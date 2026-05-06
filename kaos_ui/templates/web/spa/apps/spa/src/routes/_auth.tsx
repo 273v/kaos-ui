@@ -1,4 +1,4 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 /**
  * Pathless auth-gate layout. Every route under ``_auth`` is protected.
@@ -6,6 +6,11 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
  * The ``beforeLoad`` runs before the route component renders; if the
  * user isn't authenticated we throw ``redirect`` which TanStack Router
  * catches and navigates to ``/login`` instead.
+ *
+ * The layout is intentionally bare (``min-h-screen`` + Outlet only).
+ * Each protected page owns its own padding, scroll container, and any
+ * sticky chrome (e.g. the chat composer is bottom-pinned by the chat
+ * route itself, not by this layout).
  *
  * Add new protected routes as ``src/routes/_auth.<name>.tsx``.
  */
@@ -26,7 +31,7 @@ export const Route = createFileRoute("/_auth")({
     }
   },
   component: () => (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="min-h-screen bg-background">
       <Outlet />
     </div>
   ),

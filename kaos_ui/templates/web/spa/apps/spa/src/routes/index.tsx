@@ -6,6 +6,6 @@ export const Route = createFileRoute("/")({
     if (context.auth.isAuthenticated) {
       throw redirect({ to: "/chat" });
     }
-    throw redirect({ to: "/login" });
+    throw redirect({ to: "/login", search: { redirect: undefined } });
   },
 });

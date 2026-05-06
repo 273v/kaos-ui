@@ -16,6 +16,10 @@ dependencies = [
   "kaos-agents>=0.1.0",
   "kaos-content[markdown,nlp]>=0.1.0",
   "kaos-llm-client>=0.1.0",
+  # kaos-agents needs kaos-llm-core for the chat/plan/research pattern
+  # dispatch. Without it, the very first chat message fails with
+  # ImportError: kaos-llm-core is required for this feature but not installed.
+  "kaos-llm-core>=0.1.0",
   "kaos-pdf>=0.1.0",
   "kaos-office>=0.1.0",
   # FastAPI + transport

@@ -16,10 +16,7 @@ export interface ApiError {
   alternative_tool?: string | null;
 }
 
-export async function apiFetch(
-  input: string | URL,
-  init: RequestInit = {},
-): Promise<Response> {
+export async function apiFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(input, {
     ...init,
     credentials: "include",
@@ -31,10 +28,7 @@ export async function apiFetch(
   return response;
 }
 
-export async function apiJson<T>(
-  input: string | URL,
-  init: RequestInit = {},
-): Promise<T> {
+export async function apiJson<T>(input: string | URL, init: RequestInit = {}): Promise<T> {
   const response = await apiFetch(input, init);
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as Partial<ApiError>;

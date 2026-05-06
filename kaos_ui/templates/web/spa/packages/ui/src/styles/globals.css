@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * KAOS-UI design tokens — warmed-stone palette, hairline borders,
+ * editorial typography. Modeled after Harvey/Legora/Midpage.
+ *
+ * The `vibe coder` who wants to retheme should change the values
+ * under `:root` and `.dark`. Tailwind v4 picks them up via @theme.
+ */
+
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -20,59 +28,99 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4",
+    "Charter", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo",
+    "Consolas", monospace;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  /*
+   * Warmed-stone palette. All neutrals drift toward warm hues (~80-90°)
+   * the way Harvey, Legora, Midpage all do — pure #FFF reads as
+   * "consumer SaaS"; this reads as "paper".
+   */
+  --background:           oklch(0.984 0.003 85);   /* #faf9f6 — paper white */
+  --foreground:           oklch(0.197 0.003 85);   /* #1c1917 — warm near-black */
+  --card:                 oklch(1.000 0 0);        /* clean white for cards on paper bg */
+  --card-foreground:      oklch(0.197 0.003 85);
+  --primary:              oklch(0.197 0.003 85);   /* near-black, NOT blue */
+  --primary-foreground:   oklch(0.984 0.003 85);
+  --secondary:            oklch(0.965 0.003 85);   /* #f5f4f0 — softer paper */
+  --secondary-foreground: oklch(0.197 0.003 85);
+  --muted:                oklch(0.965 0.003 85);
+  --muted-foreground:     oklch(0.523 0.011 80);   /* #78716c — stone-500 */
+  --accent:               oklch(0.561 0.158 60);   /* amber-700 — citation pills, links */
+  --accent-foreground:    oklch(0.984 0.003 85);
+  --destructive:          oklch(0.527 0.197 25);   /* warm red */
+  --destructive-foreground: oklch(0.984 0.003 85);
+  --border:               oklch(0.910 0.005 80);   /* #e7e5e0 — hairline */
+  --input:                oklch(0.910 0.005 80);
+  --ring:                 oklch(0.708 0.008 80);   /* stone-400, used at 1px not 2px */
+
+  --radius: 0.5rem;  /* 8px — smaller than shadcn default 10px */
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  /*
+   * Harvey's actual editorial-luxury dark mode. Body is `#0f0e0d`
+   * (warm near-black, hue locked ~90°), text is `#faf9f9`. Same warm
+   * neutral, not Tailwind zinc.
+   */
+  --background:           oklch(0.140 0.003 85);   /* #0f0e0d */
+  --foreground:           oklch(0.984 0.003 85);
+  --card:                 oklch(0.165 0.003 85);
+  --card-foreground:      oklch(0.984 0.003 85);
+  --primary:              oklch(0.984 0.003 85);
+  --primary-foreground:   oklch(0.197 0.003 85);
+  --secondary:            oklch(0.221 0.004 85);
+  --secondary-foreground: oklch(0.984 0.003 85);
+  --muted:                oklch(0.221 0.004 85);
+  --muted-foreground:     oklch(0.583 0.010 80);   /* #8f8b85 */
+  --accent:               oklch(0.701 0.140 60);   /* amber-500 */
+  --accent-foreground:    oklch(0.140 0.003 85);
+  --destructive:          oklch(0.475 0.165 25);
+  --destructive-foreground: oklch(0.984 0.003 85);
+  --border:               oklch(0.260 0.004 85);
+  --input:                oklch(0.260 0.004 85);
+  --ring:                 oklch(0.430 0.006 80);
 }
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: var(--color-border);
   }
+
   body {
-    @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01", "ss03";  /* nicer Inter alts */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Editorial display type — for hero greetings, document titles. */
+  .font-display,
+  h1.font-display,
+  h2.font-display {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  /* 1px hairline ring instead of shadcn's default 2px. */
+  *:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--color-ring);
   }
 }
