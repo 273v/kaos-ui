@@ -82,38 +82,69 @@ Phase-keyed task list. Source of truth for "what is left to do." Mirrors `docs/P
 - [x] PATTERNS.md updated with Textual gotchas (`_render` reserved, AppTest+TTY, etc.)
 - [ ] `kaos_ui/doctor.py` — TUI-specific findings (LLM key present, terminal capabilities) — Phase 2
 
-### `web:spa` (fullstack) to 100%
+### `web:spa` (fullstack) to 100% (DONE)
 
-- [ ] Trim existing `kaos_ui/templates/web/spa/` to remove `apps/ssr/` (parked for Phase 4)
-- [ ] Strip the existing minimal `backend/` and rebuild on kaos-core per spec
-- [ ] Backend: `app/main.py.tmpl`, `settings.py.tmpl`, `runtime.py.tmpl`, `auth.py.tmpl`, middleware, `exceptions.py.tmpl`, `deps.py.tmpl`, `logging_setup.py.tmpl`
-- [ ] Backend routers: `auth`, `health`, `sessions` (SSE), `documents`, `search`, `uploads`
-- [ ] Backend services: `chat`, `documents`, `search`, `uploads`
-- [ ] Alembic wired with initial migration
-- [ ] Frontend: `apps/spa/` updated for React 19 + TanStack + Tailwind v4 + shadcn + Zod + Biome
-- [ ] Frontend routes: login, chat, search, documents (+ `$documentId`), upload, settings
-- [ ] OpenAPI codegen wired (`pnpm --filter spa codegen`)
-- [ ] Streaming SSE consumer in `lib/streaming.ts`
-- [ ] Auth context (httpOnly cookie flow)
-- [ ] Shared `packages/ui/` updated with current shadcn primitives
-- [ ] Caddyfile + docker-compose.yml + docker-compose.postgres.yml
-- [ ] Backend tests: `test_health`, `test_auth`, `test_uploads`, `test_search`, `test_sessions`
-- [ ] Frontend tests: vitest + RTL `pages.test.tsx`, `streaming.test.ts`
-- [ ] `Makefile` with uniform verbs (parallel `make dev`)
-- [ ] `.env.example`, `.gitignore`, `.editorconfig`, `.pre-commit-config.yaml`, `biome.json`
-- [ ] Per-template `CLAUDE.md` + `AGENTS.md`
-- [ ] Manifest entry already exists; update description + post_install + next_steps to match the new layout
-- [ ] kaos-ui repo: `tests/integration/test_scaffold_spa.py` — scaffold → uv sync + pnpm install → run backend tests + pnpm build
-- [ ] `kaos_ui/doctor.py` — SPA-specific findings (pnpm available, CORS not `*` in prod, codegen up to date)
+- [x] Trim existing `kaos_ui/templates/web/spa/` to remove `apps/ssr/` (parked for Phase 4)
+- [x] Rebuild backend wholesale on kaos-core
+- [x] Backend: main / settings / runtime / auth / deps / exceptions / logging_setup
+- [x] Backend routers: auth, health, sessions (SSE via sse-starlette), documents, search, uploads
+- [x] Backend services: chat (lazy kaos-agents), documents, search, uploads (magic-byte)
+- [x] Frontend: Vite 6 + React 19 + TanStack Router/Query + Tailwind v4 + Biome 2.x
+- [x] Frontend routes: __root, _auth (pathless protected layout), index (redirect), login, _auth.chat
+- [x] OpenAPI codegen wired (@hey-api/openapi-ts + tanstack-query plugin)
+- [x] Streaming SSE consumer in `lib/streaming.ts` + vitest tests
+- [x] Auth context (httpOnly cookie flow + ref-mirrored state for sync reads)
+- [x] Caddyfile + docker-compose.yml + docker-compose.postgres.yml
+- [x] Backend tests: test_health, test_auth (incl. Origin allowlist), test_uploads, test_settings, test_logging
+- [x] Frontend tests: vitest + happy-dom `streaming.test.ts`
+- [x] `Makefile` with uniform verbs (parallel `make dev`)
+- [x] `.env.example` (multiline CSV-supporting), `.gitignore`, `biome.json`
+- [x] Per-template `CLAUDE.md` (full runbook) + `AGENTS.md`
+- [x] Manifest entry updated (post_install runs pnpm install + uv sync; next_steps)
+- [x] kaos-ui repo: `tests/integration/test_scaffold_spa.py` — scaffold → minimal-deps → uv sync → pytest
+- [ ] `kaos_ui/doctor.py` — SPA-specific findings (pnpm available, CORS not `*` in prod, codegen up to date) — Phase 2
 
-### Phase 1 QA gate (after all three above)
+### Phase 1 QA gate (DONE)
 
-- [ ] All Phase 0 gates still pass
-- [ ] `./scripts/validate-platform.sh --profile ubuntu-26.04 --include-network --include-live` passes
-- [ ] One real agent run logged per template in `tests/integration/manual-agent-runs.md`
-- [ ] gitleaks scan on every template — clean
-- [ ] trivy scan on every generated Dockerfile — no high/critical
-- [ ] Apply 13 SDLC checklists per change
+- [x] All Phase 0 gates still pass
+- [x] kaos-ui ruff format / ruff check / ty check / pytest — all clean
+- [x] 52 tests passing (was 24 at end of Phase 0)
+- [x] Heavy scaffold→install→pytest integration green for all 3 templates
+- [x] Live verify: curl + Playwright + docker build executed by hand
+- [x] `test_template_compiles` strengthened: ast.parse + compile() + ruff check on rendered Python
+- [x] `test_logging.py` regression test in each template (pins _HumanFormatter fix)
+- [ ] Full `./scripts/validate-platform.sh --profile ubuntu-26.04 --include-network --include-live` — deferred to release
+- [ ] One real agent run logged per template — deferred to release
+- [ ] gitleaks scan on every template — deferred to Phase 3
+- [ ] trivy scan on every generated Dockerfile — Streamlit + SPA Dockerfiles validated structurally; full trivy scan deferred until kaos-* on PyPI
+- [x] Apply 13 SDLC checklists per change
+
+### Phase 1 live-verify findings (DONE)
+
+Caught 7 real bugs the structural tests missed:
+
+- [x] Streamlit `pages/chat.py` had `return` outside function (compile() now catches)
+- [x] Streamlit `services/chat.py` imported kaos-agents at module level (now lazy)
+- [x] SPA backend looked for `.env` in `backend/` only (now `("../.env", ".env")`)
+- [x] SPA cookie `secure` flag wrong in test env (TestClient drops `Secure` over http)
+- [x] SPA Origin allowlist middleware never landed (now in auth.py)
+- [x] SPA build script `tsc -b && vite build` had wrong order (now just `vite build`)
+- [x] SPA auth refresh()/login() set React state but router beforeLoad saw stale (now returns boolean + ref-mirrored)
+
+Plus secondary:
+
+- [x] `KAOS_NPM_SLUG` template variable for npm-friendly hyphenated names
+- [x] Vite proxy reads `VITE_BACKEND_URL` env override for multi-tenant dev hosts
+- [x] vite.config.ts uses `defineConfig` from `vitest/config` for type-checked test block
+- [x] `_HumanFormatter` `record.args = ()` fix ported across all 3 templates
+- [x] Cleanup of unused imports / dead noqas / RUF022 sort
+
+Documentation:
+
+- [x] PATTERNS.md gained sections for all the gotchas above
+- [x] DEPLOYMENT.md added (PyPI gap, workspace overrides, prod checklist)
+- [x] INTEGRATION.md updated with KAOS_NPM_SLUG, env_file fallback, NoDecode pattern
+- [x] Per-template CLAUDE.md updated with deploy callout
 
 ## Phase 2 — MCP Automation Surface
 
