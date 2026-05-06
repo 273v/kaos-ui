@@ -228,6 +228,55 @@ Dockerfile's `PYTHON_VERSION` build arg must agree. The integration
 test asserts this; without it, a fresh-cache `uv sync` fails on a
 mismatch nobody noticed locally.
 
+## Textual
+
+### `_render` is reserved on Widget — pick a different name
+
+`textual.widget.Widget._render()` is part of Textual's render pipeline.
+Overriding it on a `Screen` subclass silently breaks rendering — the
+internal `Widget.visual` becomes `None` and Textual raises:
+
+```
+.venv/lib/.../textual/visual.py:227 in to_strips
+    strips = visual.render_strips(...)
+AttributeError: 'NoneType' object has no attribute 'render_strips'
+```
+
+Caught the kaos-ui Textual chat screen on first integration test run.
+Rule: widget-internal helpers never use `_render`. Prefer
+`_refresh_*`, `_update_*`, `_apply_*`. The Streamlit template uses
+`_render` freely (Streamlit has no such reserved method); this only
+applies to Textual.
+
+### `App.run_test()` works in CI without a TTY
+
+Textualize themselves note in [discussion #166](https://github.com/Textualize/textual/discussions/166)
+that `App.run(headless=True)` "doesn't catch errors" — `App.run_test()`
+does. Always use `run_test`. The Pilot context manager handles teardown
+correctly even when assertions fire.
+
+### `screen.id` is None unless explicitly set
+
+`SCREENS = {"chat": ChatScreen, ...}` registers screens by name but
+does not set `screen.id` on instances. Tests that want to identify the
+current screen use `isinstance(app.screen, ChatScreen)`, not
+`app.screen.id`.
+
+### `Markdown.get_stream()` is the canonical streaming pattern
+
+But fragile against chunk boundaries that split markdown syntax
+(`**bold**` arriving as two events). The kaos-ui chat screen uses a
+"rebuild the buffer per token" approach via `Markdown.update(...)` —
+robust against partial markdown, no reach into widget private state.
+
+### TUI logging: file handler with `propagate=False`
+
+Textual owns stdout/stderr while running. Console-bound logging
+corrupts the rendered UI. The kaos-ui Textual template ships a JSON
+`RotatingFileHandler` and sets `propagate=False` on the `kaos.*`
+logger root so KAOS module logs don't leak to Textual's own
+`TextualHandler` if it's attached.
+
 ## kaos-agents
 
 ### `Agent` is config; `Runner` is execution

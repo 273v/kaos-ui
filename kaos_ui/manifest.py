@@ -68,6 +68,21 @@ _REGISTRY: dict[str, TemplateManifest] = {
         ),
         tags=("dashboard", "data", "agentic"),
     ),
+    "tui:textual": TemplateManifest(
+        kind="tui:textual",
+        description="Textual terminal UI with kaos-agents chat, document browser, settings",
+        stack="Python 3.14 + Textual + kaos-agents",
+        template_dir=_TEMPLATES_ROOT / "tui" / "textual",
+        required_env=("ANTHROPIC_API_KEY",),  # or another provider key
+        post_install=("uv sync", "uv run pre-commit install"),
+        next_steps=(
+            "cd {name}",
+            "cp .env.example .env  # then set your LLM API key",
+            "make doctor",
+            "make dev",
+        ),
+        tags=("tui", "terminal", "agentic"),
+    ),
     # Phase 1 placeholders — directories exist but templates land in the next phase.
     # Listing them here as "coming-soon" would mislead the CLI; entries are added
     # at the end of Phase 1 when the templates ship.
@@ -124,6 +139,7 @@ _LEGACY_ALIASES: dict[str, str] = {
     "api": "web:api",
     "app": "web:spa",
     "dashboard": "dashboard:streamlit",
+    "tui": "tui:textual",
 }
 
 

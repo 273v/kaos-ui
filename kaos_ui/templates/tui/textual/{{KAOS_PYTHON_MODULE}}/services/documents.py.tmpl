@@ -1,0 +1,53 @@
+"""Document browse service — list files in VFS."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentSummary:
+    document_id: str
+    filename: str
+    extension: str
+    size_bytes: int
+    path: Path
+
+
+def list_documents(settings: AppSettings) -> list[DocumentSummary]:
+    """Return every document currently stored in VFS (sorted by id)."""
+    root = settings.vfs_path / "documents"
+    if not root.is_dir():
+        return []
+    out: list[DocumentSummary] = []
+    for doc_dir in sorted(root.iterdir()):
+        if not doc_dir.is_dir():
+            continue
+        original = next(doc_dir.glob("original.*"), None)
+        if original is None:
+            continue
+        out.append(
+            DocumentSummary(
+                document_id=doc_dir.name,
+                filename=original.name,
+                extension=original.suffix.lstrip(".").lower(),
+                size_bytes=original.stat().st_size,
+                path=original,
+            )
+        )
+    return out
+
+
+def get_document_by_id(
+    settings: AppSettings, document_id: str
+) -> DocumentSummary | None:
+    """Look up one document by id, or None."""
+    for doc in list_documents(settings):
+        if doc.document_id == document_id:
+            return doc
+    return None

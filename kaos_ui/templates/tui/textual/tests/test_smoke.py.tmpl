@@ -1,0 +1,51 @@
+"""Smoke tests — boot the App headless via Pilot.
+
+``App.run_test()`` (textual.app, signature stable as of 8.x) bypasses
+the real TTY and runs entirely in memory, so this works in any CI
+environment. Use ``await pilot.pause()`` after key presses to let the
+event loop process the message before assertions.
+
+We do NOT use ``App.run(headless=True)`` — Textualize themselves note
+in [discussion #166](https://github.com/Textualize/textual/discussions/166)
+that it doesn't catch errors.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}}.app import {{KAOS_PYTHON_MODULE}}App
+from {{KAOS_PYTHON_MODULE}}.screens.chat import ChatScreen
+from {{KAOS_PYTHON_MODULE}}.screens.documents import DocumentsScreen
+from {{KAOS_PYTHON_MODULE}}.screens.settings import SettingsScreen
+
+
+@pytest.mark.smoke
+async def test_app_boots() -> None:
+    """The App constructs and reaches the chat screen without error."""
+    app = {{KAOS_PYTHON_MODULE}}App()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.title == "{{KAOS_PROJECT_NAME}}"
+        assert isinstance(app.screen, ChatScreen)
+
+
+@pytest.mark.smoke
+async def test_navigation_bindings() -> None:
+    """Ctrl+1/2/3 navigate between screens."""
+    app = {{KAOS_PYTHON_MODULE}}App()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, ChatScreen)
+
+        await pilot.press("ctrl+2")
+        await pilot.pause()
+        assert isinstance(app.screen, DocumentsScreen)
+
+        await pilot.press("ctrl+3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsScreen)
+
+        await pilot.press("ctrl+1")
+        await pilot.pause()
+        assert isinstance(app.screen, ChatScreen)

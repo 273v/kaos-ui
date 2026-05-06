@@ -1,0 +1,40 @@
+"""Settings tests — refusal cases + redaction."""
+
+from __future__ import annotations
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+def test_default_settings_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    s = AppSettings(_env_file=None)
+    assert s.env == "test"
+    assert s.debug is False
+    assert s.llm_provider == "anthropic"
+
+
+def test_production_refuses_debug_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_DEBUG", "true")
+    with pytest.raises(SettingsError, match="APP_DEBUG"):
+        AppSettings(_env_file=None)
+
+
+def test_production_accepts_debug_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_DEBUG", "false")
+    AppSettings(_env_file=None)  # must not raise
+
+
+def test_redaction_walks_all_secret_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Future SecretStr fields must be redacted automatically."""
+    monkeypatch.setenv("APP_ENV", "test")
+    s = AppSettings(_env_file=None)
+    # No SecretStr fields today; just verify the dump is JSON-serializable
+    # and contains every public field.
+    payload = s.model_dump_redacted()
+    for name in type(s).model_fields:
+        assert name in payload, f"redacted dump missing {name!r}"

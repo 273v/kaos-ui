@@ -1,0 +1,48 @@
+"""Service-layer tests — pure-Python pieces that don't need the heavy
+KAOS stack."""
+
+from __future__ import annotations
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}}.services import documents as doc_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+def test_list_documents_handles_missing_vfs(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = AppSettings(_env_file=None)
+    # vfs_path points at a nonexistent tmp dir; list returns [], not error.
+    assert doc_service.list_documents(settings) == []
+
+
+def test_list_documents_finds_stored(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_VFS_PATH", str(tmp_path / "vfs"))
+    settings = AppSettings(_env_file=None)
+    docs_root = settings.vfs_path / "documents" / "abc123"
+    docs_root.mkdir(parents=True)
+    (docs_root / "original.txt").write_text("hello", encoding="utf-8")
+
+    docs = doc_service.list_documents(settings)
+    assert len(docs) == 1
+    assert docs[0].document_id == "abc123"
+    assert docs[0].extension == "txt"
+    assert docs[0].size_bytes == 5
+
+
+def test_get_document_by_id_returns_none_when_missing(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_VFS_PATH", str(tmp_path / "vfs"))
+    settings = AppSettings(_env_file=None)
+    assert doc_service.get_document_by_id(settings, "nope") is None
+
+
+def test_session_id_for_is_stable() -> None:
+    """The chat service derives a stable session id from the user env."""
+    from {{KAOS_PYTHON_MODULE}}.services import chat as chat_service
+
+    settings = AppSettings(_env_file=None)
+    sid_a = chat_service.session_id_for(settings)
+    sid_b = chat_service.session_id_for(settings)
+    assert sid_a == sid_b
+    assert sid_a.startswith("tui-")

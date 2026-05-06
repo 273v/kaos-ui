@@ -59,23 +59,28 @@ Phase-keyed task list. Source of truth for "what is left to do." Mirrors `docs/P
 - [ ] gitleaks scan clean
 - [ ] trivy scan on generated Dockerfile clean
 
-### `tui:textual` to 100%
+### `tui:textual` to 100% (DONE)
 
-- [ ] Create `kaos_ui/templates/tui/textual/` (net-new)
-- [ ] `pyproject.toml.tmpl` with Textual + KAOS deps pinned
-- [ ] `{slug}/__main__.py`, `{slug}/app.py` ({Slug}App with screens + bindings)
-- [ ] `{slug}/settings.py` — TUI variant (no auth_token, XDG-friendly VFS path)
-- [ ] `{slug}/runtime.py`
-- [ ] `{slug}/exceptions.py`
-- [ ] `{slug}/styles.tcss`
-- [ ] Three screens: chat, documents, settings
-- [ ] `Makefile` (no up/down — TUIs aren't compose'd; optional Dockerfile)
-- [ ] `.env.example`, `.gitignore`, `.pre-commit-config.yaml`
-- [ ] `tests/test_smoke.py.tmpl` — `App.run_test()` async pilot, screen-switch assertions
-- [ ] Manifest entry registered in `kaos_ui/manifest.py`
-- [ ] Per-template `CLAUDE.md` + `AGENTS.md`
-- [ ] kaos-ui repo: `tests/integration/test_scaffold_textual.py`
-- [ ] `kaos_ui/doctor.py` — TUI-specific findings (LLM key present, terminal capabilities)
+- [x] Create `kaos_ui/templates/tui/textual/` (net-new)
+- [x] `pyproject.toml.tmpl` with Textual `>=8.0,<9.0` + KAOS deps pinned
+- [x] `{slug}/__main__.py`, `{slug}/app.py` ({Slug}App with screens + bindings)
+- [x] `{slug}/settings.py` — TUI variant (no auth_token, XDG-friendly VFS path)
+- [x] `{slug}/runtime.py` with lazy KAOS extra registration
+- [x] `{slug}/exceptions.py` (AppError, SettingsError, ChatError)
+- [x] `{slug}/styles.tcss`
+- [x] `{slug}/logging_setup.py` — JSON RotatingFileHandler with propagate=False
+- [x] Three screens: chat (Markdown + @work), documents (DataTable), settings
+- [x] Two services: chat (lazy kaos-agents), documents
+- [x] `Makefile` with `make console` for textual-dev
+- [x] `.env.example`, `.gitignore`, `.pre-commit-config.yaml`
+- [x] `tests/test_smoke.py.tmpl` — `App.run_test()` Pilot, isinstance navigation assertions
+- [x] `tests/test_settings.py.tmpl` — refusal cases + redaction walks SecretStr fields
+- [x] `tests/test_services.py.tmpl` — pure-Python tests for documents service
+- [x] Manifest entry registered in `kaos_ui/manifest.py`
+- [x] Per-template `CLAUDE.md` (full runbook) + `AGENTS.md` (cross-tool)
+- [x] kaos-ui repo: `tests/integration/test_scaffold_textual.py` — heavy integration green
+- [x] PATTERNS.md updated with Textual gotchas (`_render` reserved, AppTest+TTY, etc.)
+- [ ] `kaos_ui/doctor.py` — TUI-specific findings (LLM key present, terminal capabilities) — Phase 2
 
 ### `web:spa` (fullstack) to 100%
 

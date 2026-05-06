@@ -1,0 +1,25 @@
+"""Shared test fixtures."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _test_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Isolate every test from the user's real environment + .env."""
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_VFS_PATH", str(tmp_path / "vfs"))
+    monkeypatch.setenv("APP_LOG_PATH", str(tmp_path / "log.jsonl"))
+
+    # Stable terminal env for headless Textual tests in CI.
+    # Textual's run_test bypasses the real TTY, but Rich underneath
+    # still respects TERM / NO_COLOR.
+    monkeypatch.setenv("TERM", os.environ.get("TERM", "xterm-256color"))
+
+    # Provider key — chat tests don't actually call the LLM, but the
+    # settings model may probe for a key on construction.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-not-a-real-key")
+    yield

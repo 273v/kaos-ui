@@ -1,0 +1,75 @@
+"""{{KAOS_PROJECT_NAME}} Textual application.
+
+Three screens (chat / documents / settings), routed via app-level
+key bindings. Heavy KAOS imports stay inside the screen modules and
+service modules so the App boots quickly even when an extra is
+missing from the install.
+"""
+
+from __future__ import annotations
+
+from textual.app import App
+from textual.binding import Binding
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger, configure
+from {{KAOS_PYTHON_MODULE}}.runtime import build_runtime
+from {{KAOS_PYTHON_MODULE}}.screens.chat import ChatScreen
+from {{KAOS_PYTHON_MODULE}}.screens.documents import DocumentsScreen
+from {{KAOS_PYTHON_MODULE}}.screens.settings import SettingsScreen
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+class {{KAOS_PYTHON_MODULE}}App(App):
+    """{{KAOS_PROJECT_NAME}} — KAOS-native TUI."""
+
+    TITLE = "{{KAOS_PROJECT_NAME}}"
+    CSS_PATH = "styles.tcss"
+    BINDINGS = [
+        Binding(
+            "ctrl+1", "switch('chat')", "Chat",
+            id="nav.chat", tooltip="Open the chat screen",
+        ),
+        Binding(
+            "ctrl+2", "switch('documents')", "Documents",
+            id="nav.documents", tooltip="Browse VFS documents",
+        ),
+        Binding(
+            "ctrl+3", "switch('settings')", "Settings",
+            id="nav.settings", tooltip="Resolved configuration (read-only)",
+        ),
+        Binding(
+            "ctrl+q", "quit", "Quit",
+            id="app.quit", tooltip="Exit the application",
+        ),
+    ]
+    SCREENS = {
+        "chat": ChatScreen,
+        "documents": DocumentsScreen,
+        "settings": SettingsScreen,
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.settings = AppSettings()
+        configure(self.settings)
+        self.logger = app_logger("app")
+        self.runtime = build_runtime()
+
+    def on_mount(self) -> None:
+        """Push the default screen after the App is mounted."""
+        self.push_screen("chat")
+
+    def action_switch(self, name: str) -> None:
+        """Switch to a registered screen by name."""
+        # If the screen is already on the stack, switch_screen replaces
+        # the current top-of-stack — exactly the navigation we want.
+        self.switch_screen(name)
+
+
+def run() -> None:
+    """Console-script entry point — used by ``pyproject.toml [project.scripts]``."""
+    {{KAOS_PYTHON_MODULE}}App().run()
+
+
+if __name__ == "__main__":
+    run()
