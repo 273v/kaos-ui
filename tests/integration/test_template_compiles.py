@@ -46,10 +46,20 @@ def test_every_emitted_python_file_parses(tmp_path: Path, kind: str) -> None:
 
     failures: list[tuple[Path, str]] = []
     for f in py_files:
+        source = f.read_text(encoding="utf-8")
         try:
-            ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+            ast.parse(source, filename=str(f))
         except SyntaxError as exc:
             failures.append((f.relative_to(project), f"{exc.msg} (line {exc.lineno})"))
+            continue
+        # ast.parse validates grammar; compile() additionally rejects
+        # ``return`` / ``yield`` outside a function — bugs that
+        # otherwise ship to Streamlit pages (PATTERNS.md
+        # "Streamlit pages are scripts").
+        try:
+            compile(source, str(f), "exec")
+        except SyntaxError as exc:
+            failures.append((f.relative_to(project), f"compile: {exc.msg} (line {exc.lineno})"))
 
     if failures:
         msg = "\n".join(f"  {p}: {err}" for p, err in failures)

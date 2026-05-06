@@ -1,20 +1,20 @@
 {
-  "name": "@{{KAOS_PROJECT_SLUG}}/spa",
+  "name": "@{{KAOS_NPM_SLUG}}/spa",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "vite build --mode development --logLevel error >/dev/null && tsc --noEmit",
     "lint": "biome check --error-on-warnings",
     "format": "biome format --write",
     "test": "vitest run",
     "codegen": "openapi-ts"
   },
   "dependencies": {
-    "@{{KAOS_PROJECT_SLUG}}/ui": "workspace:*",
+    "@{{KAOS_NPM_SLUG}}/ui": "workspace:*",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-router": "^1.120.3",
     "react": "^19.1.0",

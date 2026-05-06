@@ -51,10 +51,8 @@ if prompt := st.chat_input("Ask anything…"):
             asyncio.run(_run())
         except Exception as exc:  # noqa: BLE001 — surface to user
             placeholder.error(f"Error from agent: {exc}")
-            return
+            st.stop()  # NOT `return` — pages are top-level scripts
 
         final = "".join(accumulated) or "_(no response)_"
         placeholder.markdown(final)
-        st.session_state["chat_messages"].append(
-            {"role": "assistant", "content": final}
-        )
+        st.session_state["chat_messages"].append({"role": "assistant", "content": final})

@@ -2,7 +2,9 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+// Use vitest/config so the ``test`` block is type-checked. It re-exports
+// vite's defineConfig with the vitest extension.
+import { defineConfig } from "vitest/config";
 
 // Vite dev proxy notes (see kaos-ui PATTERNS.md):
 // - The frontend dev server runs on :5173, the FastAPI backend on :8000.
@@ -11,6 +13,12 @@ import { defineConfig } from "vite";
 // - cookieDomainRewrite + secure rewrites strip Domain= and the Secure
 //   flag from Set-Cookie response headers so the browser actually
 //   stores the cookie under the dev origin.
+
+// VITE_BACKEND_URL lets the dev server hit a backend on a different
+// port (override in .env or shell env). Defaults to the conventional
+// uvicorn port. Multi-tenant dev hosts that already use :8000 should
+// override.
+const BACKEND_URL = process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export default defineConfig({
   plugins: [
@@ -30,7 +38,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/v1": {
-        target: "http://127.0.0.1:8000",
+        target: BACKEND_URL,
         changeOrigin: true,
         cookieDomainRewrite: { "*": "" },
         // Some dev setups send Secure cookies even on http; strip.

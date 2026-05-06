@@ -33,10 +33,16 @@ def _slugify(name: str) -> str:
 
 def _build_variables(name: str, kind: str) -> dict[str, str]:
     slug = _slugify(name)
+    # NPM scope names allow hyphens but not underscores; produce a
+    # parallel hyphenated variant for use as an npm scope or workspace
+    # package-name (the underscored ``KAOS_PYTHON_MODULE`` is for
+    # Python packages).
+    npm_slug = re.sub(r"[^a-z0-9-]+", "-", name.lower().strip()).strip("-")
     return {
         "KAOS_PROJECT_NAME": name,
         "KAOS_PROJECT_SLUG": slug,
         "KAOS_PYTHON_MODULE": slug.replace("-", "_"),
+        "KAOS_NPM_SLUG": npm_slug,
         "KAOS_PYTHON_VERSION": "3.14",
         "KAOS_NODE_VERSION": "24",
         "KAOS_TEMPLATE": kind,
