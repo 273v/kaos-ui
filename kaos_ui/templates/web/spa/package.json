@@ -1,9 +1,13 @@
 {
+  "name": "{{KAOS_PROJECT_SLUG}}",
   "private": true,
   "packageManager": "pnpm@10.10.0",
   "scripts": {
     "dev": "pnpm -r dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "test": "pnpm -r test"
   }
 }

@@ -1,26 +1,30 @@
-# {{KAOS_PROJECT_NAME}} — Agent Instructions
+# {{KAOS_PROJECT_NAME}} — Cross-tool Agent Notes
 
-## Project Structure
+`CLAUDE.md` is the full runbook. This file is the one-page orientation
+for any agent walking in cold.
 
-This is a full-stack application with a FastAPI backend and a Next.js frontend,
-connected via a Caddy reverse proxy.
+## Two-minute orientation
 
-## Backend
+1. **Read `CLAUDE.md`** for the full runbook (never-edit list, worked
+   examples, troubleshooting, production checklist, OIDC swap path).
+2. **Run `make doctor`.** Read its output before editing.
+3. **Project shape:**
+   - `backend/app/{main,settings,runtime,auth,deps,exceptions,logging_setup}.py`
+   - `backend/app/routers/{health,auth,sessions,documents,search,uploads}.py`
+   - `backend/app/services/{chat,documents,search,uploads}.py`
+   - `apps/spa/src/{main.tsx, auth/, lib/, routes/}` — Vite + React
+   - `packages/ui/` — shared shadcn primitives + utils
+   - `Caddyfile`, `docker-compose.yml`, `Makefile` at the root
+4. **Make the smallest change that solves the task.**
+5. **Run `make test` AND `make typecheck` before declaring done.**
 
-- Framework: FastAPI
-- Language: Python 3.14+
-- Package manager: uv
-- KAOS packages: kaos-core, kaos-content, kaos-pdf, kaos-web
-- API prefix: `/api/v1/`
+## Rules of thumb
 
-## Frontend
-
-- Framework: Next.js (scaffold in `frontend/` if not yet created)
-- API calls go to `/api/v1/*` (proxied by Caddy)
-
-## Conventions
-
-- Backend endpoints return JSON
-- Use `--json` flag for CLI commands
-- All KAOS extraction produces `ContentDocument` objects
-- Environment variables use `KAOS_` prefix
+- Routes stay thin; logic lives in `backend/app/services/*`.
+- Heavy KAOS imports are lazy (inside service function bodies).
+- `apiFetch` / `apiJson` are the only ways to talk to `/v1/*` from the
+  SPA. Biome bans raw `fetch`.
+- TanStack Router file-based — protected pages live under `_auth.*`.
+  Public pages at `src/routes/` root.
+- Never edit `routeTree.gen.ts` or files under `src/api/client/` —
+  they're regenerated.

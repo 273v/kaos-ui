@@ -46,12 +46,24 @@ _REGISTRY: dict[str, TemplateManifest] = {
     ),
     "web:spa": TemplateManifest(
         kind="web:spa",
-        description="Full-stack: Vite + React + Tailwind + shadcn + FastAPI + Caddy + Docker",
-        stack="Vite + React 19 + TanStack Router + Tailwind v4 + shadcn + FastAPI",
+        description=(
+            "Fullstack: Vite + React + Tailwind v4 + shadcn + FastAPI + Caddy"
+            " + Docker, kaos-agents wired"
+        ),
+        stack=(
+            "Vite 6 + React 19 + TanStack Router/Query + Tailwind v4 + Biome + FastAPI on kaos-core"
+        ),
         template_dir=_TEMPLATES_ROOT / "web" / "spa",
-        post_install=("pnpm install", "uv sync"),
-        next_steps=("cd {name}", "docker compose up"),
-        tags=("frontend", "fullstack"),
+        required_env=("APP_AUTH_TOKEN",),
+        post_install=("pnpm install", "cd backend && uv sync && uv run pre-commit install"),
+        next_steps=(
+            "cd {name}",
+            "cp .env.example .env  # then set APP_AUTH_TOKEN + your LLM API key",
+            "make install",
+            "make doctor",
+            "make dev      # backend on :8000, vite on :5173",
+        ),
+        tags=("fullstack", "web", "agentic"),
     ),
     "dashboard:streamlit": TemplateManifest(
         kind="dashboard:streamlit",
