@@ -160,6 +160,11 @@ If the setting is required in production, add a clause to the
 
 ## Production deployment checklist
 
+> **Before deploying:** read `kaos-ui/docs/DEPLOYMENT.md` for the
+> end-to-end deploy guide (PyPI gap, workspace overrides for
+> kaos-* not yet on PyPI, hostname / TLS / Caddy notes, the
+> "what still needs the user" list).
+
 Before `docker compose up` on a public host:
 
 - [ ] `APP_ENV=production` set in `.env`

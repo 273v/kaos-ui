@@ -2,7 +2,27 @@
 
 > How every kaos-ui template plugs into the KAOS ecosystem. This is the
 > contract every template implements. Per-template specs live in
-> `docs/templates/`.
+> `docs/templates/`. Deployment-specific notes live in `docs/DEPLOYMENT.md`.
+
+## 0. Template variables (substitution placeholders)
+
+The scaffolder substitutes these in every text file (`{{KAOS_*}}`)
+and in path components (so `{{KAOS_PYTHON_MODULE}}/settings.py.tmpl`
+becomes `<slug>/settings.py`):
+
+| Variable | Example for ``"My App"`` | Use |
+|---|---|---|
+| `KAOS_PROJECT_NAME` | `My App` | Display strings, README titles, page titles |
+| `KAOS_PROJECT_SLUG` | `my_app` | Underscored Python-friendly slug |
+| `KAOS_PYTHON_MODULE` | `my_app` | Python package name (same as slug) |
+| `KAOS_NPM_SLUG` | `my-app` | Hyphenated npm-friendly slug; use for npm scope/package names |
+| `KAOS_PYTHON_VERSION` | `3.14` | For `.python-version`, Dockerfile ARG |
+| `KAOS_NODE_VERSION` | `24` | For frontend |
+| `KAOS_TEMPLATE` | `web:spa` | The kind that scaffolded this project |
+
+Critical: use `KAOS_NPM_SLUG` (not `KAOS_PROJECT_SLUG`) for npm
+scope names. pnpm rejects underscores in workspace package names —
+`@my_app/ui` would not resolve.
 
 ## 1. The startup dance
 
@@ -62,7 +82,10 @@ class AppSettings(ModuleSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="APP_",
-        env_file=".env",
+        # If the backend lives in a subdir (web:spa: backend/), try
+        # project-root .env first then backend-local. Streamlit /
+        # Textual put their entrypoints at root and use just ".env".
+        env_file=("../.env", ".env"),
         extra="ignore",
     )
 
@@ -92,6 +115,34 @@ Rules:
   `mode="before"` per the top-level `CLAUDE.md`.)
 - **The app refuses to start** if a required secret is missing in any
   non-test environment.
+- **`env_file=("../.env", ".env")`** for backends that live in a
+  subdir. pydantic-settings reads the first existing file. Without
+  this, `cd backend && uvicorn` won't find a project-root `.env`.
+  See `PATTERNS.md` § Settings.
+
+### Tuple env vars: `Annotated[..., NoDecode]` + CSV parser
+
+For tuple-typed fields like `cors_origins`:
+
+```python
+from pydantic_settings import NoDecode
+
+class AppSettings(ModuleSettings):
+    cors_origins: Annotated[tuple[str, ...], NoDecode] = (
+        "http://localhost:5173",
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_csv(cls, value: object) -> object:
+        if isinstance(value, str):
+            return tuple(s.strip() for s in value.split(",") if s.strip())
+        return value
+```
+
+Without `NoDecode`, pydantic-settings tries to JSON-parse env strings
+into tuples — a vibe coder typing `APP_CORS_ORIGINS=https://a,https://b`
+gets `JSONDecodeError`. With it, the validator splits CSV input.
 
 ## 4. Auth contract
 
@@ -189,12 +240,36 @@ Stack traces never leak to end users. Internal logs keep them.
 | `.env` missing | App refuses to start with `how_to_fix: cp .env.example .env` |
 | Bind | `127.0.0.1` only. Public bind requires explicit `--host 0.0.0.0` |
 | `DEBUG=True` in prod | `AppSettings` validator refuses to load |
+| Weak token in prod | Validator rejects `changeme` / `password` / `admin` / `dev` / `test` and tokens shorter than 32 chars |
+| Wildcard CORS in prod | Validator rejects `APP_CORS_ORIGINS=*` (browsers reject wildcard with credentials anyway) |
+| Cookie `Secure` flag | `secure = (env == "production")` — dev/test speak http, prod gets the flag |
+| `Origin` header | State-changing methods (POST/PUT/PATCH/DELETE) require `Origin` to be in `APP_CORS_ORIGINS` (belt-and-suspenders CSRF for the SPA backend) |
+| Magic-byte uploads | `python-magic` verifies content type matches declared extension; falls back to a logged warning when libmagic missing |
 | Container | Multi-stage, non-root (`uid=1000`), slim base, `HEALTHCHECK`, no secrets baked |
 | Pre-commit | `ruff` + `ty` + `eslint` (web only) + `gitleaks` |
 | Errors at boundaries | `what / how_to_fix / alternative` shape |
 | Make verbs (uniform) | `install dev test up down doctor build typecheck` |
 | Logging in prod | JSON output, `ENV=production` triggers |
+| CWE-117 | CR/LF stripped from logged user-controlled values |
 | Secrets in logs | `SecretStr` auto-redacts; never `print(settings.dict())` — use `model_dump_redacted()` |
+| `_HumanFormatter` | Clears `record.args = ()` after substitution. See PATTERNS.md § Logging |
+
+## 10a. Lazy KAOS imports in service modules
+
+Every `services/*.py` lazy-imports optional KAOS extras (kaos-agents,
+kaos-content, kaos-pdf, kaos-office). Pattern:
+
+```python
+def build_runner(settings, runtime):
+    from kaos_agents import Agent, AgentPattern, Runner   # ← inside the function
+    return Runner(Agent(...), runtime=runtime)
+```
+
+This means a screen / page / route can `from {slug}.services import
+chat as chat_service` cheaply — only when a user actually calls
+`build_runner(...)` does the heavy import fire. The minimal-deps
+integration tests rely on this; production deploys should have the
+full kaos-* stack installed.
 
 ## 11. Agent affordances inside scaffolded projects
 

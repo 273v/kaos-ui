@@ -350,6 +350,7 @@ requires-dist = [
     { name = "kaos-core", editable = "../kaos-core" },
     { name = "kaos-mcp", marker = "extra == 'mcp'", editable = "../kaos-mcp" },
     { name = "kaos-nlp-core", marker = "extra == 'nlp'", editable = "../kaos-nlp-core" },
+    { name = "kaos-nlp-transformers", marker = "extra == 'transformers'", editable = "../kaos-nlp-transformers" },
     { name = "lxml", marker = "extra == 'html'", specifier = ">=6.1.0" },
     { name = "markdown-it-py", extras = ["plugins"], marker = "extra == 'markdown'", specifier = ">=3.0.0" },
     { name = "numpy", marker = "extra == 'images'", specifier = ">=2.0.0" },
@@ -359,7 +360,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "uuid6", marker = "python_full_version < '3.14'", specifier = ">=2024.7.10" },
 ]
-provides-extras = ["dedup-perceptual", "duckdb", "html", "images", "layout", "markdown", "mcp", "nlp", "polars"]
+provides-extras = ["dedup-perceptual", "duckdb", "html", "images", "layout", "markdown", "mcp", "nlp", "polars", "transformers"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -124,6 +124,10 @@ is the right behavior when the user hits Enter twice.
 
 ## Production / distribution checklist
 
+> **Before distributing:** read `kaos-ui/docs/DEPLOYMENT.md` for the
+> end-to-end deploy guide. TUIs ship via `pipx install dist/*.whl`
+> rather than docker — but the kaos-* PyPI gap still applies.
+
 - [ ] `APP_ENV=production` set in `.env` if shipping a binary
 - [ ] `APP_DEBUG=false`
 - [ ] LLM API key set for `APP_LLM_PROVIDER`

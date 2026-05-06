@@ -54,6 +54,53 @@ def model_dump_redacted(self) -> dict[str, object]:
 Hardcoding a single field name (e.g. `auth_token`) silently leaks any
 SecretStr added later. The walk is one-line cheap and future-proof.
 
+### `env_file` fallback for backends in subdirectories
+
+When a template has the FastAPI backend in a `backend/` subdir
+(`web:spa`), uvicorn typically runs as `cd backend && uvicorn ...`.
+pydantic-settings looks for `.env` relative to cwd → finds none →
+required-secret validator fires.
+
+Fix: `env_file=("../.env", ".env")` — try project root first, then
+backend-local. Both `cd backend && uvicorn` and project-root
+invocations resolve correctly.
+
+This only matters for templates whose Python lives in a subdir.
+Streamlit and Textual put their entrypoints at the project root and
+don't need it.
+
+### `Annotated[..., NoDecode]` for tuple env vars
+
+pydantic-settings tries to JSON-parse env var values destined for
+tuple/list-typed fields. A vibe coder typing
+`APP_CORS_ORIGINS=https://a,https://b` gets `JSONDecodeError`, not
+the expected tuple.
+
+```python
+from pydantic_settings import NoDecode
+
+cors_origins: Annotated[tuple[str, ...], NoDecode] = (...)
+
+@field_validator("cors_origins", mode="before")
+@classmethod
+def _split_csv(cls, value: object) -> object:
+    if isinstance(value, str):
+        return tuple(s.strip() for s in value.split(",") if s.strip())
+    return value
+```
+
+`NoDecode` opts the field out of the default JSON parser; the
+`field_validator(mode="before")` runs after. Comma-separated env
+input now works; JSON-array input still works as a fallback.
+
+### Cookie `Secure` flag in test env breaks TestClient
+
+`secure=settings.env != "development"` flagged the cookie `Secure` in
+test env too. `TestClient` (and curl in dev) speak http://, so
+browsers/test-clients drop `Secure` cookies. Fix:
+`secure = env == "production"`. Dev + test both speak http; prod
+gets the flag.
+
 ## Logging
 
 ### LogRecord has reserved attributes — don't collide
@@ -89,6 +136,37 @@ replaces `\r` and `\n` in user-controlled string values with literal
 classic CWE-117. The cost is one `.replace()` per logged string; keep
 it.
 
+### `_HumanFormatter` must clear `record.args`
+
+The naive implementation:
+
+```python
+class _HumanFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        record.msg = _strip_crlf(record.getMessage())
+        return super().format(record)
+```
+
+…has a latent bug. `record.getMessage()` substitutes the args (turning
+`"X %d", (7,)` into `"X 7"`). We assign that result back to
+`record.msg`. Then `super().format(record)` calls `record.getMessage()`
+*again* — which retries the `%`-substitution on the now-substituted
+string, raising
+`TypeError: not all arguments converted during string formatting` for
+any caller that used `logger.info("X %d", n)`.
+
+Fix: clear `record.args` after substitution:
+
+```python
+record.msg = _strip_crlf(record.getMessage())
+record.args = ()
+return super().format(record)
+```
+
+Templates carry a regression test (`tests/test_logging.py`) that pins
+this; future changes to the formatter that re-introduce double-format
+will fail in CI.
+
 ## Scaffolder
 
 ### Class-name placeholders vs module-name placeholders
@@ -104,6 +182,22 @@ literally, regardless of project name. Subclasses follow standard
 PascalCase (`AuthError`, `UploadError`, `SettingsError`). The only
 project-name substitution in identifier positions is the package name
 itself (`{{KAOS_PYTHON_MODULE}}`).
+
+### `KAOS_NPM_SLUG` for npm package names
+
+`KAOS_PROJECT_SLUG` uses underscores (Python-safe). NPM accepts
+hyphens but not underscores in many tooling surfaces (`@my_app/ui`
+trips pnpm's package-name validator in some workspace configurations).
+
+Templates that emit npm-shaped names use `KAOS_NPM_SLUG`:
+
+```json
+{ "name": "@{{KAOS_NPM_SLUG}}/spa" }
+```
+
+For input `"My App"` → `KAOS_PROJECT_SLUG = "my_app"` (Python),
+`KAOS_NPM_SLUG = "my-app"` (npm). For `"my-app"` already-hyphenated
+input both equal `"my-app"` / `"my_app"` respectively.
 
 ### `[tool.uv.sources]` transitive conflicts
 
@@ -131,6 +225,38 @@ When kaos-* packages publish to PyPI, this entire workaround
 disappears.
 
 ## Streamlit
+
+### Streamlit pages are top-level scripts — no `return`
+
+Streamlit page files (`pages/chat.py`, etc.) are executed by the
+runtime as a script: their top level is *not* wrapped in a function.
+A bare `return` outside a `def` is a `SyntaxError` at compile time.
+
+`ast.parse()` *accepts* this (it's a semantic, not grammatical,
+error). `compile(source, filename, "exec")` rejects it. The kaos-ui
+integration test runs both — see `tests/integration/test_template_compiles.py`.
+
+To halt early in a page, use `st.stop()`:
+
+```python
+try:
+    asyncio.run(_run())
+except Exception as exc:
+    st.error(f"Error: {exc}")
+    st.stop()  # NOT `return`
+```
+
+### `services/*` should lazy-import KAOS extras
+
+The Streamlit chat service imports `kaos_agents` only inside function
+bodies. Module-level imports get triggered the moment a page does
+`from {slug}.services import chat as chat_service`, which happens at
+page navigation in `st.navigation`. With kaos-agents missing (or
+broken), the entire page fails — even pages that don't use chat.
+
+Same rule across templates: every `services/*.py` lazy-imports
+optional KAOS deps. The screen / page / route imports the service
+module cheaply; only function calls trigger heavy deps.
 
 ### `AppTest` does not fully render `st.navigation` apps
 
@@ -276,6 +402,104 @@ corrupts the rendered UI. The kaos-ui Textual template ships a JSON
 `RotatingFileHandler` and sets `propagate=False` on the `kaos.*`
 logger root so KAOS module logs don't leak to Textual's own
 `TextualHandler` if it's attached.
+
+### Free-threaded Python 3.14t breaks Playwright sync API
+
+`playwright.sync_api` uses greenlets, which interact badly with
+Python 3.14's free-threaded GIL: tests fail with
+``Fatal Python error: PyMutex_Unlock: unlocking mutex that is not locked``.
+
+Use the async API:
+
+```python
+import asyncio
+from playwright.async_api import async_playwright
+
+async def main():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(executable_path="/usr/bin/google-chrome")
+        ...
+
+asyncio.run(main())
+```
+
+This affects test harnesses run from kaos-ui itself (3.14t default),
+not scaffolded projects (which can use whichever Python they pin).
+
+## SPA / web
+
+### Auth context: React `setState` is async — return values directly
+
+The naive `AuthContext.refresh()`:
+
+```python
+const refresh = useCallback(async () => {
+    const response = await apiFetch("/v1/auth/me");
+    setAuthed(response.ok);  // queued, not yet flushed
+}, []);
+```
+
+…breaks router auth gates. The TanStack Router `_auth.beforeLoad`
+runs synchronously after `await refresh()`. It reads
+`context.auth.isAuthenticated` (the React-state copy) — which is
+*still false* because the state update queued by `setAuthed` hasn't
+flushed yet on the same microtask tick.
+
+Result: cookie is set, /v1/auth/me returns 200, but the next
+navigation gets redirected back to /login.
+
+Fix: return the result directly *and* mirror in a ref for synchronous
+reads:
+
+```ts
+const refresh = useCallback(async (): Promise<boolean> => {
+    const response = await apiFetch("/v1/auth/me");
+    const ok = response.ok;
+    authedRef.current = ok;
+    setAuthed(ok);
+    return ok;
+}, []);
+```
+
+Then in the route guard:
+
+```ts
+beforeLoad: async ({ context }) => {
+    if (context.auth.isAuthenticated) return;
+    const ok = await context.auth.refresh();  // ← read the boolean, not the state
+    if (!ok) throw redirect({ to: "/login" });
+}
+```
+
+### Vite proxy port: read from env, never hardcode
+
+Templates default `VITE_BACKEND_URL` to `http://127.0.0.1:8000` but
+read the env var first. Multi-tenant dev hosts that already have :8000
+occupied (other agent sessions, other projects) would otherwise see
+the dev proxy forward to the wrong backend and serve unexpected
+content. The override is documented in CLAUDE.md.
+
+### Vite build script ordering: don't `tsc -b` before `vite build`
+
+`tsc -b && vite build` fails on a fresh checkout because TanStack
+Router's plugin generates `routeTree.gen.ts` *during* vite's run,
+not before. The naive build script crashes with:
+
+```
+src/main.tsx: Cannot find module './routeTree.gen' or its corresponding type declarations.
+src/routes/_auth.tsx: Argument of type '"/_auth"' is not assignable to parameter of type 'undefined'.
+```
+
+Templates use `vite build` for the build script (vite + plugin-react
+handle TS transforms). A separate `typecheck` script runs `vite build
+--mode development` first to seed `routeTree.gen.ts`, then `tsc
+--noEmit`.
+
+### `vitest/config` for type-checked test config
+
+`vite.config.ts` with a `test:` block fails type checking unless you
+import `defineConfig` from `vitest/config` instead of `vite`. The
+former re-exports vite's defineConfig with the vitest extension.
 
 ## kaos-agents
 
