@@ -1,4 +1,6 @@
-"""{{KAOS_PROJECT_NAME}} backend — FastAPI application."""
+"""{{KAOS_PROJECT_NAME}} backend entrypoint."""
+
+from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -6,28 +8,74 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
-from app.routers import health
+from app.auth import AuthMiddleware
+from app.logging_setup import app_logger, configure
+from app.routers import auth, documents, health, search, sessions, uploads
+from app.runtime import build_runtime
+from app.settings import AppSettings
+
+logger = app_logger("main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan — startup and shutdown."""
-    yield
+    """Build runtime + register cleanup on shutdown."""
+    settings = app.state.settings
+    app.state.runtime = build_runtime()
+    logger.info("startup", extra={"env": settings.env})
+    try:
+        yield
+    finally:
+        logger.info("shutdown")
 
 
-app = FastAPI(
-    title=settings.project_name,
-    version="0.1.0",
-    lifespan=lifespan,
-)
+def _generate_operation_id(route: object) -> str:
+    """OpenAPI operation_id = ``<tag>-<route_name>``.
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    Makes ``@hey-api/openapi-ts`` produce client methods like
+    ``Auth.login`` / ``Documents.upload`` instead of the cryptic default
+    ``post_login_v1_auth_login_post``. Required for the SPA's typed
+    client generation to be readable.
+    """
+    tags = getattr(route, "tags", None) or ["root"]
+    name = getattr(route, "name", "op")
+    return f"{tags[0]}-{name}"
 
-app.include_router(health.router)
+
+def create_app(settings: AppSettings | None = None) -> FastAPI:
+    """Build the FastAPI app. Test code calls this with a custom ``settings``."""
+    settings = settings or AppSettings()
+    configure(settings)
+
+    expose_docs = settings.env != "production"
+    app = FastAPI(
+        title="{{KAOS_PROJECT_NAME}}",
+        version="0.1.0",
+        lifespan=lifespan,
+        # Move docs under /v1 so the auth middleware allowlist matches.
+        docs_url="/v1/docs" if expose_docs else None,
+        redoc_url="/v1/redoc" if expose_docs else None,
+        openapi_url="/v1/openapi.json" if expose_docs else None,
+        generate_unique_id_function=_generate_operation_id,
+    )
+    app.state.settings = settings
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(AuthMiddleware, settings=settings)
+
+    app.include_router(health.router, prefix="/v1")
+    app.include_router(auth.router, prefix="/v1/auth")
+    app.include_router(sessions.router, prefix="/v1/sessions")
+    app.include_router(documents.router, prefix="/v1/documents")
+    app.include_router(search.router, prefix="/v1/search")
+    app.include_router(uploads.router, prefix="/v1/uploads")
+    return app
+
+
+app = create_app()

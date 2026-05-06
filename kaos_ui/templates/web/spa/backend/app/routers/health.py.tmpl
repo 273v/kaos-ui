@@ -1,11 +1,28 @@
-"""Health check endpoint."""
+"""Health + readiness."""
 
-from fastapi import APIRouter
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+
+from app.deps import get_settings
+from app.settings import AppSettings
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check() -> dict[str, str]:
-    """Return service health status."""
+def health() -> dict[str, str]:
+    """Liveness — the process is up."""
     return {"status": "ok"}
+
+
+@router.get("/ready")
+def ready(settings: Annotated[AppSettings, Depends(get_settings)]) -> dict[str, object]:
+    """Readiness — declared dependencies look reachable."""
+    checks: dict[str, object] = {
+        "vfs": settings.vfs_path.parent.exists() or settings.vfs_path.parent == settings.vfs_path,
+    }
+    ok = all(bool(v) for v in checks.values())
+    return {"status": "ready" if ok else "degraded", "checks": checks}

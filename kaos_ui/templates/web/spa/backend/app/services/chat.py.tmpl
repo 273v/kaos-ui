@@ -1,0 +1,65 @@
+"""Chat service — kaos-agents Runner + SSE wire.
+
+Builds a fresh Runner per turn (Agent is frozen config, Runner is the
+execution engine). Persistent SessionMemory hangs off the ``session_id``
+in VFS via kaos-agents' SessionStore — same id across runs gives the
+agent access to prior context.
+
+Heavy kaos-agents imports are lazy so a backend without the extra
+installed boots and serves the rest of the API.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
+
+from app.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from app.settings import AppSettings
+
+logger = app_logger("chat")
+
+_DEFAULT_INSTRUCTIONS = (
+    "You are a helpful assistant for {{KAOS_PROJECT_NAME}}. "
+    "Answer the user's questions clearly. Use the available tools when "
+    "they would help. When you cite a document, name it explicitly."
+)
+
+
+def build_runner(
+    settings: AppSettings,
+    runtime: KaosRuntime,
+    *,
+    instructions: str | None = None,
+) -> Any:
+    """Build a kaos-agents Runner for one chat turn."""
+    from kaos_agents import Agent, AgentPattern, Runner
+
+    agent = Agent(
+        instructions=instructions or _DEFAULT_INSTRUCTIONS,
+        pattern=AgentPattern.CHAT,
+        model=f"{settings.llm_provider}:{settings.llm_model}",
+    )
+    return Runner(agent, runtime=runtime)
+
+
+async def stream_events(
+    runner: Any, message: str, session_id: str
+) -> AsyncIterator[dict[str, str]]:
+    """Yield ``{event, data}`` records ready for ``sse-starlette``.
+
+    ``kaos_agents.events_to_sse`` already formats wire-bytes (``data: ...
+    \\n\\n``); ``sse-starlette`` wants the unwrapped event payload so it
+    can attach event ids, ping comments, and disconnect detection. We
+    use ``serialize_event`` directly and let sse-starlette wrap.
+    """
+    from kaos_agents import serialize_event
+
+    async for event in runner.run(message, session_id):
+        payload = serialize_event(event)
+        # ``payload`` is already a dict with a ``type`` discriminator.
+        yield {"event": payload.get("type", "message"), "data": __import__("json").dumps(payload)}

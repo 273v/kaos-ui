@@ -1,0 +1,56 @@
+"""Settings refusal cases + redaction."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.exceptions import SettingsError
+from app.settings import AppSettings
+
+
+def test_refuses_to_start_without_token_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("APP_AUTH_TOKEN", raising=False)
+    with pytest.raises(SettingsError, match="APP_AUTH_TOKEN"):
+        AppSettings(_env_file=None)
+
+
+def test_production_refuses_debug_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "x" * 40)
+    monkeypatch.setenv("APP_DEBUG", "true")
+    with pytest.raises(SettingsError, match="APP_DEBUG"):
+        AppSettings(_env_file=None)
+
+
+@pytest.mark.parametrize("weak", ["changeme", "password", "admin", "dev", "test"])
+def test_production_refuses_weak_token(
+    monkeypatch: pytest.MonkeyPatch, weak: str
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", weak)
+    with pytest.raises(SettingsError, match="weak literal"):
+        AppSettings(_env_file=None)
+
+
+def test_production_refuses_short_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "x" * 16)
+    with pytest.raises(SettingsError, match="too short"):
+        AppSettings(_env_file=None)
+
+
+def test_production_refuses_wildcard_cors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "x" * 40)
+    monkeypatch.setenv("APP_CORS_ORIGINS", "*")
+    with pytest.raises(SettingsError, match="\\*"):
+        AppSettings(_env_file=None)
+
+
+def test_redaction_walks_all_secret_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_AUTH_TOKEN", "abcdefghijklmnopqrstuvwxyz")
+    settings = AppSettings(_env_file=None)
+    payload = settings.model_dump_redacted()
+    assert "abcdefghijklmnopqrstuvwxyz" not in str(payload)
+    assert payload["auth_token"] == "abcd...wxyz"

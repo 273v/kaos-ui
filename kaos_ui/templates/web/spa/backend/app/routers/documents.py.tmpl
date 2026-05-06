@@ -1,0 +1,80 @@
+"""Document list / read / soft-delete routes."""
+
+from __future__ import annotations
+
+import shutil
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+
+from app.deps import get_settings
+from app.services import documents as doc_service
+from app.settings import AppSettings
+
+router = APIRouter(tags=["documents"])
+
+
+class DocumentEntry(BaseModel):
+    document_id: str
+    filename: str
+    extension: str
+    size_bytes: int
+
+
+class DocumentList(BaseModel):
+    items: list[DocumentEntry]
+    total: int
+
+
+@router.get("", response_model=DocumentList)
+def list_documents_route(
+    settings: Annotated[AppSettings, Depends(get_settings)],
+) -> DocumentList:
+    docs = doc_service.list_documents(settings)
+    return DocumentList(
+        items=[
+            DocumentEntry(
+                document_id=d.document_id,
+                filename=d.filename,
+                extension=d.extension,
+                size_bytes=d.size_bytes,
+            )
+            for d in docs
+        ],
+        total=len(docs),
+    )
+
+
+@router.get("/{document_id}", response_model=DocumentEntry)
+def get_document_route(
+    document_id: str,
+    settings: Annotated[AppSettings, Depends(get_settings)],
+) -> DocumentEntry:
+    doc = doc_service.get_document(settings, document_id)
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "what": f"Document {document_id!r} not found.",
+                "how_to_fix": "Check the document id; list via GET /v1/documents.",
+                "alternative_tool": None,
+            },
+        )
+    return DocumentEntry(
+        document_id=doc.document_id,
+        filename=doc.filename,
+        extension=doc.extension,
+        size_bytes=doc.size_bytes,
+    )
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document_route(
+    document_id: str,
+    settings: Annotated[AppSettings, Depends(get_settings)],
+) -> None:
+    doc = doc_service.get_document(settings, document_id)
+    if doc is None:
+        return  # idempotent — already gone
+    shutil.rmtree(doc.path.parent, ignore_errors=True)

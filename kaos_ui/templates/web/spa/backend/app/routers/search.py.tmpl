@@ -1,0 +1,49 @@
+"""Search route."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+
+from app.deps import get_settings
+from app.services import search as search_service
+from app.settings import AppSettings
+
+router = APIRouter(tags=["search"])
+
+
+class SearchHitResponse(BaseModel):
+    document_id: str
+    filename: str
+    snippet: str
+    score: float
+
+
+class SearchResponse(BaseModel):
+    query: str
+    total: int
+    items: list[SearchHitResponse]
+
+
+@router.get("", response_model=SearchResponse)
+def search_route(
+    settings: Annotated[AppSettings, Depends(get_settings)],
+    q: Annotated[str, Query(min_length=1, max_length=500)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SearchResponse:
+    hits = search_service.query(settings, q, limit=limit)
+    return SearchResponse(
+        query=q,
+        total=len(hits),
+        items=[
+            SearchHitResponse(
+                document_id=h.document_id,
+                filename=h.filename,
+                snippet=h.snippet,
+                score=h.score,
+            )
+            for h in hits
+        ],
+    )
