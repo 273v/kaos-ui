@@ -1,0 +1,108 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaos-ui"
+dynamic = ["version"]
+description = "Project scaffolding for KAOS user-facing applications — TUI, desktop, web, dashboard"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "LicenseRef-Proprietary" }
+authors = [
+  { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Code Generators",
+  "Typing :: Typed",
+]
+dependencies = [
+  "kaos-core>=0.1.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.8.1",
+]
+
+[dependency-groups]
+dev = [
+  "kaos-mcp>=0.1.0",
+  "pytest>=8.3.5",
+  "pytest-asyncio>=0.26.0",
+  "pytest-cov>=6.0.0",
+  "ruff>=0.11.0",
+  "ty>=0.0.1a17",
+]
+
+[project.scripts]
+kaos-ui = "kaos_ui.cli:main"
+
+[project.urls]
+Homepage = "https://273ventures.com"
+Documentation = "https://docs.273ventures.com"
+Repository = "https://github.com/273v/kaos-modules"
+
+[tool.hatch.version]
+path = "kaos_ui/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/kaos_ui",
+  "/README.md",
+  "/CLAUDE.md",
+  "/docs",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_ui"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov=kaos_ui",
+  "--cov-branch",
+  "--cov-report=term-missing",
+]
+markers = [
+  "integration: end-to-end behavior checks",
+  "unit: focused unit checks",
+  "slow: requires extra toolchains (cargo, docker)",
+  "desktop_native: requires a native desktop toolchain (cargo for tauri)",
+]
+
+[tool.coverage.run]
+source = ["kaos_ui"]
+branch = true
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kaos-core = { path = "../kaos-core", editable = true }
+kaos-mcp = { path = "../kaos-mcp", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+ignore = []
+
+[tool.ty.src]
+exclude = [
+  # template files are not part of the runtime module
+  "kaos_ui/templates/**",
+]

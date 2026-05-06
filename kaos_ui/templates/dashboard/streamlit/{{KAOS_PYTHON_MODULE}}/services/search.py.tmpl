@@ -1,0 +1,53 @@
+"""Search service — substring fallback today, BM25 over ContentDocuments
+when documents have been parsed.
+
+Phase 0 ships the substring path so the page is functional immediately
+after a fresh scaffold. The BM25 path activates as soon as upload
+parsing produces ContentDocuments via ``services.uploads`` Phase 2 work.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from {{KAOS_PYTHON_MODULE}}.services.documents import list_documents
+
+if TYPE_CHECKING:
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    document_id: str
+    filename: str
+    snippet: str
+    score: float
+
+
+def query(settings: AppSettings, q: str, *, limit: int = 20) -> list[SearchHit]:
+    """Return ranked hits for ``q``."""
+    if not q.strip():
+        return []
+    needle = q.lower()
+    hits: list[SearchHit] = []
+    for doc in list_documents(settings):
+        try:
+            text = doc.path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            continue
+        score = text.lower().count(needle)
+        if score == 0:
+            continue
+        idx = text.lower().find(needle)
+        snippet = text[max(0, idx - 60) : idx + 140].replace("\n", " ")
+        hits.append(
+            SearchHit(
+                document_id=doc.document_id,
+                filename=doc.filename,
+                snippet=snippet,
+                score=float(score),
+            )
+        )
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits[:limit]

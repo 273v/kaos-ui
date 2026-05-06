@@ -1,0 +1,17 @@
+"""Shared test fixtures."""
+
+from __future__ import annotations
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _test_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Ensure tests never touch the real .env or VFS."""
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "test-token-do-not-use-in-prod")
+    monkeypatch.setenv("APP_VFS_PATH", str(tmp_path / "vfs"))
+    # Provider key — chat tests don't actually call the LLM, but the
+    # provider client may probe for a key on construction.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    yield

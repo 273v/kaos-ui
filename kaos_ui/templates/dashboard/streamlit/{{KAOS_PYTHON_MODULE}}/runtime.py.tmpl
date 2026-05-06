@@ -1,0 +1,44 @@
+"""KaosRuntime factory.
+
+The runtime is the bus that every KAOS tool plugs into. We register
+``kaos-core`` tools unconditionally and any installed extras
+(``kaos-pdf``, ``kaos-office``, ``kaos-content``) opportunistically —
+the app stays functional with fewer extras rather than crashing.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from functools import lru_cache
+
+from kaos_core import KaosRuntime
+from kaos_core.tools import register_core_tools
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+logger = app_logger("runtime")
+
+
+@lru_cache(maxsize=1)
+def build_runtime() -> KaosRuntime:
+    """Build the application's KaosRuntime with all available tools registered."""
+    runtime = KaosRuntime()
+    n_core = register_core_tools(runtime)
+    logger.info("registered %d core tools", n_core)
+
+    n_extras = 0
+    with contextlib.suppress(ImportError):
+        from kaos_pdf import register_pdf_tools
+
+        n_extras += register_pdf_tools(runtime)
+    with contextlib.suppress(ImportError):
+        from kaos_office import register_office_tools
+
+        n_extras += register_office_tools(runtime)
+    with contextlib.suppress(ImportError):
+        from kaos_content.tools import register_content_tools
+
+        n_extras += register_content_tools(runtime)
+
+    logger.info("registered %d extra tools", n_extras)
+    return runtime

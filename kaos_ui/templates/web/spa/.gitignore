@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+uv.lock
+
+# Node
+node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+
+# Build output
+apps/spa/dist/
+apps/spa/src/routeTree.gen.ts
+
+# Environment
+.env
+*.sqlite
+*.db

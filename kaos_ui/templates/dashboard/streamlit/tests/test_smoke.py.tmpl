@@ -1,0 +1,31 @@
+"""Smoke test — boot the app + every page in headless mode.
+
+Uses Streamlit's first-party AppTest harness. ``test`` env disables the
+auth gate so pages render immediately.
+"""
+
+from __future__ import annotations
+
+import pytest
+from streamlit.testing.v1 import AppTest
+
+PAGE_PATHS = (
+    "pages/chat.py",
+    "pages/upload.py",
+    "pages/search.py",
+    "pages/browse.py",
+    "pages/settings.py",
+)
+
+
+@pytest.mark.smoke
+def test_app_root_boots() -> None:
+    at = AppTest.from_file("app.py", default_timeout=30).run()
+    assert at.exception == [], f"app.py raised: {at.exception}"
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize("page", PAGE_PATHS)
+def test_each_page_renders(page: str) -> None:
+    at = AppTest.from_file(page, default_timeout=30).run()
+    assert at.exception == [], f"{page} raised: {at.exception}"

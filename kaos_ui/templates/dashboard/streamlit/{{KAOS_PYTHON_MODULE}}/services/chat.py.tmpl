@@ -1,0 +1,51 @@
+"""Chat service — kaos-agents Runner with persistent SessionMemory."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
+
+from kaos_agents import Agent, AgentEvent, AgentPattern, Runner
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+logger = app_logger("chat")
+
+_DEFAULT_INSTRUCTIONS = (
+    "You are a helpful assistant for {{KAOS_PROJECT_NAME}}. "
+    "Answer the user's questions clearly. Use the available tools when "
+    "they would help. When you cite a document, name it explicitly."
+)
+
+
+def build_agent(settings: AppSettings, *, instructions: str | None = None) -> Agent:
+    """Configure the chat agent based on user settings."""
+    return Agent(
+        instructions=instructions or _DEFAULT_INSTRUCTIONS,
+        pattern=AgentPattern.CHAT,
+        model=f"{settings.llm_provider}:{settings.llm_model}",
+    )
+
+
+def build_runner(
+    settings: AppSettings,
+    runtime: KaosRuntime,
+    *,
+    instructions: str | None = None,
+) -> Runner:
+    """Build a Runner for one chat turn."""
+    agent = build_agent(settings, instructions=instructions)
+    return Runner(agent, runtime=runtime)
+
+
+async def stream(
+    runner: Runner, message: str, session_id: str
+) -> AsyncIterator[AgentEvent]:
+    """Yield AgentEvents from a single turn. Page code renders them."""
+    async for event in runner.run(message, session_id):
+        yield event

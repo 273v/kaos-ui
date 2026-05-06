@@ -1,0 +1,74 @@
+"""Bearer-token auth gate for Streamlit pages.
+
+The simplest viable auth for an internal/single-team dashboard:
+
+- One token in ``.env`` as ``APP_AUTH_TOKEN``.
+- Pages call ``auth.require(settings)`` as their first executable line.
+- The login form appears in-page; on success the token hash is stored
+  in ``st.session_state``.
+- Constant-time comparison via ``hmac.compare_digest`` to defeat
+  timing oracles.
+
+To swap to OAuth/OIDC see ``CLAUDE.md`` § Production auth swap path.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+_SESSION_KEY = "auth_ok"
+_TOKEN_HASH_KEY = "auth_token_hash"
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def is_authenticated(settings: AppSettings) -> bool:
+    if settings.env == "test":
+        return True
+    return bool(st.session_state.get(_SESSION_KEY))
+
+
+def session_token_hash() -> str | None:
+    return st.session_state.get(_TOKEN_HASH_KEY)
+
+
+def require(settings: AppSettings) -> None:
+    """Block page render if the user has not authenticated."""
+    if is_authenticated(settings):
+        return
+    _render_login(settings)
+    st.stop()
+
+
+def logout() -> None:
+    st.session_state.pop(_SESSION_KEY, None)
+    st.session_state.pop(_TOKEN_HASH_KEY, None)
+
+
+def _render_login(settings: AppSettings) -> None:
+    st.title("Sign in")
+    st.caption(
+        "Enter your `APP_AUTH_TOKEN` from `.env`. "
+        "If you don't have one, generate it with: "
+        "`head -c 32 /dev/urandom | base64`."
+    )
+    token = st.text_input("Token", type="password", key="login_token")
+    submitted = st.button("Sign in", type="primary")
+    if submitted:
+        if settings.auth_token is None:
+            st.error("Server is misconfigured: APP_AUTH_TOKEN not set.")
+            return
+        expected = settings.auth_token.get_secret_value()
+        if hmac.compare_digest(token, expected):
+            st.session_state[_SESSION_KEY] = True
+            st.session_state[_TOKEN_HASH_KEY] = _hash(token)
+            st.rerun()
+        else:
+            st.error("Invalid token. Check APP_AUTH_TOKEN in .env.")

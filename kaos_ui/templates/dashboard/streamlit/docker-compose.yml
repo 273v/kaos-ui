@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: {{KAOS_PROJECT_SLUG}}:latest
+    env_file: .env
+    ports:
+      - "127.0.0.1:8501:8501"  # localhost only by default
+    volumes:
+      - ./.kaos-vfs:/app/.kaos-vfs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

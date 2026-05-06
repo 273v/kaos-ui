@@ -1,0 +1,58 @@
+"""Upload validation tests."""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import UploadError
+from {{KAOS_PYTHON_MODULE}}.services import uploads as upload_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+class _FakeFile:
+    def __init__(self, name: str, payload: bytes) -> None:
+        self.name = name
+        self._payload = payload
+
+    def getvalue(self) -> bytes:
+        return self._payload
+
+
+def _settings() -> AppSettings:
+    return AppSettings(_env_file=None)
+
+
+def test_rejects_oversize() -> None:
+    settings = _settings()
+    big = b"x" * (settings.max_upload_bytes + 1)
+    with pytest.raises(UploadError, match="too large"):
+        upload_service.validate(_FakeFile("big.txt", big), settings)
+
+
+def test_rejects_disallowed_extension() -> None:
+    settings = _settings()
+    with pytest.raises(UploadError, match="not allowed"):
+        upload_service.validate(_FakeFile("evil.exe", b"abc"), settings)
+
+
+def test_accepts_allowed_extension() -> None:
+    settings = _settings()
+    ext, payload = upload_service.validate(_FakeFile("doc.txt", b"hello"), settings)
+    assert ext == "txt"
+    assert payload == b"hello"
+
+
+def test_store_writes_to_vfs(tmp_path) -> None:
+    settings = _settings()
+    file = _FakeFile("hello.txt", b"contents")
+    result = upload_service.store(file, runtime=None, settings=settings)
+    assert result.vfs_path.read_bytes() == b"contents"
+    assert result.document_id
+
+
+def test_store_rejects_bad_input() -> None:
+    settings = _settings()
+    with pytest.raises(UploadError):
+        upload_service.store(_FakeFile("x.exe", b"x"), runtime=None, settings=settings)

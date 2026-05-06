@@ -1,0 +1,106 @@
+"""Upload service — file → ContentDocument → VFS.
+
+Enforces server-side type and size limits before parsing. Errors raise
+``UploadError`` carrying the agent-friendly what/how-to-fix shape.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import UploadError
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+logger = app_logger("uploads")
+
+
+class _UploadedFile(Protocol):
+    """Minimal interface — accepts both Streamlit and Werkzeug-style files."""
+
+    name: str
+
+    def getvalue(self) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StoredDocument:
+    document_id: str
+    filename: str
+    extension: str
+    size_bytes: int
+    vfs_path: Path
+
+
+def validate(file: _UploadedFile, settings: AppSettings) -> tuple[str, bytes]:
+    """Validate ``file`` against settings. Returns ``(extension, payload)``."""
+    payload = file.getvalue()
+    size = len(payload)
+    if size > settings.max_upload_bytes:
+        raise UploadError(
+            f"Upload too large: {size} bytes > limit "
+            f"{settings.max_upload_bytes} bytes.\n"
+            f"How to fix: shrink the file or raise APP_MAX_UPLOAD_BYTES.\n"
+            f"Alternative: split the document and upload the parts separately."
+        )
+    suffix = Path(file.name).suffix.lstrip(".").lower()
+    if suffix not in settings.allowed_upload_types:
+        allowed = ", ".join(settings.allowed_upload_types)
+        raise UploadError(
+            f"File type {suffix!r} is not allowed.\n"
+            f"How to fix: upload one of: {allowed}.\n"
+            f"Alternative: convert the file to a supported type before upload."
+        )
+    return suffix, payload
+
+
+def store(
+    file: _UploadedFile,
+    *,
+    runtime: KaosRuntime,  # noqa: ARG001 — used in Phase 2 wiring
+    settings: AppSettings,
+) -> StoredDocument:
+    """Validate, parse (best-effort), and stash the upload in VFS."""
+    extension, payload = validate(file, settings)
+    document_id = _make_document_id(file.name)
+    vfs_dir = settings.vfs_path / "documents" / document_id
+    vfs_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = vfs_dir / f"original.{extension}"
+    raw_path.write_bytes(payload)
+
+    logger.info(
+        "stored upload",
+        extra={
+            "document_id": document_id,
+            "original_filename": file.name,
+            "extension": extension,
+            "size_bytes": len(payload),
+        },
+    )
+
+    # Phase 2: dispatch to kaos-pdf / kaos-office and serialize the
+    # resulting ContentDocument alongside the raw bytes. The basic
+    # store path is functional today so the UI can ship.
+    return StoredDocument(
+        document_id=document_id,
+        filename=file.name,
+        extension=extension,
+        size_bytes=len(payload),
+        vfs_path=raw_path,
+    )
+
+
+def _make_document_id(filename: str) -> str:
+    import hashlib
+    import time
+
+    fingerprint = hashlib.sha256(
+        f"{filename}:{time.time_ns()}".encode()
+    ).hexdigest()[:12]
+    return fingerprint

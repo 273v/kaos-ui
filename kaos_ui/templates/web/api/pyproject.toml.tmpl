@@ -1,0 +1,25 @@
+[project]
+name = "{{KAOS_PROJECT_SLUG}}"
+version = "0.1.0"
+description = "{{KAOS_PROJECT_NAME}} — FastAPI backend with KAOS integration"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.115",
+]
+# To add KAOS packages (when available on PyPI or via local path):
+#   uv add kaos-core kaos-content kaos-pdf kaos-web
+# For monorepo development, add to [tool.uv.sources]:
+#   kaos-core = { path = "../kaos-core", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.11"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,52 @@
+"""Logging setup — structured JSON in production, human-readable in dev.
+
+Always use ``kaos_core.logging.get_logger`` so logger names are
+auto-prefixed under the ``kaos.app.{{KAOS_PROJECT_SLUG}}.*`` hierarchy
+and ``session_id`` / ``trace_id`` propagate when a ``KaosContext`` is in
+scope.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from kaos_core.logging import get_logger
+
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+_CONFIGURED = False
+
+
+def configure(settings: AppSettings) -> None:
+    """Idempotent logging configuration. Call once at app start."""
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+
+    # Clear default handlers so Streamlit's reload doesn't multiply them.
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    handler = logging.StreamHandler(stream=sys.stderr)
+    if settings.env == "production":
+        handler.setFormatter(
+            logging.Formatter(
+                '{"ts":"%(asctime)s","level":"%(levelname)s",'
+                '"name":"%(name)s","msg":%(message)r}'
+            )
+        )
+    else:
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s — %(message)s")
+        )
+    root.addHandler(handler)
+    _CONFIGURED = True
+
+
+def app_logger(suffix: str) -> logging.Logger:
+    """``app_logger("chat")`` → ``kaos.app.{{KAOS_PROJECT_SLUG}}.chat``."""
+    return get_logger(f"kaos.app.{{KAOS_PROJECT_SLUG}}.{suffix}")

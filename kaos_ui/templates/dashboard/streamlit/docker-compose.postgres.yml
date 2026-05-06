@@ -1,0 +1,31 @@
+# Overlay: postgres-backed deployments.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+#
+# Set APP_DATABASE_URL in .env to:
+#   postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/{{KAOS_PROJECT_SLUG}}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: {{KAOS_PROJECT_SLUG}}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d {{KAOS_PROJECT_SLUG}}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pg-data:

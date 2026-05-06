@@ -1,0 +1,81 @@
+"""Application settings for {{KAOS_PROJECT_NAME}}.
+
+Resolution order matches the KAOS hierarchy described in
+``kaos-ui/docs/INTEGRATION.md``:
+
+1. Explicit overrides
+2. Prefixed env vars (``APP_*``)
+3. ``.env`` file
+4. Field defaults
+
+Required fields raise on missing values when ``env != "test"`` so the
+app refuses to boot in misconfigured environments rather than silently
+running insecurely.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+from kaos_core.config import ModuleSettings
+from pydantic import Field, SecretStr, model_validator
+from pydantic_settings import SettingsConfigDict
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+
+
+class AppSettings(ModuleSettings):
+    """Configuration for {{KAOS_PROJECT_NAME}}."""
+
+    auth_token: SecretStr | None = None
+    env: Literal["development", "production", "test"] = "development"
+    log_level: str = "INFO"
+
+    vfs_path: Path = Path(".kaos-vfs")
+
+    max_upload_bytes: int = 25 * 1024 * 1024
+    allowed_upload_types: tuple[str, ...] = (
+        "pdf",
+        "docx",
+        "pptx",
+        "xlsx",
+        "csv",
+        "txt",
+        "md",
+    )
+
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-haiku-4-5"
+
+    streamlit_port: int = 8501
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=".env",
+        extra="ignore",
+        validate_default=True,
+    )
+
+    @model_validator(mode="after")
+    def _refuse_to_start_without_auth_token(self) -> AppSettings:
+        if self.env != "test" and self.auth_token is None:
+            msg = (
+                "APP_AUTH_TOKEN is not set.\n"
+                "How to fix: cp .env.example .env, then edit .env and set "
+                "APP_AUTH_TOKEN to a long random string "
+                "(head -c 32 /dev/urandom | base64).\n"
+                "Alternative: set APP_ENV=test for unit tests."
+            )
+            raise SettingsError(msg)
+        return self
+
+    def model_dump_redacted(self) -> dict[str, object]:
+        """Dump settings with secrets redacted — for the Settings page."""
+        data = self.model_dump()
+        if self.auth_token is not None:
+            secret = self.auth_token.get_secret_value()
+            data["auth_token"] = (
+                "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
+            )
+        return data
