@@ -48,15 +48,26 @@ export function Message({ role, text, streaming }: MessageProps) {
        *  newlines from the model are visible. */}
       <div className="whitespace-pre-wrap">
         {text}
-        {streaming ? (
-          <span
-            className={cn(
-              "ml-0.5 inline-block h-[1em] w-[2px] -translate-y-[2px] animate-pulse bg-foreground/60 align-middle",
-            )}
-            aria-hidden="true"
-          />
-        ) : null}
+        {streaming ? <StreamingDot /> : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Pulsing dot rendered at the tail of streaming assistant text.
+ * Visible at body line-height so the user knows tokens are arriving.
+ * Modeled after Cursor / ChatGPT — small, intentional, not a 2-px
+ * caret you can miss on a high-DPI screen.
+ */
+function StreamingDot() {
+  return (
+    <span
+      className={cn(
+        "ml-1 inline-block h-1.5 w-1.5 translate-y-[-1px] rounded-full bg-foreground/70",
+        "animate-pulse align-middle",
+      )}
+      aria-hidden="true"
+    />
   );
 }

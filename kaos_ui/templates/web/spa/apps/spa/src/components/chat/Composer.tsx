@@ -13,7 +13,7 @@
 import { Button } from "@{{KAOS_NPM_SLUG}}/ui/components/ui/button";
 import { Textarea } from "@{{KAOS_NPM_SLUG}}/ui/components/ui/textarea";
 import { cn } from "@{{KAOS_NPM_SLUG}}/ui/lib/utils";
-import { ArrowUp, Briefcase, Paperclip, Plus } from "lucide-react";
+import { ArrowUp, Briefcase, Loader2, Paperclip, Plus } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
 
 interface ComposerProps {
@@ -88,22 +88,25 @@ export function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={pending ? "Generating response…" : placeholder}
           rows={1}
+          disabled={pending}
           className={cn(
             "border-0 bg-transparent px-2 py-1.5 shadow-none",
             "focus-visible:ring-0",
             "min-h-[36px]",
+            pending && "opacity-70",
           )}
         />
         <Button
           type="submit"
           size="icon"
-          disabled={!canSend}
-          aria-label="Send message"
+          disabled={!canSend && !pending}
+          aria-label={pending ? "Generating…" : "Send message"}
+          aria-busy={pending}
           className="h-8 w-8 shrink-0 rounded-md"
         >
-          <ArrowUp className="h-4 w-4" />
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </Button>
       </div>
     </form>
