@@ -98,7 +98,10 @@ class ChatScreen(Screen):
             if not buffer:
                 self._transcript = base + "*(no response)*"
                 self._refresh_transcript()
-        except Exception as exc:  # noqa: BLE001 — surface to user
+        except Exception as exc:
+            # Broad except: surface any worker error in the transcript
+            # rather than silently dying. Full traceback is in the
+            # file logs.
             self._transcript += f"\n\n*[error: {exc}]*"
             self._refresh_transcript()
 

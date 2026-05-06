@@ -8,7 +8,6 @@ carrying the agent-friendly what/how-to-fix shape.
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -141,7 +140,7 @@ def _verify_magic_bytes(extension: str, payload: bytes) -> None:
 def store(
     file: _UploadedFile,
     *,
-    runtime: KaosRuntime,  # noqa: ARG001 — used in Phase 2 wiring
+    runtime: KaosRuntime,  # held for Phase 2 (parser dispatch via runtime tools)
     settings: AppSettings,
 ) -> StoredDocument:
     """Validate, parse (best-effort), and stash the upload in VFS."""

@@ -99,6 +99,75 @@ def test_every_emitted_pyproject_parses(tmp_path: Path, kind: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("kind", kinds())
+def test_ruff_check_passes_on_rendered_python(tmp_path: Path, kind: str) -> None:
+    """Run ``ruff check`` against every emitted .py file.
+
+    ``ast.parse`` and ``compile()`` only catch grammar / hard semantic
+    errors. ruff additionally catches the larger class of bugs that
+    ship to vibe coders: undefined names, unused imports, broken
+    relative imports, ``noqa`` typos, etc. Research finding from the
+    template-testing best-practices agent: "don't rely on ast.parse
+    alone; the real linter on rendered output catches more".
+    """
+    project = tmp_path / "demo"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kaos_ui",
+            "new",
+            kind,
+            "demo",
+            "--target",
+            str(project),
+        ],
+        check=True,
+        cwd=tmp_path,
+    )
+    py_files = sorted(project.rglob("*.py"))
+    if not py_files:
+        pytest.skip(f"kind {kind!r} emits no Python files")
+
+    # Ruff only — no project-level config (the scaffolded project's
+    # pyproject may have settings we don't want to inherit). Use
+    # ``--isolated`` so we ignore any pyproject.toml ruff section and
+    # ``--select`` a conservative core set: pyflakes (F), pycodestyle
+    # errors (E), basic stuff that's universally bad. Skip ``E501``
+    # (line length) — templates may have long lines that survive
+    # substitution. The point is to catch real correctness issues, not
+    # style.
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--with",
+            "ruff",
+            "ruff",
+            "check",
+            "--isolated",
+            "--select",
+            "F,E,B,UP,SIM,RUF",
+            # Ignore:
+            #   E501  — line length (style; templates may have long lines)
+            #   UP043 — preview rule
+            #   F841  — unused buffer var (services keep them for Phase 2)
+            #   RUF012 — Textual's BINDINGS/SCREENS class attrs are
+            #            the framework-prescribed mutable-list pattern
+            "--ignore",
+            "E501,UP043,F841,RUF012",
+            *[str(f) for f in py_files],
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            f"ruff check failed on {kind!r} rendered Python:\n{result.stdout}\n{result.stderr}"
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("kind", kinds())
 def test_python_version_consistency(tmp_path: Path, kind: str) -> None:
     """``.python-version`` must match ``pyproject.toml``'s requires-python.
 

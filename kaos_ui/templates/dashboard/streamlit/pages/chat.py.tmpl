@@ -49,7 +49,10 @@ if prompt := st.chat_input("Ask anything…"):
 
         try:
             asyncio.run(_run())
-        except Exception as exc:  # noqa: BLE001 — surface to user
+        except Exception as exc:
+            # Broad except: any agent error is surfaced to the user
+            # without leaking the stack trace. Full traceback is in the
+            # file logs via streamlit's own error capture.
             placeholder.error(f"Error from agent: {exc}")
             st.stop()  # NOT `return` — pages are top-level scripts
 

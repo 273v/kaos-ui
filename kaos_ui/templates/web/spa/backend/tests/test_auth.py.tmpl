@@ -10,7 +10,7 @@ def test_login_with_correct_token(client) -> None:
     )
     assert response.status_code == 200
     # Cookie should be set on the response.
-    assert any("Set-Cookie" in k for k in response.headers.keys()) or response.cookies
+    assert any("Set-Cookie" in k for k in response.headers) or response.cookies
 
 
 def test_login_with_wrong_token(client) -> None:
