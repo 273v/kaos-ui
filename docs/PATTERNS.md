@@ -524,19 +524,54 @@ async for event in runner.run(message, session_id):
 NOT as a `Runner` constructor argument. Memory persists across runs
 because the same `session_id` lookup hits the same VFS path.
 
-### Stream events have a `text` attribute on `TextDelta` only
+### Stream tokens come from `TextDelta.content`, NOT `.text`
 
 `async for event in runner.run(...)` yields 19 typed event subclasses.
-Code that does `getattr(event, "text", None)` accidentally picks up
-both `TextDelta` (assistant output) and `ThinkingDelta` (model
-reasoning, not user-facing). Filter by type:
+The streamed assistant token chunk is on `TextDelta.content`, while
+the assembled final response on `TurnComplete.text` is the FULL
+message at the end. Reading `.text` on `TextDelta` returns `None`
+silently — no exception, just empty assistant messages in the UI.
+
+Always filter by `isinstance` AND read the canonical field:
 
 ```python
 from kaos_agents import TextDelta
 async for event in runner.run(...):
     if isinstance(event, TextDelta):
-        accumulated.append(event.text)
+        accumulated.append(event.content)  # NOT .text
 ```
 
-The current Streamlit chat page accepts both for simplicity but should
-filter once the spec is finalized.
+`getattr(event, "text", None)` is a triple footgun: it matches
+`TurnComplete` too (so you get the final string twice — once as a
+delta-shaped event and once when the turn ends), it picks up
+`ThinkingDelta` if any future event grows a `text` attribute, and it
+silently returns `None` on `TextDelta`.
+
+### Don't roll your own SSE parser — use `eventsource-parser`
+
+The SPA template uses `sse-starlette` server-side, which emits CRLF
+event separators (`\r\n\r\n`). A naive client parser using
+`buffer.indexOf("\n\n")` finds nothing, the SSE stream "succeeds"
+(HTTP 200, body fully read), and the consumer's `for await` exits
+without yielding a single event. The chat UI shows an empty assistant
+message and no error. This bug bit the template once and is hard to
+spot because the unit tests used LF-only fixtures.
+
+The 2026 standard is **`eventsource-parser`** (Vercel-maintained,
+~3M weekly downloads, used by the Vercel `ai` SDK, OpenAI Node SDK,
+and Anthropic SDK). It's a state-machine parser that handles CRLF/CR/LF
+separators, multi-line `data:` accumulation, comment lines, `event:`
+/ `id:` / `retry:` fields, UTF-8 BOMs, and chunk boundaries that
+split events. We keep our own `fetch()` (so we control credentials,
+abort, request body) but the parsing layer must be the library.
+
+Regression tests in `apps/spa/tests/streaming.test.ts` lock in:
+1. CRLF-terminated events (matching `sse-starlette`'s wire format)
+2. Events split across chunk boundaries mid-UTF-8
+
+Both must keep passing. If a future change "just" tweaks the parser,
+ask: would `eventsource-parser` already do this? Almost always yes.
+
+Native `EventSource` is wrong for our chat use case because it can't
+do POST / custom headers / cookie auth the way we need; that's why
+we use `fetch` + `eventsource-parser` instead.

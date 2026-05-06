@@ -41,10 +41,15 @@ if prompt := st.chat_input("Ask anything…"):
             async for event in chat_service.stream(
                 runner, prompt, st.session_state["chat_session_id"]
             ):
-                # TextDelta carries the streamed assistant text.
-                delta = getattr(event, "text", None)
-                if delta:
-                    accumulated.append(delta)
+                # ``TextDelta`` from kaos-agents carries the streamed
+                # token chunk in ``.content`` — NOT ``.text`` (which is
+                # the assembled final on ``TurnComplete``). Reading the
+                # wrong field silently produces empty assistant
+                # messages.
+                from kaos_agents import TextDelta
+
+                if isinstance(event, TextDelta) and event.content:
+                    accumulated.append(event.content)
                     placeholder.markdown("".join(accumulated))
 
         try:

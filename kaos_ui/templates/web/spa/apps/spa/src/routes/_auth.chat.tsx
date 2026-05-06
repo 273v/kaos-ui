@@ -30,11 +30,17 @@ function ChatPage() {
           body: JSON.stringify({ message: userMsg }),
         },
       )) {
-        // Surface only TextDelta-flavored events to keep the UI focused.
+        // kaos-agents wire events use ``content`` for incremental
+        // token deltas (text_delta events) and ``text`` for the
+        // assembled final on turn_complete. Stream the deltas so
+        // tokens land as they arrive; turn_complete is redundant
+        // for a streaming UI.
         const data = event.data as Record<string, unknown> | undefined;
-        const text = typeof data?.text === "string" ? (data.text as string) : "";
-        if (text) {
-          assistant += text;
+        const isDelta = data?.type === "text_delta";
+        const piece =
+          isDelta && typeof data?.content === "string" ? (data.content as string) : "";
+        if (piece) {
+          assistant += piece;
           setMessages((m) => {
             const next = m.slice(0, -1);
             return [...next, { role: "agent", text: assistant }];

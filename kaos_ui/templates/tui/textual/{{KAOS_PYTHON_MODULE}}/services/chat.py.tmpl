@@ -60,14 +60,14 @@ def extract_text(event: Any) -> str:
     """Return user-visible token text from a streamed AgentEvent.
 
     Filters to ``TextDelta`` only — ``ThinkingDelta`` is internal
-    reasoning and shouldn't render directly. Any future event type
-    with a ``text`` attribute that's user-facing should be allowlisted
-    here explicitly.
+    reasoning and shouldn't render directly. The kaos-agents canonical
+    field for the streamed token chunk is ``content`` (not ``text``);
+    a wrong field name silently produces empty assistant messages.
     """
     from kaos_agents import TextDelta
 
     if isinstance(event, TextDelta):
-        return getattr(event, "text", "") or ""
+        return event.content or ""
     return ""
 
 
