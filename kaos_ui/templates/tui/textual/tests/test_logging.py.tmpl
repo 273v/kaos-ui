@@ -1,0 +1,37 @@
+"""Logging configuration regression tests.
+
+The TUI template uses JSON-only logging (Textual owns stdout/stderr),
+but the formatter must still handle %-args + CRLF stripping — same
+bug class as the SPA backend / Streamlit's _HumanFormatter.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import _JsonFormatter
+
+
+def _make_record(msg: str, *args: object) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="kaos.app.{{KAOS_PROJECT_SLUG}}.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg=msg,
+        args=args or None,
+        exc_info=None,
+    )
+
+
+def test_json_formatter_handles_percent_args() -> None:
+    record = _make_record("registered %d core tools", 7)
+    output = _JsonFormatter().format(record)
+    assert '"registered 7 core tools"' in output
+
+
+def test_json_formatter_strips_crlf() -> None:
+    """CRLF in user-controlled content must not forge log lines (CWE-117)."""
+    record = _make_record("note: hello\r\nINJECTED")
+    output = _JsonFormatter().format(record)
+    assert "\r\n" not in output

@@ -62,7 +62,13 @@ class _JsonFormatter(logging.Formatter):
 
 class _HumanFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        # Substitute %-args via getMessage, strip CRLF, then clear
+        # ``record.args`` so super().format() doesn't try to substitute
+        # the already-formatted string again (which would raise
+        # ``TypeError: not all arguments converted...``). See
+        # kaos-ui/docs/PATTERNS.md §Logging.
         record.msg = _strip_crlf(record.getMessage())
+        record.args = ()
         return super().format(record)
 
 
