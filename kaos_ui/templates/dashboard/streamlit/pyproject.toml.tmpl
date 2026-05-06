@@ -18,10 +18,14 @@ dependencies = [
   "kaos-llm-client>=0.1.0",
   "kaos-pdf>=0.1.0",
   "kaos-office>=0.1.0",
-  # Streamlit + config
-  "streamlit>=1.50,<2.0",
+  # Streamlit — pin >= 1.54 for CVE patches (CVE-2025-1684 client-only
+  # MIME enforcement, CVE-2024-42474 path traversal, Windows SSRF/NTLM)
+  "streamlit>=1.54,<2.0",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.8,<3",
+  # python-magic for magic-byte upload verification — extension-only
+  # checks are insufficient (CWE-434).
+  "python-magic>=0.4.27,<1",
 ]
 
 [dependency-groups]

@@ -44,7 +44,7 @@ def test_accepts_allowed_extension() -> None:
     assert payload == b"hello"
 
 
-def test_store_writes_to_vfs(tmp_path) -> None:
+def test_store_writes_to_vfs() -> None:
     settings = _settings()
     file = _FakeFile("hello.txt", b"contents")
     result = upload_service.store(file, runtime=None, settings=settings)
@@ -56,3 +56,30 @@ def test_store_rejects_bad_input() -> None:
     settings = _settings()
     with pytest.raises(UploadError):
         upload_service.store(_FakeFile("x.exe", b"x"), runtime=None, settings=settings)
+
+
+def test_rejects_renamed_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ELF binary renamed .pdf must be rejected by magic-byte check
+    (when libmagic is available). When libmagic is not installed the
+    test asserts the warning path runs without crashing."""
+    settings = _settings()
+    elf_header = b"\x7fELF" + b"\x00" * 100  # ELF magic, fake binary
+
+    try:
+        import magic  # noqa: F401
+
+        with pytest.raises(UploadError, match="content does not match"):
+            upload_service.validate(_FakeFile("disguised.pdf", elf_header), settings)
+    except ImportError:
+        # libmagic not installed — verify graceful degradation.
+        ext, _ = upload_service.validate(_FakeFile("disguised.pdf", elf_header), settings)
+        assert ext == "pdf"  # extension check passed; magic check skipped
+
+
+def test_document_id_has_no_path_separators() -> None:
+    """The document_id is used as a directory name; it must be safe."""
+    doc_id = upload_service._make_document_id("../etc/passwd")
+    assert "/" not in doc_id
+    assert "\\" not in doc_id
+    assert ".." not in doc_id
+    assert "\x00" not in doc_id

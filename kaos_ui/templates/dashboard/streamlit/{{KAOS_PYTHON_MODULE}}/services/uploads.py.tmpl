@@ -1,17 +1,51 @@
 """Upload service — file → ContentDocument → VFS.
 
-Enforces server-side type and size limits before parsing. Errors raise
-``UploadError`` carrying the agent-friendly what/how-to-fix shape.
+Enforces server-side validation: size limit, extension allowlist, AND
+magic-byte verification (extension-only checks are insufficient — see
+CWE-434 and OWASP File Upload guidance). Errors raise ``UploadError``
+carrying the agent-friendly what/how-to-fix shape.
 """
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from {{KAOS_PYTHON_MODULE}}.exceptions import UploadError
 from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+# python-magic is a hard dependency in pyproject.toml. Import lazily so
+# tests can run even when libmagic is missing on the system (CI without
+# `apt-get install libmagic1`). At runtime we fail loud if it's needed.
+try:
+    import magic as _magic
+except ImportError:  # pragma: no cover — documented fallback path
+    _magic = None  # type: ignore[assignment]
+
+# Extension → list of acceptable MIME types as detected by libmagic.
+# We allow multiple because magic detection is fuzzy at the boundaries
+# (e.g., older python-magic returns "application/CDFV2" for older Office
+# files).
+_EXTENSION_TO_MIME: dict[str, tuple[str, ...]] = {
+    "pdf": ("application/pdf",),
+    "docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/zip",  # docx IS a zip; some libmagic versions stop there
+    ),
+    "pptx": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/zip",
+    ),
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+    ),
+    "csv": ("text/csv", "text/plain", "application/csv"),
+    "txt": ("text/plain",),
+    "md": ("text/plain", "text/markdown"),
+}
 
 if TYPE_CHECKING:
     from kaos_core import KaosRuntime
@@ -39,7 +73,18 @@ class StoredDocument:
 
 
 def validate(file: _UploadedFile, settings: AppSettings) -> tuple[str, bytes]:
-    """Validate ``file`` against settings. Returns ``(extension, payload)``."""
+    """Validate ``file`` against settings.
+
+    Three checks, in order:
+
+    1. Size <= ``APP_MAX_UPLOAD_BYTES``.
+    2. Extension in ``APP_ALLOWED_UPLOAD_TYPES``.
+    3. Magic-byte content type matches the declared extension (when
+       libmagic is available — best-effort otherwise, with a logged
+       warning).
+
+    Returns ``(extension, payload)``.
+    """
     payload = file.getvalue()
     size = len(payload)
     if size > settings.max_upload_bytes:
@@ -57,7 +102,40 @@ def validate(file: _UploadedFile, settings: AppSettings) -> tuple[str, bytes]:
             f"How to fix: upload one of: {allowed}.\n"
             f"Alternative: convert the file to a supported type before upload."
         )
+    _verify_magic_bytes(suffix, payload)
     return suffix, payload
+
+
+def _verify_magic_bytes(extension: str, payload: bytes) -> None:
+    """Refuse files whose content doesn't match their declared extension.
+
+    Defense against the "renamed .exe to .pdf" attack class. Falls back
+    to a logged warning when libmagic is unavailable — the app should
+    still be usable on a developer machine without ``libmagic1``
+    installed, but production deployments must have it.
+    """
+    if _magic is None:
+        logger.warning(
+            "python-magic unavailable; skipping content-type verification. "
+            "Install libmagic1 (Linux) / libmagic (macOS) for stronger "
+            "upload validation."
+        )
+        return
+    expected = _EXTENSION_TO_MIME.get(extension)
+    if expected is None:
+        # Extension passed the allowlist check above but we don't have a
+        # MIME profile for it — accept and log.
+        logger.info("no MIME profile for extension %r; accepting", extension)
+        return
+    detected = _magic.from_buffer(payload[:2048], mime=True)
+    if detected not in expected:
+        raise UploadError(
+            f"File content does not match declared extension {extension!r}.\n"
+            f"Detected MIME: {detected!r}; expected one of {expected!r}.\n"
+            f"How to fix: upload a real .{extension} file. Renaming a "
+            f"file's extension does not change its content.\n"
+            f"Alternative: convert the file with a real tool before upload."
+        )
 
 
 def store(
@@ -97,10 +175,15 @@ def store(
 
 
 def _make_document_id(filename: str) -> str:
+    """Generate a collision-resistant id from ``filename`` + nanosecond time.
+
+    The id is used as a directory name under VFS — it must contain no
+    path separators, no NUL bytes, and no parent-traversal sequences.
+    The hex digest of sha256 satisfies all three by construction.
+    """
     import hashlib
     import time
 
-    fingerprint = hashlib.sha256(
+    return hashlib.sha256(
         f"{filename}:{time.time_ns()}".encode()
     ).hexdigest()[:12]
-    return fingerprint

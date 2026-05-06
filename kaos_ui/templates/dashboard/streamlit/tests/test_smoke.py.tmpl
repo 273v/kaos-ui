@@ -1,7 +1,10 @@
-"""Smoke test — boot the app + every page in headless mode.
+"""Smoke test — boot every page in headless mode.
 
-Uses Streamlit's first-party AppTest harness. ``test`` env disables the
-auth gate so pages render immediately.
+We test pages individually because Streamlit's AppTest does not yet
+fully render ``st.navigation``-routed pages when pointed at ``app.py``
+(see https://github.com/streamlit/streamlit/issues/9446). Pointing
+``AppTest.from_file`` directly at each page module is the supported
+way to assert "this page renders without exception."
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ PAGE_PATHS = (
 
 @pytest.mark.smoke
 def test_app_root_boots() -> None:
+    """``app.py`` boots and registers navigation. Page bodies are not
+    rendered through this entrypoint per the AppTest gap noted above."""
     at = AppTest.from_file("app.py", default_timeout=30).run()
     assert at.exception == [], f"app.py raised: {at.exception}"
 

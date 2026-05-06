@@ -19,10 +19,16 @@ from pathlib import Path
 from typing import Literal
 
 from kaos_core.config import ModuleSettings
-from pydantic import Field, SecretStr, model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import SettingsConfigDict
 
 from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+
+
+_WEAK_TOKEN_LITERALS: frozenset[str] = frozenset(
+    {"changeme", "password", "secret", "admin", "dev", "test", "default", ""}
+)
+_MIN_TOKEN_LENGTH_PROD = 32
 
 
 class AppSettings(ModuleSettings):
@@ -30,6 +36,7 @@ class AppSettings(ModuleSettings):
 
     auth_token: SecretStr | None = None
     env: Literal["development", "production", "test"] = "development"
+    debug: bool = False
     log_level: str = "INFO"
 
     vfs_path: Path = Path(".kaos-vfs")
@@ -58,24 +65,69 @@ class AppSettings(ModuleSettings):
     )
 
     @model_validator(mode="after")
-    def _refuse_to_start_without_auth_token(self) -> AppSettings:
-        if self.env != "test" and self.auth_token is None:
-            msg = (
+    def _validate_security_invariants(self) -> AppSettings:
+        """Refuse to start with insecure configuration.
+
+        Rules:
+        - In any non-test env, APP_AUTH_TOKEN must be set.
+        - In production, APP_DEBUG must be False.
+        - In production, the token must be at least 32 chars and must not
+          be one of a small set of well-known weak literals.
+
+        Failures are explicit (with how-to-fix) so a vibe coder reading
+        the error message can act on it.
+        """
+        if self.env == "test":
+            return self
+
+        if self.auth_token is None:
+            raise SettingsError(
                 "APP_AUTH_TOKEN is not set.\n"
                 "How to fix: cp .env.example .env, then edit .env and set "
                 "APP_AUTH_TOKEN to a long random string "
                 "(head -c 32 /dev/urandom | base64).\n"
                 "Alternative: set APP_ENV=test for unit tests."
             )
-            raise SettingsError(msg)
+
+        if self.env == "production":
+            if self.debug:
+                raise SettingsError(
+                    "APP_DEBUG=True is not allowed when APP_ENV=production.\n"
+                    "How to fix: set APP_DEBUG=false in .env.\n"
+                    "Alternative: set APP_ENV=development if you want debug behavior."
+                )
+            secret = self.auth_token.get_secret_value()
+            if secret.lower() in _WEAK_TOKEN_LITERALS:
+                raise SettingsError(
+                    "APP_AUTH_TOKEN is set to a well-known weak literal.\n"
+                    "How to fix: replace it with a long random string "
+                    "(head -c 32 /dev/urandom | base64).\n"
+                    "Alternative: this check is only enforced when "
+                    "APP_ENV=production."
+                )
+            if len(secret) < _MIN_TOKEN_LENGTH_PROD:
+                raise SettingsError(
+                    f"APP_AUTH_TOKEN is too short for production "
+                    f"(< {_MIN_TOKEN_LENGTH_PROD} chars).\n"
+                    f"How to fix: regenerate it: head -c 32 /dev/urandom | base64.\n"
+                    f"Alternative: this check is only enforced when "
+                    f"APP_ENV=production."
+                )
         return self
 
     def model_dump_redacted(self) -> dict[str, object]:
-        """Dump settings with secrets redacted — for the Settings page."""
+        """Dump settings with secrets redacted — for the Settings page.
+
+        Walks every field and redacts any ``SecretStr`` value. The fixed
+        ``auth_token``-only behavior was a bug waiting to happen — adding a
+        new SecretStr field would silently leak it.
+        """
         data = self.model_dump()
-        if self.auth_token is not None:
-            secret = self.auth_token.get_secret_value()
-            data["auth_token"] = (
-                "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
-            )
+        for name, _ in type(self).model_fields.items():
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                secret = value.get_secret_value()
+                data[name] = (
+                    "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
+                )
         return data

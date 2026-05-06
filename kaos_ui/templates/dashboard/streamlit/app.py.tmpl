@@ -14,8 +14,14 @@ from {{KAOS_PYTHON_MODULE}}.runtime import build_runtime
 from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
 
 
-@st.cache_resource
+@st.cache_resource(ttl=3600, max_entries=1)
 def _runtime():
+    """The KaosRuntime singleton.
+
+    ``ttl`` and ``max_entries`` are explicit per Streamlit's cache
+    guidance — unbounded ``@st.cache_resource`` is the most common cause
+    of OOM in Streamlit deployments.
+    """
     return build_runtime()
 
 

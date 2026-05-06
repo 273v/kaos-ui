@@ -1,0 +1,33 @@
+# kaos-ui repo-level pre-commit hooks.
+#
+# Templates under kaos_ui/templates/ ship as text. Their .py.tmpl files
+# are NOT linted as Python here (the {{KAOS_*}} placeholders make them
+# invalid syntax until rendered). Instead we exercise them in
+# tests/integration/test_template_compiles.py which renders + AST-parses
+# every emitted .py.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+        exclude: ^kaos_ui/templates/
+      - id: ruff-format
+        exclude: ^kaos_ui/templates/
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty type check
+        language: system
+        entry: uv run ty check
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+        exclude: ^kaos_ui/templates/

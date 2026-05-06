@@ -1,16 +1,44 @@
+# Hardened defaults. See kaos-ui/docs/templates/streamlit.md for rationale.
+# Streamlit cannot inject HTTP security headers from app code — terminate
+# behind a reverse proxy (Caddy/Nginx) and set CSP / HSTS / X-Frame-Options
+# / X-Content-Type-Options there. The compose file ships a Caddy example.
+
 [server]
 runOnSave = false
 fileWatcherType = "none"
+
+# Server-side max upload (mirrors APP_MAX_UPLOAD_BYTES default).
+# Set this to match your APP_MAX_UPLOAD_BYTES if you change the env var.
 maxUploadSize = 25
-enableCORS = false
+
+# CORS + XSRF: keep both enabled. Setting both False is rejected by
+# Streamlit; setting one False without the other re-enables both
+# silently in newer versions.
+enableCORS = true
+enableXsrfProtection = true
+
 headless = true
 
 [browser]
 gatherUsageStats = false
+# In production set this to your public origin so OAuth-style flows work.
+# serverAddress = "dashboard.example.com"
 
 [theme]
 base = "light"
 
 [client]
 toolbarMode = "minimal"
-showErrorDetails = false
+# Default is "full" which leaks tracebacks (and frequently secrets in
+# tracebacks) to the browser. Force "none" for production safety; flip
+# to "stacktrace" or "type" only while debugging locally.
+showErrorDetails = "none"
+
+[runner]
+# Bare expressions in scripts are NOT auto-rendered. This prevents
+# the most common vibe-coder leak: pasting a debug variable that then
+# silently appears in the UI.
+magicEnabled = false
+# Keep the script execution model clean; do not rerun on widget value
+# changes that the page didn't request.
+fastReruns = true
