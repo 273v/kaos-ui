@@ -95,6 +95,24 @@ _REGISTRY: dict[str, TemplateManifest] = {
         ),
         tags=("tui", "terminal", "agentic"),
     ),
+    "module": TemplateManifest(
+        kind="module",
+        description="KAOS module package (tools, CLI, serve, tests)",
+        stack="Python 3.14 + KAOS module conventions",
+        template_dir=_TEMPLATES_ROOT / "module",
+        post_install=("uv sync",),
+        next_steps=("cd {name}", "uv sync", "uv run pytest tests/ -v"),
+        tags=("module", "package"),
+    ),
+    "workflow": TemplateManifest(
+        kind="workflow",
+        description="Single-file Python script with KAOS imports",
+        stack="Python 3.14",
+        template_dir=_TEMPLATES_ROOT / "workflow",
+        post_install=("uv sync",),
+        next_steps=("cd {name}", "uv run python main.py"),
+        tags=("workflow", "script"),
+    ),
     # Phase 1 placeholders — directories exist but templates land in the next phase.
     # Listing them here as "coming-soon" would mislead the CLI; entries are added
     # at the end of Phase 1 when the templates ship.
@@ -123,9 +141,9 @@ def get_manifest(kind: str) -> TemplateManifest:
 def register_template(manifest: TemplateManifest) -> None:
     """Register a template manifest with the global registry.
 
-    Used by sibling packages (e.g. ``kaos-mcp`` for ``module`` /
-    ``workflow``) to expose non-UI scaffolds through the same CLI and
-    MCP surface without copying templates into kaos-ui.
+    Extension point for downstream packages that want to expose their
+    own scaffolds through the same CLI and MCP surface as kaos-ui's
+    built-in kinds.
     """
     _REGISTRY[manifest.kind] = manifest
     TEMPLATES[manifest.kind] = manifest.description

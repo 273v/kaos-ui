@@ -1,0 +1,23 @@
+"""{{KAOS_PROJECT_NAME}} — KAOS module."""
+
+from __future__ import annotations
+
+from kaos_core import KaosRuntime
+
+from {{KAOS_PYTHON_MODULE}}._version import __version__
+
+__all__ = ["__version__", "register_{{KAOS_PYTHON_MODULE}}_tools"]
+
+
+def register_{{KAOS_PYTHON_MODULE}}_tools(runtime: KaosRuntime) -> int:
+    """Register all tools with a ``KaosRuntime``.
+
+    Returns the number of tools registered so callers (e.g. the
+    ``serve.py`` entry point) can log a startup line.
+    """
+    from {{KAOS_PYTHON_MODULE}}.tools import get_tools
+
+    tools = get_tools()
+    for tool in tools:
+        runtime.tools.register_tool(tool)
+    return len(tools)

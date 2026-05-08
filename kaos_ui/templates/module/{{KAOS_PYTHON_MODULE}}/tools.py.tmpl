@@ -1,0 +1,66 @@
+"""MCP tools for {{KAOS_PROJECT_NAME}}."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from kaos_core import (
+    KaosContext,
+    KaosTool,
+    ParameterSchema,
+    TextContent,
+    ToolAnnotations,
+    ToolCapability,
+    ToolCategory,
+    ToolMetadata,
+    ToolResult,
+)
+
+from {{KAOS_PYTHON_MODULE}}._version import __version__
+
+_MODULE_NAME = "{{KAOS_NPM_SLUG}}"
+
+
+class ExampleTool(KaosTool):
+    """Example read-only tool — replace with your implementation."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name=f"kaos-{_MODULE_NAME}-example",
+            description="Echo a message back. Replace with your actual tool.",
+            category=ToolCategory.UTILITY,
+            capability=ToolCapability.TRANSFORM,
+            input_schema=[
+                ParameterSchema(
+                    name="message",
+                    type="string",
+                    description="Message to echo.",
+                ),
+            ],
+            output_schema={"type": "object"},
+            module_name=_MODULE_NAME,
+            version=__version__,
+            annotations=ToolAnnotations(
+                readOnlyHint=True,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        )
+
+    async def execute(
+        self,
+        inputs: dict[str, Any],
+        context: KaosContext | None = None,
+    ) -> ToolResult:
+        del context
+        message = str(inputs.get("message", ""))
+        return ToolResult(
+            content=[TextContent(text=message)],
+            structuredContent={"echo": message},
+        )
+
+
+def get_tools() -> list[KaosTool]:
+    """Return all tools provided by this module."""
+    return [ExampleTool()]

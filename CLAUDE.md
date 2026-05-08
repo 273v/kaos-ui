@@ -22,13 +22,13 @@ Skip 11 (`retrieval-and-evaluation`), 12 (`benchmarking`), and 13 (`kaos-agent-r
 ## What this package owns
 
 - Templates for every KAOS user-facing form factor (TUI, desktop, web SPA, web API, dashboard).
+- The non-UI `module/` and `workflow/` scaffolds — package skeletons and single-file scripts. They live alongside the UI kinds because kaos-ui owns the scaffolder and CLI surface; splitting them out would re-introduce the same upward-dependency edge that motivated their move out of kaos-mcp.
 - The CLI (`kaos-ui`) that scaffolds, installs, and health-checks them.
 - The MCP tools (`kaos-ui-list-templates`, `kaos-ui-template-info`, `kaos-ui-scaffold`, `kaos-ui-doctor`) that expose the same lifecycle to agents.
 - Shared Docker/Caddy fragments under `kaos_ui/docker/shared/` reused across web templates.
 
 ## What this package does NOT own
 
-- `module/` and `workflow/` templates — they are not UIs. They currently live in `kaos-mcp/kaos_mcp/management/templates/` and stay there until they get their own home (see PLAN §10 Open Questions).
 - Cloud-deploy automation — recipes can sit in template `Makefile`s but `kaos deploy` is out of scope.
 - A community template registry — Phase 4 may revisit.
 

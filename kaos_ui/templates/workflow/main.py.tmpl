@@ -1,0 +1,39 @@
+"""{{KAOS_PROJECT_NAME}} — KAOS workflow script.
+
+Usage:
+    uv run python main.py <file.pdf>
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def main() -> None:
+    """Run the workflow."""
+    if len(sys.argv) < 2:
+        print(f"Usage: python {sys.argv[0]} <file.pdf>")
+        sys.exit(1)
+
+    input_path = Path(sys.argv[1])
+    if not input_path.exists():
+        print(f"File not found: {input_path}")
+        sys.exit(1)
+
+    # Extract PDF
+    from kaos_pdf.extract import extract_pdf
+
+    doc = extract_pdf(input_path)
+
+    # Print summary
+    print(f"File: {input_path.name}")
+    print(f"Blocks: {len(doc.blocks)}")
+    print()
+
+    # Print markdown
+    print(doc.to_markdown())
+
+
+if __name__ == "__main__":
+    main()

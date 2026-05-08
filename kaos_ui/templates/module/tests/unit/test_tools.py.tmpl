@@ -1,0 +1,46 @@
+"""Tests for {{KAOS_PROJECT_NAME}} tools."""
+
+from __future__ import annotations
+
+import pytest
+
+from kaos_core import KaosRuntime
+
+from {{KAOS_PYTHON_MODULE}} import register_{{KAOS_PYTHON_MODULE}}_tools
+from {{KAOS_PYTHON_MODULE}}.tools import ExampleTool, get_tools
+
+
+def test_get_tools_returns_list() -> None:
+    """``get_tools`` should return a non-empty list."""
+    tools = get_tools()
+    assert len(tools) > 0
+
+
+def test_example_tool_metadata_complete() -> None:
+    """Every tool must declare ``ToolAnnotations`` (never ``None``)."""
+    meta = ExampleTool().metadata
+    assert meta.annotations is not None
+    assert meta.annotations.readOnlyHint is True
+
+
+def test_example_tool_name_follows_convention() -> None:
+    """Tool names must follow ``kaos-{module}-{action}`` (≥ 3 segments)."""
+    name = ExampleTool().metadata.name
+    assert name.startswith("kaos-")
+    assert len(name.split("-")) >= 3
+
+
+@pytest.mark.asyncio
+async def test_example_tool_execute() -> None:
+    """``ExampleTool.execute`` should round-trip its input message."""
+    tool = ExampleTool()
+    result = await tool.execute({"message": "hello"})
+    assert result.structuredContent == {"echo": "hello"}
+
+
+def test_register_with_runtime() -> None:
+    """``register_*_tools`` should hand tools to ``runtime.tools``."""
+    runtime = KaosRuntime()
+    n = register_{{KAOS_PYTHON_MODULE}}_tools(runtime)
+    assert n == len(get_tools())
+    assert n > 0
