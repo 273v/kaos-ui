@@ -1,10 +1,12 @@
 {
   "name": "{{KAOS_PROJECT_SLUG}}",
   "private": true,
-  "packageManager": "pnpm@10.10.0",
+  "packageManager": "pnpm@11.1.0",
   "scripts": {
     "dev": "pnpm -r dev",
     "build": "pnpm -r build",
+    "install:ci": "pnpm install --frozen-lockfile",
+    "verify:deps": "pnpm audit signatures",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",

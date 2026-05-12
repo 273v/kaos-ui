@@ -37,6 +37,16 @@ A fullstack web app scaffolded by `kaos-ui new web:spa`:
 | Frontend component | `apps/spa/src/components/<Name>.tsx` (app-specific) or `packages/ui/src/components/...` (shared) | |
 | New dep | backend: `cd backend && uv add ...`. frontend: `pnpm add ...` | |
 
+Frontend dependency rules:
+
+- Keep root `packageManager` pinned to `pnpm@11.1.0` or newer.
+- Do not weaken `pnpm-workspace.yaml` supply-chain settings.
+- Do not set `dangerouslyAllowAllBuilds: true`.
+- Add dependency build scripts only to `allowBuilds` after reviewing why
+  they need install-time execution.
+- Commit `pnpm-lock.yaml` after the first install; CI should use
+  `make install-ci && make verify-deps`.
+
 ## How to add a backend route
 
 ```python
@@ -124,6 +134,7 @@ the copied source directly — there is no library to upgrade out of band.
 - [ ] `Caddyfile`: replace `localhost` with the real domain
 - [ ] Compose binds `127.0.0.1:8443:443` for proxy-fronted deploys
       OR `0.0.0.0:443` if Caddy is the public-facing TLS terminator
+- [ ] `pnpm-lock.yaml` committed; `make install-ci && make verify-deps` pass
 - [ ] `make doctor` exits 0; `make test` passes
 - [ ] gitleaks + trivy scans clean
 

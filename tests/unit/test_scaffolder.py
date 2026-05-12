@@ -14,6 +14,8 @@ import pytest
 from kaos_ui.exceptions import TargetExistsError, UnknownTemplateError
 from kaos_ui.scaffolder import _slugify, scaffold
 
+TEMPLATE_ROOT = Path(__file__).resolve().parents[2] / "kaos_ui" / "templates" / "web" / "spa"
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
@@ -59,3 +61,26 @@ def test_target_must_be_empty(tmp_project_root: Path) -> None:
     (tmp_project_root / "preexisting.txt").write_text("hi", encoding="utf-8")
     with pytest.raises(TargetExistsError):
         scaffold("dashboard:streamlit", "demo", target_dir=tmp_project_root)
+
+
+@pytest.mark.unit
+def test_web_spa_template_has_hardened_pnpm_defaults() -> None:
+    package_json = (TEMPLATE_ROOT / "package.json").read_text(encoding="utf-8")
+    workspace = (TEMPLATE_ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    makefile = (TEMPLATE_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert '"packageManager": "pnpm@11.1.0"' in package_json
+    assert "minimumReleaseAge: 4320" in workspace
+    assert "minimumReleaseAgeStrict: true" in workspace
+    assert "minimumReleaseAgeIgnoreMissingTime: false" in workspace
+    assert "trustPolicy: no-downgrade" in workspace
+    assert "blockExoticSubdeps: true" in workspace
+    assert "strictDepBuilds: true" in workspace
+    assert "dangerouslyAllowAllBuilds: false" in workspace
+    assert 'savePrefix: ""' in workspace
+    assert "allowBuilds:" in workspace
+    assert "  esbuild: true" in workspace
+    assert "install-ci:" in makefile
+    assert "pnpm install --frozen-lockfile" in makefile
+    assert "verify-deps:" in makefile
+    assert "pnpm audit signatures" in makefile

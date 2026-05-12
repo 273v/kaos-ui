@@ -161,6 +161,9 @@ def test_dry_run_lists_expected_files(tmp_path: Path) -> None:
         "backend/Dockerfile",
         "backend/pyproject.toml",
         ".env.example",
+        "package.json",
+        "pnpm-workspace.yaml",
+        "Makefile",
         "Caddyfile",
         "docker-compose.yml",
     }

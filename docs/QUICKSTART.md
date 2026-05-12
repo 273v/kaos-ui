@@ -8,7 +8,7 @@ This guide gets you from "I have an idea" to "I have a running app" in under 5 m
 kaos doctor
 ```
 
-This should report Python 3.14, Node 24, pnpm 9 (for web kinds), and at least one LLM API key configured. If anything is missing, run:
+This should report Python 3.14, Node 24, pnpm 11.1+ (for web kinds), and at least one LLM API key configured. If anything is missing, run:
 
 ```bash
 kaos setup env
@@ -39,6 +39,12 @@ make install         # uv sync + pnpm install (or your kind's equivalent)
 make doctor          # health-check the scaffold; should exit 0 immediately
 make up              # boot the app
 ```
+
+For `web:spa`, `pnpm install` creates the first lockfile under hardened
+workspace settings: pnpm 11.1 pinned through Corepack, 72-hour release
+cooldown, blocked exotic transitive specs, and reviewed dependency
+build scripts only. Commit `pnpm-lock.yaml` after reviewing it; CI
+should use `make install-ci && make verify-deps`.
 
 ## Through an agent
 

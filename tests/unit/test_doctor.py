@@ -6,7 +6,24 @@ from pathlib import Path
 
 import pytest
 
-from kaos_ui.doctor import run_doctor
+from kaos_ui.doctor import MIN_HARDENED_PNPM_VERSION, run_doctor
+
+_HARDENED_WORKSPACE = """\
+packages:
+  - "packages/*"
+  - "apps/*"
+
+minimumReleaseAge: 4320
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+savePrefix: ""
+allowBuilds:
+  esbuild: true
+"""
 
 
 @pytest.mark.unit
@@ -64,3 +81,63 @@ def test_findings_have_agent_friendly_shape(tmp_project_root: Path) -> None:
         # Every finding has what + how_to_fix; alternative is optional.
         assert finding.what
         assert finding.how_to_fix
+
+
+@pytest.mark.unit
+def test_spa_doctor_accepts_hardened_pnpm_config(tmp_project_root: Path) -> None:
+    (tmp_project_root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (tmp_project_root / "package.json").write_text(
+        f'{{"private": true, "packageManager": "pnpm@{MIN_HARDENED_PNPM_VERSION}"}}\n',
+        encoding="utf-8",
+    )
+    (tmp_project_root / "pnpm-workspace.yaml").write_text(_HARDENED_WORKSPACE, encoding="utf-8")
+    (tmp_project_root / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+
+    report = run_doctor(tmp_project_root)
+
+    assert report.ok
+    assert not any("packageManager" in f.what for f in report.findings)
+    assert not any("pnpm-workspace.yaml" in f.what for f in report.findings)
+    assert not any("pnpm-lock.yaml is missing" in f.what for f in report.findings)
+
+
+@pytest.mark.unit
+def test_spa_doctor_rejects_weak_pnpm_config(tmp_project_root: Path) -> None:
+    (tmp_project_root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (tmp_project_root / "package.json").write_text(
+        '{"private": true, "packageManager": "pnpm@10.10.0"}\n',
+        encoding="utf-8",
+    )
+    (tmp_project_root / "pnpm-workspace.yaml").write_text(
+        'packages:\n  - "apps/*"\ndangerouslyAllowAllBuilds: true\n',
+        encoding="utf-8",
+    )
+
+    report = run_doctor(tmp_project_root)
+
+    assert not report.ok
+    assert any("packageManager pins pnpm" in f.what for f in report.findings)
+    assert any("dangerouslyAllowAllBuilds" in f.what for f in report.findings)
+    assert any("pnpm-lock.yaml is missing" in f.what for f in report.findings)
+
+
+@pytest.mark.unit
+def test_spa_doctor_rejects_suspicious_npm_worm_artifacts(tmp_project_root: Path) -> None:
+    (tmp_project_root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (tmp_project_root / "package.json").write_text(
+        f'{{"private": true, "packageManager": "pnpm@{MIN_HARDENED_PNPM_VERSION}"}}\n',
+        encoding="utf-8",
+    )
+    (tmp_project_root / "pnpm-workspace.yaml").write_text(_HARDENED_WORKSPACE, encoding="utf-8")
+    (tmp_project_root / "pnpm-lock.yaml").write_text(
+        "packages:\n  /@tanstack/setup@1.0.0: {}\n",
+        encoding="utf-8",
+    )
+    (tmp_project_root / ".claude").mkdir()
+    (tmp_project_root / ".claude" / "setup.mjs").write_text("console.log('x')\n", encoding="utf-8")
+
+    report = run_doctor(tmp_project_root)
+
+    assert not report.ok
+    assert any("Suspicious npm worm setup artifact" in f.what for f in report.findings)
+    assert any("@tanstack/setup" in f.what for f in report.findings)

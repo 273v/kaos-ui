@@ -54,7 +54,7 @@ It does **not** depend on:
 ## 7. Constraints
 
 - Python 3.13+, targeting 3.14 default (matches platform).
-- Node 24 / pnpm 9 for web kinds (matches platform).
+- Node 24 / pnpm 11.1+ for web kinds (matches platform supply-chain baseline).
 - Rust 1.80+ for Tauri (matches `kaos-nlp-core`).
 - All templates must build offline-friendly: no required network calls beyond the standard package install.
 - All CLIs follow `docs/guides/cli-standard.md`. All MCP tools follow `docs/guides/tool-design.md`.

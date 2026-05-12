@@ -18,6 +18,12 @@ make dev               # backend :8000 + vite :5173
 The Vite dev server proxies `/v1/*` to the backend so cookies stay
 first-party in development. Caddy handles the same job in production.
 
+The frontend is pinned to `pnpm@11.1.0` and the workspace delays new
+registry releases for 72 hours, blocks exotic transitive dependency
+specifiers, and only allows reviewed dependency build scripts. After the
+first `pnpm install`, commit `pnpm-lock.yaml`. In CI, use
+`make install-ci && make verify-deps`.
+
 ## Routes
 
 ### Backend (`/v1/...`)
@@ -59,6 +65,9 @@ see `CLAUDE.md` § How to add a frontend route.
   state-changing methods (belt-and-suspenders CSRF).
 - **Caddy security headers**: CSP, X-Content-Type-Options, Referrer-
   Policy, Permissions-Policy, X-Frame-Options.
+- **Node dependency hardening**: pinned pnpm 11.1, 72-hour dependency
+  cooldown, exotic transitive dependency blocking, strict build-script
+  allowlist, lockfile expected after first install.
 - **Multi-stage non-root Dockerfile** with libmagic + urllib healthcheck.
 - **Compose binds `127.0.0.1`** by default; production needs explicit
   override + Caddy in front.

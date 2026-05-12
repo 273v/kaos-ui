@@ -20,6 +20,14 @@ Login page → bearer token from `.env` → SPA can call `/v1/*`. The
 backend exposes the standard KAOS surface (chat, documents, search,
 upload). The frontend renders it.
 
+The frontend workspace pins `pnpm@11.1.0` and ships hardened pnpm
+settings: 72-hour dependency release cooldown, exotic transitive
+dependency blocking, strict dependency build scripts, a reviewed
+`allowBuilds` list, and exact-version saves. The template does not ship
+a static `pnpm-lock.yaml` because package names are templated; the first
+`pnpm install` creates the project-specific lockfile, and `kaos-ui
+doctor` warns until it is committed.
+
 ## Scaffolded layout
 
 ```
@@ -323,12 +331,18 @@ on prod via the `Caddyfile.prod` overlay.
 ## Makefile
 
 ```make
-.PHONY: install dev test up down doctor build typecheck lint format db:revision
+	.PHONY: install install-ci verify-deps dev test up down doctor build typecheck lint format db:revision
 
-install:
-	uv sync --directory backend
-	pnpm install
-	cd backend && uv run pre-commit install
+	install:
+		uv sync --directory backend
+		pnpm install
+		cd backend && uv run pre-commit install
+
+	install-ci:
+		pnpm install --frozen-lockfile
+
+	verify-deps:
+		pnpm audit signatures
 
 dev:
 	# Run both in parallel; trap Ctrl+C
@@ -415,7 +429,10 @@ def test_scaffold_install_build(tmp_path):
 |---|---|---|
 | `APP_AUTH_TOKEN` set in `.env` | error | Set it; `head -c 32 /dev/urandom \| base64` is a fine source |
 | `APP_CORS_ORIGINS` not `*` in production | error | Set explicit list in `.env` |
-| `pnpm` available | error | Install pnpm or run `make install` which calls it |
+| `packageManager` pins pnpm 11.1+ | error | Restore the root package.json pin |
+| Hardened `pnpm-workspace.yaml` settings present | error | Restore cooldown, strict build-script, exotic-subdep, trust-policy, and exact-save settings |
+| `pnpm-lock.yaml` committed after first install | warning | Run `pnpm install`, review dependency prompts, commit lockfile |
+| `pnpm` available and 11.1+ | warning | Run `kaos setup env` |
 | Caddy port 443 free (when `make up` running) | warning | Pick a different `APP_PUBLIC_PORT` |
 | Frontend OpenAPI client up to date with backend | warning | Run `pnpm --filter spa codegen` |
 

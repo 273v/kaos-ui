@@ -39,6 +39,7 @@ than silently degrading.
 | CWE-117 log injection: strip CR/LF in JSON formatter | `{slug}/logging_setup.py:_strip_crlf` | A09 |
 | `.gitignore` covers `.env` + `secrets.toml` + build artifacts | `.gitignore` | A05 |
 | Pre-commit gitleaks scan on every commit | `.pre-commit-config.yaml` | Software Supply Chain |
+| pnpm 11.1+ pinned through `packageManager`; 72-hour registry cooldown; strict dependency build-script allowlist; exotic transitive dependency specs blocked | `package.json`, `pnpm-workspace.yaml`, `kaos-ui doctor` | Software Supply Chain |
 | Multi-stage Dockerfile, non-root `uid=1000`, slim base, `HEALTHCHECK` | `Dockerfile` | A05 |
 | Compose binds `127.0.0.1` only by default | `docker-compose.yml` | A05 |
 | Bounded `@st.cache_resource(ttl=3600, max_entries=1)` to prevent OOM | `app.py` | A05 |
@@ -87,6 +88,25 @@ Future:
 
 - [ ] `APP_ENV=production` + `--server.address 0.0.0.0` without proxy
 - [ ] Detect committed `.env` (presence in `git ls-files`) and refuse
+
+## Node dependency supply-chain
+
+Generated pnpm workspaces use a conservative default posture:
+
+- `packageManager` pins `pnpm@11.1.0` so Corepack selects a toolchain
+  with dependency cooldowns, build-script allowlists, exotic-subdep
+  blocking, trust policy, and `pnpm audit signatures`.
+- `pnpm-workspace.yaml` sets `minimumReleaseAge: 4320` (72 hours) with
+  strict missing-time handling, `blockExoticSubdeps: true`,
+  `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`,
+  `trustPolicy: no-downgrade`, and `savePrefix: ""`.
+- `allowBuilds` is explicit and small. New entries require review
+  because install-time lifecycle scripts are a supply-chain boundary.
+- The SPA template does not ship a static `pnpm-lock.yaml` because
+  workspace package names are templated. `kaos-ui doctor` warns until
+  the generated project runs `pnpm install` and commits its lockfile.
+- CI should run `pnpm install --frozen-lockfile` and
+  `pnpm audit signatures` after the first lockfile is committed.
 
 ## Required scanning (per kaos-ui release)
 

@@ -1,4 +1,4 @@
-.PHONY: install dev test up down doctor build typecheck lint format codegen clean help
+.PHONY: install install-ci verify-deps dev test up down doctor build typecheck lint format codegen clean help
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -6,6 +6,12 @@ help:  ## Show this help
 install:  ## Install backend (uv) + frontend (pnpm) deps
 	cd backend && uv sync && uv run pre-commit install
 	pnpm install
+
+install-ci:  ## Install frontend deps from committed lockfile
+	pnpm install --frozen-lockfile
+
+verify-deps:  ## Verify npm package signatures/provenance where available
+	pnpm audit signatures
 
 dev:  ## Run backend (uvicorn) + frontend (vite) in parallel
 	@trap 'kill 0' INT; \
