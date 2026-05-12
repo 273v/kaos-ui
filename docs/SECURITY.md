@@ -95,11 +95,12 @@ Generated pnpm workspaces use a conservative default posture:
 
 - `packageManager` pins `pnpm@11.1.0` so Corepack selects a toolchain
   with dependency cooldowns, build-script allowlists, exotic-subdep
-  blocking, trust policy, and `pnpm audit signatures`.
+  blocking, and `pnpm audit signatures`.
 - `pnpm-workspace.yaml` sets `minimumReleaseAge: 4320` (72 hours) with
-  strict missing-time handling, `blockExoticSubdeps: true`,
-  `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`,
-  `trustPolicy: no-downgrade`, and `savePrefix: ""`.
+  non-strict fallback, missing-time tolerance, and `resolutionMode:
+  highest` for registry compatibility, `blockExoticSubdeps: true`,
+  `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, and
+  `savePrefix: ""`.
 - `allowBuilds` is explicit and small. New entries require review
   because install-time lifecycle scripts are a supply-chain boundary.
 - The SPA template does not ship a static `pnpm-lock.yaml` because

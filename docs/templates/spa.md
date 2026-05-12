@@ -430,7 +430,7 @@ def test_scaffold_install_build(tmp_path):
 | `APP_AUTH_TOKEN` set in `.env` | error | Set it; `head -c 32 /dev/urandom \| base64` is a fine source |
 | `APP_CORS_ORIGINS` not `*` in production | error | Set explicit list in `.env` |
 | `packageManager` pins pnpm 11.1+ | error | Restore the root package.json pin |
-| Hardened `pnpm-workspace.yaml` settings present | error | Restore cooldown, strict build-script, exotic-subdep, trust-policy, and exact-save settings |
+| Hardened `pnpm-workspace.yaml` settings present | error | Restore cooldown, strict build-script, exotic-subdep, and exact-save settings |
 | `pnpm-lock.yaml` committed after first install | warning | Run `pnpm install`, review dependency prompts, commit lockfile |
 | `pnpm` available and 11.1+ | warning | Run `kaos setup env` |
 | Caddy port 443 free (when `make up` running) | warning | Pick a different `APP_PUBLIC_PORT` |

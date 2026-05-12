@@ -8,9 +8,9 @@ packages:
 # - refuse unreviewed lifecycle build scripts
 # - pin newly added dependencies exactly instead of adding semver ranges
 minimumReleaseAge: 4320
-minimumReleaseAgeStrict: true
-minimumReleaseAgeIgnoreMissingTime: false
-trustPolicy: no-downgrade
+minimumReleaseAgeStrict: false
+minimumReleaseAgeIgnoreMissingTime: true
+resolutionMode: highest
 blockExoticSubdeps: true
 strictDepBuilds: true
 dangerouslyAllowAllBuilds: false

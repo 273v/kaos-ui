@@ -14,9 +14,9 @@ packages:
   - "apps/*"
 
 minimumReleaseAge: 4320
-minimumReleaseAgeStrict: true
-minimumReleaseAgeIgnoreMissingTime: false
-trustPolicy: no-downgrade
+minimumReleaseAgeStrict: false
+minimumReleaseAgeIgnoreMissingTime: true
+resolutionMode: highest
 blockExoticSubdeps: true
 strictDepBuilds: true
 dangerouslyAllowAllBuilds: false

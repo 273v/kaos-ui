@@ -21,9 +21,9 @@ Severity = Literal["info", "warning", "error"]
 MIN_HARDENED_PNPM_VERSION = "11.1.0"
 REQUIRED_PNPM_SETTINGS: dict[str, object] = {
     "minimumReleaseAge": 4320,
-    "minimumReleaseAgeStrict": True,
-    "minimumReleaseAgeIgnoreMissingTime": False,
-    "trustPolicy": "no-downgrade",
+    "minimumReleaseAgeStrict": False,
+    "minimumReleaseAgeIgnoreMissingTime": True,
+    "resolutionMode": "highest",
     "blockExoticSubdeps": True,
     "strictDepBuilds": True,
     "dangerouslyAllowAllBuilds": False,

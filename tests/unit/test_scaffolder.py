@@ -71,9 +71,9 @@ def test_web_spa_template_has_hardened_pnpm_defaults() -> None:
 
     assert '"packageManager": "pnpm@11.1.0"' in package_json
     assert "minimumReleaseAge: 4320" in workspace
-    assert "minimumReleaseAgeStrict: true" in workspace
-    assert "minimumReleaseAgeIgnoreMissingTime: false" in workspace
-    assert "trustPolicy: no-downgrade" in workspace
+    assert "minimumReleaseAgeStrict: false" in workspace
+    assert "minimumReleaseAgeIgnoreMissingTime: true" in workspace
+    assert "resolutionMode: highest" in workspace
     assert "blockExoticSubdeps: true" in workspace
     assert "strictDepBuilds: true" in workspace
     assert "dangerouslyAllowAllBuilds: false" in workspace
