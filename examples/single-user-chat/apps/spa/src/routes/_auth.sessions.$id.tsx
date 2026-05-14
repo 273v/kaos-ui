@@ -2,10 +2,11 @@
 // settings sheet + per-session model override.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Settings } from "lucide-react";
+import { Download, Quote, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
+import { CitationsPanel } from "@/components/chat/CitationsPanel";
 import { Composer } from "@/components/chat/Composer";
 import { DebugPanel } from "@/components/chat/DebugPanel";
 import { DropZone } from "@/components/chat/DropZone";
@@ -14,6 +15,7 @@ import { Message } from "@/components/chat/Message";
 import { TurnStatus } from "@/components/chat/TurnStatus";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
+import { useCitations } from "@/hooks/use-citations";
 import { useDeleteFile, useSessionFiles, useUploadFile } from "@/hooks/use-files";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { useSendMessage } from "@/hooks/use-send-message";
@@ -69,10 +71,12 @@ function ChatDetail() {
   }, [history.data]);
 
   const stream = useSendMessage({ sessionId: id, initialMessages });
+  const citations = useCitations(id, stream.state.messages);
 
   const [input, setInput] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [citationsOpen, setCitationsOpen] = useState(false);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -88,172 +92,203 @@ function ChatDetail() {
 
   const meta = session.data;
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-border px-6 py-3 flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-medium truncate" title={meta?.title}>
-            {meta?.title ?? "Loading…"}
-          </h1>
-          {meta && (
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {meta.model} · {meta.message_count} messages
-              {meta.tools_enabled && " · tools on"}
-            </p>
-          )}
-        </div>
-
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setExportOpen((v) => !v)}
-            disabled={!meta || stream.state.messages.length === 0}
-            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
-            title="Export transcript"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export
-          </button>
-          {exportOpen && meta && (
-            <div
-              role="menu"
-              className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm"
-              onMouseLeave={() => setExportOpen(false)}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  downloadMarkdown({ meta, messages: stream.state.messages });
-                  setExportOpen(false);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-muted"
-              >
-                Download Markdown
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  downloadJSON({ meta, messages: stream.state.messages });
-                  setExportOpen(false);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-muted"
-              >
-                Download JSON
-              </button>
-            </div>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          disabled={!meta}
-          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
-          title="Session settings"
-          aria-label="Session settings"
-        >
-          <Settings className="h-3.5 w-3.5" />
-        </button>
-      </header>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-6 py-8" role="log" aria-live="polite">
-          {stream.state.banners.length > 0 && (
-            <div className="mb-4 space-y-2">
-              {stream.state.banners.map((b) => (
-                <div
-                  key={b.id}
-                  className={
-                    "rounded-md border px-3 py-2 text-sm " +
-                    (b.kind === "error"
-                      ? "border-destructive/40 text-destructive bg-destructive/5"
-                      : "border-border bg-muted text-muted-foreground")
-                  }
-                >
-                  {b.text}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {stream.state.messages.length === 0 && (
-            <div className="text-center pt-16">
-              <h2 className="text-3xl font-serif font-light mb-1">
-                {meta?.title || "New conversation"}
-              </h2>
-              <p className="text-sm text-muted-foreground">Send a message below to get started.</p>
-            </div>
-          )}
-
-          <div className="space-y-1 divide-y divide-border/60">
-            {stream.state.messages.map((m) => (
-              <Message key={m.id} message={m} />
-            ))}
+    <div className="flex h-full">
+      <div className="flex flex-1 min-w-0 flex-col">
+        <header className="border-b border-border px-6 py-3 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-sm font-medium truncate" title={meta?.title}>
+              {meta?.title ?? "Loading…"}
+            </h1>
+            {meta && (
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {meta.model} · {meta.message_count} messages
+                {meta.tools_enabled && " · tools on"}
+              </p>
+            )}
           </div>
 
-          <TurnStatus status={stream.state.status} />
-        </div>
-      </div>
-
-      <DropZone onDrop={onAttach} disabled={!meta} />
-
-      {uploadError && (
-        <div className="mx-auto max-w-3xl px-4">
-          <div
-            role="alert"
-            className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-          >
-            <span>{uploadError}</span>
+          <div className="relative">
             <button
               type="button"
-              onClick={() => setUploadError(null)}
-              className="text-destructive/70 hover:text-destructive text-xs"
-              aria-label="Dismiss upload error"
+              onClick={() => setExportOpen((v) => !v)}
+              disabled={!meta || stream.state.messages.length === 0}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+              title="Export transcript"
             >
-              ✕
+              <Download className="h-3.5 w-3.5" />
+              Export
             </button>
+            {exportOpen && meta && (
+              <div
+                role="menu"
+                className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm"
+                onMouseLeave={() => setExportOpen(false)}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    downloadMarkdown({ meta, messages: stream.state.messages });
+                    setExportOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
+                >
+                  Download Markdown
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    downloadJSON({ meta, messages: stream.state.messages });
+                    setExportOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
+                >
+                  Download JSON
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setCitationsOpen((v) => !v)}
+            disabled={!meta}
+            className={
+              "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 " +
+              (citationsOpen ? "bg-muted text-foreground" : "")
+            }
+            title={citations.total > 0 ? `${citations.total} citations` : "Citations"}
+            aria-label="Toggle citations panel"
+            aria-pressed={citationsOpen}
+          >
+            <Quote className="h-3.5 w-3.5" />
+            {citations.total > 0 && (
+              <span className="tabular-nums text-[10px]">{citations.total}</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            disabled={!meta}
+            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+            title="Session settings"
+            aria-label="Session settings"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-4xl px-6 py-8" role="log" aria-live="polite">
+            {stream.state.banners.length > 0 && (
+              <div className="mb-4 space-y-2">
+                {stream.state.banners.map((b) => (
+                  <div
+                    key={b.id}
+                    className={
+                      "rounded-md border px-3 py-2 text-sm " +
+                      (b.kind === "error"
+                        ? "border-destructive/40 text-destructive bg-destructive/5"
+                        : "border-border bg-muted text-muted-foreground")
+                    }
+                  >
+                    {b.text}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {stream.state.messages.length === 0 && (
+              <div className="text-center pt-16">
+                <h2 className="text-3xl font-serif font-light mb-1">
+                  {meta?.title || "New conversation"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Send a message below to get started.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-1 divide-y divide-border/60">
+              {stream.state.messages.map((m) => (
+                <Message key={m.id} message={m} />
+              ))}
+            </div>
+
+            <TurnStatus status={stream.state.status} />
           </div>
         </div>
-      )}
 
-      {files.data && files.data.files.length > 0 && (
-        <div className="mx-auto max-w-3xl px-4">
-          <FileChips
-            files={files.data.files}
-            onRemove={(name) => removeFile.mutate(name)}
-            removing={
-              removeFile.variables && removeFile.isPending
-                ? new Set([removeFile.variables])
-                : undefined
-            }
-          />
-        </div>
-      )}
+        <DropZone onDrop={onAttach} disabled={!meta} />
 
-      <Composer
-        value={input}
-        onChange={setInput}
-        onSubmit={onSubmit}
-        onStop={stream.abort}
-        pending={stream.state.pending}
-        placeholder={`Message ${meta?.title ?? "this conversation"}…`}
-        onAttach={onAttach}
-        uploading={upload.isPending}
-        leftChips={
-          meta && (
-            <ModelPickerChip
-              value={meta.model}
-              onChange={onModelChange}
-              disabled={stream.state.pending}
+        {uploadError && (
+          <div className="mx-auto max-w-3xl px-4">
+            <div
+              role="alert"
+              className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            >
+              <span>{uploadError}</span>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="text-destructive/70 hover:text-destructive text-xs"
+                aria-label="Dismiss upload error"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {files.data && files.data.files.length > 0 && (
+          <div className="mx-auto max-w-3xl px-4">
+            <FileChips
+              files={files.data.files}
+              onRemove={(name) => removeFile.mutate(name)}
+              removing={
+                removeFile.variables && removeFile.isPending
+                  ? new Set([removeFile.variables])
+                  : undefined
+              }
             />
-          )
-        }
+          </div>
+        )}
+
+        <Composer
+          value={input}
+          onChange={setInput}
+          onSubmit={onSubmit}
+          onStop={stream.abort}
+          pending={stream.state.pending}
+          placeholder={`Message ${meta?.title ?? "this conversation"}…`}
+          onAttach={onAttach}
+          uploading={upload.isPending}
+          leftChips={
+            meta && (
+              <ModelPickerChip
+                value={meta.model}
+                onChange={onModelChange}
+                disabled={stream.state.pending}
+              />
+            )
+          }
+        />
+
+        {meta && (
+          <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
+        )}
+
+        <DebugPanel events={stream.rawEvents} />
+      </div>
+
+      <CitationsPanel
+        open={citationsOpen}
+        onClose={() => setCitationsOpen(false)}
+        byMessage={citations.byMessage}
+        total={citations.total}
+        pending={citations.pending}
+        error={citations.error}
       />
-
-      {meta && (
-        <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
-      )}
-
-      <DebugPanel events={stream.rawEvents} />
     </div>
   );
 }

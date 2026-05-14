@@ -130,6 +130,9 @@ READ_ONLY_TOOL_GLOBS: tuple[str, ...] = (
     "kaos-content-filter*",
     "kaos-content-corpus-*",
     "kaos-content-sentences-*",
+    # kaos-citations: typed Bluebook/financial citation extraction.
+    # extract + validate + doctor are all readOnlyHint=True.
+    "kaos-citations-*",
 )
 
 

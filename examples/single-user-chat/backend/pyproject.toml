@@ -27,6 +27,8 @@ dependencies = [
     "kaos-content[markdown]>=0.1.0a6,<0.2",
     "kaos-pdf>=0.1.0a2,<0.2",
     "kaos-office>=0.1.0a2,<0.2",
+    # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
+    "kaos-citations>=0.1.0a2,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",

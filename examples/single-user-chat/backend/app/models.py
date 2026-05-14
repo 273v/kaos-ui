@@ -166,3 +166,33 @@ class FileListResponse(BaseModel):
 
     session_id: str
     files: list[FileMeta]
+
+
+# ── citation extraction (P2-1) ────────────────────────────────────────
+
+
+_MAX_CITATION_TEXT_LEN = 200_000
+
+
+class ExtractCitationsBody(BaseModel):
+    """POST /v1/chat/sessions/{id}/citations body.
+
+    Used by the SPA to extract typed citations from an assistant turn
+    once it lands. We cap at 200k chars — well above any realistic
+    single-turn reply, and short of pathological abuse.
+    """
+
+    text: str = Field(min_length=1, max_length=_MAX_CITATION_TEXT_LEN)
+
+
+class ExtractCitationsResponse(BaseModel):
+    """POST /v1/chat/sessions/{id}/citations response.
+
+    `citations` is a list of `Citation.model_dump()` shapes. The TS
+    side uses a loose `Record<string, unknown>` since the kind union
+    has 60+ variants — discriminator lives on `kind`.
+    """
+
+    session_id: str
+    count: int
+    citations: list[dict]

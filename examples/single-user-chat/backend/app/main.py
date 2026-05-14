@@ -23,13 +23,15 @@ the next kaos-ui release.
 
 from __future__ import annotations
 
+import contextlib
+
 import httpx
 from kaos_agents.api.server import create_app as create_agent_app
 from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
-from app.routers import chat, files, health, models
+from app.routers import chat, citations, files, health, models
 from app.settings import AppSettings
 
 
@@ -53,6 +55,16 @@ def create_app(settings: AppSettings | None = None):
     # workaround applied idempotently. `tool_names` is the sorted catalog
     # used downstream by the system-prompt augmentation in stream_proxy.
     runtime, tool_names = build_chat_runtime(vfs_path=settings.vfs_path)
+
+    # kaos-citations is not yet known to kaos-ui 0.1.0a1, so we register
+    # it here. Promote into kaos_ui.agents.build_chat_runtime alongside
+    # pdf/office/content when we cut kaos-ui 0.1.0a2 (task #92).
+    with contextlib.suppress(ImportError):
+        from kaos_citations import register_citations_tools
+
+        register_citations_tools(runtime)
+        tool_names = tuple(sorted(runtime.tools.list_tools()))
+
     logger.info("registered %d kaos tools on runtime", len(tool_names))
 
     app = create_agent_app(runtime=runtime)
@@ -87,6 +99,7 @@ def create_app(settings: AppSettings | None = None):
     app.include_router(models.router, prefix="/v1")
     app.include_router(chat.router, prefix="/v1/chat")
     app.include_router(files.router, prefix="/v1/chat")
+    app.include_router(citations.router, prefix="/v1/chat")
 
     return app
 
