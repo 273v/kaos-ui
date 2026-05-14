@@ -70,6 +70,23 @@ class AppSettings(ModuleSettings):
     # Per-turn budget cap (USD). Threaded into MessageRequest.max_cost_usd.
     turn_budget_usd: float = 0.50
 
+    # Model used by the auto-titler + document summarizer Programs.
+    # Haiku is the default — cheapest current-gen Anthropic, fast
+    # enough for the every-10-turn cadence. Override to Sonnet for
+    # richer titles on dense conversations, or to a local model.
+    auto_title_model: str = "anthropic:claude-haiku-4-5"
+    summarizer_model: str = "anthropic:claude-haiku-4-5"
+    # Soft char-cap on the input the summarizer sends to the LLM.
+    # 800k chars ≈ 200k tokens — comfortable inside Haiku 4.5 +
+    # Sonnet 4.6's context windows with headroom for the instruction
+    # template. This is a RUNAWAY-COST GUARD, not a quality knob: a
+    # full SEC filing or deal-room PDF must NOT be silently truncated
+    # to a head-excerpt (the prior 12k-char cap was wrong for legal
+    # use). Raise the cap (or switch to Sonnet, whose context is 1M)
+    # if your documents routinely exceed this. Track logged-truncation
+    # events to know when you've crossed the line.
+    summary_input_cap_chars: int = 800_000
+
     # File-upload pipeline (P1-1).
     # Max accepted bytes per upload — 25 MiB by default. Large enough for
     # a typical SEC filing or a deal-room PDF, small enough to keep the

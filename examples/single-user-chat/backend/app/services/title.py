@@ -29,15 +29,26 @@ from app.persistence.sessions import SessionStore
 logger = app_logger("title_service")
 
 # Re-title every N messages or after this much wall-clock time, whichever
-# fires first. The default model is Haiku — cheap + fast enough that we
-# don't mind running it once per ~10 turns.
+# fires first. Default model lives in AppSettings.auto_title_model
+# (env var APP_AUTO_TITLE_MODEL). We baseline on Haiku at decoration
+# time, then pass the configured value at call time so env overrides
+# land without re-importing this module.
 _REFRESH_EVERY_MESSAGES = 10
 _REFRESH_MAX_AGE = timedelta(hours=24)
 _TITLE_MAX_INPUT_CHARS = 8_000
-_TITLE_MODEL = "anthropic:claude-haiku-4-5"
+_BASELINE_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 
 
-@llm_call(model=_TITLE_MODEL, max_retries=1)
+def _resolve_title_model() -> str:
+    """Read the auto-title model from AppSettings at call time so the
+    `APP_AUTO_TITLE_MODEL` env var takes effect on every refresh.
+    """
+    from app.settings import AppSettings
+
+    return AppSettings().auto_title_model
+
+
+@llm_call(model=_BASELINE_TITLE_MODEL, max_retries=1)
 async def summarize_session_title(conversation: str) -> str:
     """Read the chat conversation below and produce a short, specific
     title for the session.
@@ -131,7 +142,12 @@ async def maybe_retitle_session(
         return
 
     try:
-        title = (await summarize_session_title(conversation=conversation)).strip()
+        title = (
+            await summarize_session_title(
+                conversation=conversation,
+                model=_resolve_title_model(),
+            )
+        ).strip()
     except Exception as exc:
         logger.warning("title summarize failed for %s: %s", session_id, exc)
         return

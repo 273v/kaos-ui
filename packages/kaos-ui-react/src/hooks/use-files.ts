@@ -71,7 +71,11 @@ export function useDeleteFile(sessionId: string | null) {
 export function useBackfillFiles(sessionId: string | null) {
   const transport = useTransport();
   const qc = useQueryClient();
-  return useMutation<BackfillResponse, unknown, { overwrite?: boolean } | undefined>({
+  return useMutation<
+    BackfillResponse,
+    unknown,
+    { overwrite?: boolean; filename?: string } | undefined
+  >({
     mutationFn: (vars) => {
       if (!sessionId) {
         return Promise.reject(new Error("session id is required for backfill"));

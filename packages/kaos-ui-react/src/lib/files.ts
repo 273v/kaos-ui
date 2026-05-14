@@ -85,19 +85,22 @@ export interface BackfillResponse {
 
 /**
  * Recompute token_count + summary for ready-parsed files that don't
- * have them yet (or pass `overwrite=true` to refresh everything).
- * Backed by the kaos-llm-core summarize Program + the kaos-nlp-core
- * tokenizer on the server. Best-effort: a summarizer outage leaves
- * the field null but never errors the request.
+ * have them yet (or pass `overwrite=true` to refresh everything,
+ * `filename` to scope to a single file). Backed by the kaos-llm-core
+ * summarize Program + the kaos-nlp-core tokenizer on the server.
+ * Best-effort: a summarizer outage leaves the field null but never
+ * errors the request.
  */
 export function backfillFiles(
   transport: Transport,
   sessionId: string,
-  options: { overwrite?: boolean } = {},
+  options: { overwrite?: boolean; filename?: string } = {},
 ): Promise<BackfillResponse> {
-  const path = `/sessions/${encodeURIComponent(sessionId)}/files:backfill${
-    options.overwrite ? "?overwrite=true" : ""
-  }`;
+  const params = new URLSearchParams();
+  if (options.overwrite) params.set("overwrite", "true");
+  if (options.filename) params.set("filename", options.filename);
+  const qs = params.toString();
+  const path = `/sessions/${encodeURIComponent(sessionId)}/files:backfill${qs ? `?${qs}` : ""}`;
   return transportJson<BackfillResponse>(transport, path, { method: "POST" });
 }
 

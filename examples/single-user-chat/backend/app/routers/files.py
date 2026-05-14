@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from kaos_core import KaosRuntime
 
 from app.auth import require_auth
@@ -33,6 +34,7 @@ from app.services.uploads import (
     backfill_session_files,
     delete_session_file,
     list_session_files,
+    read_session_file,
     store_and_parse,
 )
 from app.settings import AppSettings
@@ -164,21 +166,70 @@ async def backfill_files(
     store: StoreDep,
     runtime: RuntimeDep,
     overwrite: bool = False,
+    filename: str | None = None,
 ) -> dict[str, int]:
     """Recompute token_count + summary for files missing them.
 
     Useful after a backend upgrade that adds new sidecar fields, or
     after the summarizer was offline at upload time. Pass
-    ``?overwrite=true`` to refresh every file regardless.
+    ``?overwrite=true`` to refresh every file regardless. Pass
+    ``?filename=`` to scope to a single file (the per-file
+    Re-summarize action in DocumentExplorer uses this).
     """
     try:
         await store.get(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     updated = await backfill_session_files(
-        runtime=runtime, session_id=session_id, overwrite=overwrite
+        runtime=runtime,
+        session_id=session_id,
+        overwrite=overwrite,
+        filename=filename,
     )
     return {"updated": updated}
+
+
+@router.get(
+    "/sessions/{session_id}/files/{filename:path}/download",
+    response_class=Response,
+)
+async def download_file(
+    session_id: str,
+    filename: str,
+    store: StoreDep,
+    runtime: RuntimeDep,
+) -> Response:
+    """Stream the original bytes of an uploaded file back to the caller.
+
+    The `Content-Type` matches what the user uploaded (per-file
+    `meta.content_type`); the `Content-Disposition` is `attachment`
+    so the browser saves rather than opens the file inline.
+    """
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    try:
+        data, meta = await read_session_file(
+            runtime=runtime, session_id=session_id, filename=filename
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"what": exc.what, "how_to_fix": exc.how_to_fix},
+        ) from exc
+
+    # RFC 6266: quote any special chars in the filename header.
+    safe_attachment = meta.filename.replace('"', '\\"')
+    return Response(
+        content=data,
+        media_type=meta.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_attachment}"',
+            "Content-Length": str(len(data)),
+        },
+    )
 
 
 @router.delete(

@@ -21,6 +21,15 @@ const ROLE_LABEL: Record<ChatMessage["role"], string> = {
   system: "System",
 };
 
+function formatLatency(ms: number | undefined): string | null {
+  if (typeof ms !== "number") return null;
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const min = Math.floor(ms / 60_000);
+  const sec = Math.round((ms % 60_000) / 1000);
+  return `${min}m${sec.toString().padStart(2, "0")}s`;
+}
+
 export function toMarkdown(input: TranscriptInput): string {
   const lines: string[] = [];
   lines.push(`# ${input.meta.title}`);
@@ -33,11 +42,48 @@ export function toMarkdown(input: TranscriptInput): string {
     lines.push(`**${ROLE_LABEL[m.role]}** — ${new Date(m.created_at).toISOString()}`);
     lines.push("");
     lines.push(m.content);
-    if (m.tokens || m.cost_usd) {
-      const tok = typeof m.tokens === "number" ? `${m.tokens.toLocaleString()} tok` : "";
-      const cost = typeof m.cost_usd === "number" ? `$${m.cost_usd.toFixed(4)}` : "";
+
+    // Inline tool-call cards as fenced blocks under the assistant
+    // message so a markdown reader sees what was invoked + what came
+    // back, not just the prose.
+    if (m.tool_calls && m.tool_calls.length > 0) {
+      for (const tc of m.tool_calls) {
+        lines.push("");
+        lines.push(`> **Tool call** — \`${tc.name}\` · ${tc.status}`);
+        if (tc.args_preview) {
+          lines.push("> ");
+          lines.push("> ```");
+          for (const argline of tc.args_preview.split("\n")) {
+            lines.push(`> ${argline}`);
+          }
+          lines.push("> ```");
+        }
+        if (tc.result_preview) {
+          lines.push("> ");
+          lines.push("> ```");
+          for (const rline of tc.result_preview.split("\n")) {
+            lines.push(`> ${rline}`);
+          }
+          lines.push("> ```");
+        }
+      }
+    }
+
+    // Per-turn stats footer.
+    const stats: string[] = [];
+    const latency = formatLatency(m.latency_ms);
+    if (latency) stats.push(latency);
+    if (typeof m.tokens === "number") stats.push(`${m.tokens.toLocaleString()} tok`);
+    if (typeof m.input_tokens === "number" && typeof m.output_tokens === "number") {
+      stats.push(`(${m.input_tokens} in / ${m.output_tokens} out)`);
+    }
+    if (typeof m.cost_usd === "number") stats.push(`$${m.cost_usd.toFixed(4)}`);
+    if (m.tool_calls && m.tool_calls.length > 0) {
+      stats.push(`${m.tool_calls.length} tool${m.tool_calls.length === 1 ? "" : "s"}`);
+    }
+    if (stats.length > 0) {
       lines.push("");
-      lines.push(`> ${[tok, cost].filter(Boolean).join(" · ")}`);
+      lines.push(`> ${stats.join(" · ")}`);
     }
     lines.push("");
   }

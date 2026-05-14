@@ -145,13 +145,30 @@ async def _parse_offloaded(temp_path: Path, ext: str) -> Any:
     return await loop.run_in_executor(_PARSER_EXECUTOR, _parse_sync, temp_path, ext)
 
 
-# Soft cap on summarizer input. Haiku's context is huge but anything
-# beyond ~12k chars is rarely improved by the marginal tokens — the
-# summary picks up document type + key entities + main subject from
-# the head + a long tail of repetition. We trim once on the head;
-# alternative approaches (chunk + map-reduce) are out of scope for v1.
-_SUMMARY_INPUT_CAP = 12_000
-_SUMMARY_MODEL = "anthropic:claude-haiku-4-5"
+def _resolve_summarizer_model() -> str:
+    """Read the summarizer model from AppSettings at call time so
+    `APP_SUMMARIZER_MODEL` env-var overrides take effect per request.
+    """
+    from app.settings import AppSettings
+
+    return AppSettings().summarizer_model
+
+
+def _resolve_summary_input_cap() -> int:
+    """Soft char-cap on summarizer input — chosen to fit comfortably
+    inside the configured model's context with headroom for the
+    instruction template. 800k chars ≈ 200k tokens, safely under
+    Haiku 4.5 / Sonnet 4.6's context windows. Override via
+    `APP_SUMMARY_INPUT_CAP` for million-token long contexts.
+
+    DOES NOT silently summarize a head-excerpt anymore — pre-this
+    change we capped at 12k chars, which was wrong for legal use
+    where a single SEC filing or deal-room PDF easily exceeds 100k
+    tokens. The cap is now only a runaway-cost guard.
+    """
+    from app.settings import AppSettings
+
+    return AppSettings().summary_input_cap_chars
 
 
 async def _enrich_parsed_doc(
@@ -212,11 +229,21 @@ async def _enrich_parsed_doc(
     try:
         from kaos_llm_core.starter import summarize
 
-        head = text[:_SUMMARY_INPUT_CAP]
+        cap = _resolve_summary_input_cap()
+        body = text if len(text) <= cap else text[:cap]
+        if len(text) > cap:
+            logger.info(
+                "summary input truncated session=%s file=%s len=%d cap=%d",
+                session_id,
+                filename,
+                len(text),
+                cap,
+                extra={"session_id": session_id, "upload_filename": filename},
+            )
         summary = await summarize(
-            head,
-            model=_SUMMARY_MODEL,
-            max_words=80,
+            body,
+            model=_resolve_summarizer_model(),
+            max_words=120,
             style="concise",
         )
     except Exception as exc:
@@ -355,6 +382,7 @@ async def backfill_session_files(
     runtime: KaosRuntime,
     session_id: str,
     overwrite: bool = False,
+    filename: str | None = None,
 ) -> int:
     """Recompute token_count + summary for ready-parsed files that are
     missing them.
@@ -365,7 +393,9 @@ async def backfill_session_files(
 
     `overwrite=False` is the default — files that already have BOTH a
     token_count and a summary are skipped. Pass `True` to refresh
-    everything (useful after a summarizer prompt change).
+    everything (useful after a summarizer prompt change). Pass a
+    `filename` to scope the operation to a single file (used by the
+    per-file Re-summarize action in DocumentExplorer).
     """
     from kaos_content import ContentDocument
 
@@ -378,6 +408,8 @@ async def backfill_session_files(
             raw = await runtime.vfs.read(meta_path)
             meta = FileMeta.model_validate_json(raw)
         except Exception:
+            continue
+        if filename is not None and meta.filename != filename:
             continue
         if meta.parse.status != "ready":
             continue
@@ -502,6 +534,32 @@ async def render_session_corpus_markdown(
 
 class FileNotFoundError(UploadError):
     """No such file in the session's VFS prefix."""
+
+
+async def read_session_file(
+    *, runtime: KaosRuntime, session_id: str, filename: str
+) -> tuple[bytes, FileMeta]:
+    """Return (original_bytes, meta) for one uploaded file.
+
+    Raises FileNotFoundError when the meta sidecar is absent — the
+    delete route uses the same signal so 404 semantics are consistent.
+    """
+    safe = _safe_filename(filename)
+    base = _vfs_path(session_id, safe)
+    meta_path = f"{base}.meta.json"
+    if not await runtime.vfs.exists(meta_path):
+        raise FileNotFoundError(
+            what=f"no file {filename!r} in session {session_id}",
+            how_to_fix="check GET /v1/chat/sessions/{id}/files for valid names",
+        )
+    meta = FileMeta.model_validate_json(await runtime.vfs.read(meta_path))
+    if not await runtime.vfs.exists(base):
+        raise FileNotFoundError(
+            what=f"file {filename!r} exists in metadata but bytes are missing",
+            how_to_fix="re-upload the file or DELETE then re-upload",
+        )
+    data = await runtime.vfs.read(base)
+    return data, meta
 
 
 async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename: str) -> None:

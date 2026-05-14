@@ -7,7 +7,7 @@
  * fetching and passes `files` here so this stays presentational.
  */
 
-import { ChevronDown, ChevronRight, FileText, Loader2, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, FileText, Loader2, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 
 import type { FileMeta } from "../lib/files.js";
@@ -26,6 +26,16 @@ interface Props {
   onBackfill?: () => void;
   /** True while a backfill request is in flight. */
   backfilling?: boolean;
+  /** Per-file: force a re-summarize. Receives the filename. */
+  onResummarize?: (filename: string) => void;
+  /** Filenames currently mid-resummarize — renders a spinner on those cards. */
+  resummarizing?: ReadonlySet<string>;
+  /**
+   * Per-file: produce a download URL for the original bytes. When
+   * provided, every ready file gets a Download icon link. Returning
+   * `null` from `getDownloadUrl` hides the link for that file.
+   */
+  getDownloadUrl?: (filename: string) => string | null;
 }
 
 function formatSize(bytes: number): string {
@@ -40,44 +50,88 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
-function FileCard({ file }: { file: FileMeta }) {
+function FileCard({
+  file,
+  onResummarize,
+  resummarizing,
+  downloadUrl,
+}: {
+  file: FileMeta;
+  onResummarize?: (filename: string) => void;
+  resummarizing?: boolean;
+  downloadUrl?: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const failed = file.parse.status === "failed";
   const hasSummary = !!file.summary;
 
   return (
     <li className="rounded-md border border-border bg-background">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full text-left px-3 py-2 hover:bg-muted/40 flex items-start gap-2"
-        aria-expanded={open}
-      >
-        <span className="mt-0.5 text-muted-foreground">
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-sm font-medium truncate" title={file.filename}>
-            {file.filename}
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 min-w-0 text-left px-3 py-2 hover:bg-muted/40 flex items-start gap-2"
+          aria-expanded={open}
+        >
+          <span className="mt-0.5 text-muted-foreground">
+            {open ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
           </span>
-          <span className="block text-[11px] text-muted-foreground tabular-nums mt-0.5">
-            {formatSize(file.size_bytes)}
-            {file.content_type && ` · ${file.content_type}`}
-            {typeof file.token_count === "number" && ` · ${formatTokens(file.token_count)} tok`}
-            <span
-              className={`ml-2 inline-block rounded-sm px-1 py-0.5 text-[9px] uppercase tracking-wide ${
-                failed ? "bg-destructive/20 text-destructive" : "bg-muted text-foreground/80"
-              }`}
-            >
-              {failed ? "failed" : "ready"}
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-medium truncate" title={file.filename}>
+              {file.filename}
+            </span>
+            <span className="block text-[11px] text-muted-foreground tabular-nums mt-0.5">
+              {formatSize(file.size_bytes)}
+              {file.content_type && ` · ${file.content_type}`}
+              {typeof file.token_count === "number" && ` · ${formatTokens(file.token_count)} tok`}
+              <span
+                className={`ml-2 inline-block rounded-sm px-1 py-0.5 text-[9px] uppercase tracking-wide ${
+                  failed ? "bg-destructive/20 text-destructive" : "bg-muted text-foreground/80"
+                }`}
+              >
+                {failed ? "failed" : "ready"}
+              </span>
             </span>
           </span>
-        </span>
-      </button>
+        </button>
+        <div className="flex items-center pr-2 gap-1">
+          {downloadUrl && (
+            <a
+              href={downloadUrl}
+              download={file.filename}
+              title={`Download ${file.filename}`}
+              aria-label={`Download ${file.filename}`}
+              className="text-muted-foreground hover:text-foreground p-1"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </a>
+          )}
+          {onResummarize && !failed && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onResummarize(file.filename);
+              }}
+              disabled={resummarizing}
+              title="Re-summarize this file"
+              aria-label={`Re-summarize ${file.filename}`}
+              className="text-muted-foreground hover:text-foreground p-1 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {resummarizing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
       {open && (
         <div className="px-3 pb-3 pt-1 text-xs space-y-2">
           {failed && file.parse.error && (
@@ -110,6 +164,9 @@ export function DocumentExplorer({
   loading = false,
   onBackfill,
   backfilling = false,
+  onResummarize,
+  resummarizing,
+  getDownloadUrl,
 }: Props) {
   if (!open) return null;
   const needsBackfill = files.some(
@@ -164,7 +221,13 @@ export function DocumentExplorer({
         ) : (
           <ul className="space-y-2 list-none p-0 m-0">
             {files.map((f) => (
-              <FileCard key={f.filename} file={f} />
+              <FileCard
+                key={f.filename}
+                file={f}
+                onResummarize={onResummarize}
+                resummarizing={resummarizing?.has(f.filename)}
+                downloadUrl={getDownloadUrl?.(f.filename)}
+              />
             ))}
           </ul>
         )}

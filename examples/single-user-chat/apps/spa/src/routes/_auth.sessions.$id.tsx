@@ -375,6 +375,15 @@ function ChatDetail() {
         loading={files.isLoading}
         onBackfill={() => backfill.mutate({})}
         backfilling={backfill.isPending}
+        onResummarize={(filename) => backfill.mutate({ filename, overwrite: true })}
+        resummarizing={
+          backfill.isPending && backfill.variables?.filename
+            ? new Set([backfill.variables.filename])
+            : undefined
+        }
+        getDownloadUrl={(filename) =>
+          `/v1/chat/sessions/${encodeURIComponent(id)}/files/${encodeURIComponent(filename)}/download`
+        }
       />
 
       <CitationsPanel
