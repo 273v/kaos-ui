@@ -119,6 +119,13 @@ function LoginRoute() {
           </Link>
           .
         </p>
+        <p className="mt-3 text-[11px] text-muted-foreground border-l-2 border-warn/40 pl-2">
+          <strong className="text-foreground">Dev-mode auth.</strong> The token lands in your
+          browser's <code>localStorage</code> — fine for local development, vulnerable to XSS for
+          anything internet-facing. Don't deploy this example beyond a trusted-network gate until
+          the cookie-wrapper rolls out in Phase 4+. See <code>apps/spa/src/auth/storage.ts</code>{" "}
+          for the trade-off note.
+        </p>
       </div>
     </div>
   );
