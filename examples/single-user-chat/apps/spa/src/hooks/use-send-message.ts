@@ -22,10 +22,18 @@ export interface UseSendMessageOptions {
   initialMessages?: TranscriptState["messages"];
 }
 
+/** Wrapper used by the debug overlay — stable `_id` per appended event. */
+export interface DebugEvent {
+  _id: number;
+  event: KaosAgentEvent;
+}
+
 export function useSendMessage(opts: UseSendMessageOptions) {
   const [state, setState] = useState<TranscriptState>(() =>
     opts.initialMessages ? { ...initialState, messages: opts.initialMessages } : initialState,
   );
+  const [rawEvents, setRawEvents] = useState<DebugEvent[]>([]);
+  const eventCounter = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const qc = useQueryClient();
 
@@ -55,7 +63,11 @@ export function useSendMessage(opts: UseSendMessageOptions) {
           if (typeof evt.data !== "object" || evt.data === null) continue;
           const wire = evt.data as Partial<KaosAgentEvent> & { type?: string };
           if (!wire.type) continue;
-          setState((prev) => applyEvent(prev, wire as KaosAgentEvent));
+          const ev = wire as KaosAgentEvent;
+          eventCounter.current += 1;
+          const id = eventCounter.current;
+          setRawEvents((prev) => [...prev, { _id: id, event: ev }]);
+          setState((prev) => applyEvent(prev, ev));
 
           // Side effect: invalidate the session list cache when the
           // agent persists state (bumps message_count + title).
@@ -90,5 +102,5 @@ export function useSendMessage(opts: UseSendMessageOptions) {
     abortRef.current?.abort();
   }, []);
 
-  return { state, send, abort };
+  return { state, send, abort, rawEvents };
 }

@@ -4,8 +4,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Download, Settings } from "lucide-react";
 import { useState } from "react";
+import { z } from "zod";
 
 import { Composer } from "@/components/chat/Composer";
+import { DebugPanel } from "@/components/chat/DebugPanel";
 import { Message } from "@/components/chat/Message";
 import { TurnStatus } from "@/components/chat/TurnStatus";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
@@ -15,7 +17,14 @@ import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
+const SearchSchema = z.object({
+  debug: z
+    .union([z.literal("true"), z.literal(true), z.literal("false"), z.literal(false)])
+    .optional(),
+});
+
 export const Route = createFileRoute("/_auth/sessions/$id")({
+  validateSearch: (search) => SearchSchema.parse(search),
   component: ChatDetail,
 });
 
@@ -169,6 +178,8 @@ function ChatDetail() {
       {meta && (
         <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
       )}
+
+      <DebugPanel events={stream.rawEvents} />
     </div>
   );
 }
