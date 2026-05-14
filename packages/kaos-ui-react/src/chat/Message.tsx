@@ -20,9 +20,17 @@ import { UsageChip } from "./UsageChip.js";
 
 interface Props {
   message: ChatMessage;
+  /**
+   * When true, every tool-call card under this message starts
+   * expanded. Defaults to true while the message is still streaming
+   * (so the user sees tool activity live) AND when any tool call on
+   * this message has errored. The host can also force this via the
+   * `verboseTools` prop — typically wired to a header toggle.
+   */
+  verboseTools?: boolean;
 }
 
-export function Message({ message }: Props) {
+export function Message({ message, verboseTools = false }: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
   const isTool = message.role === "tool";
@@ -73,7 +81,16 @@ export function Message({ message }: Props) {
       {message.tool_calls && message.tool_calls.length > 0 && (
         <div className="mt-3 space-y-2">
           {message.tool_calls.map((tc) => (
-            <ToolCallBlock key={tc.id} call={tc} />
+            <ToolCallBlock
+              key={tc.id}
+              call={tc}
+              defaultOpen={
+                verboseTools ||
+                message.streaming ||
+                tc.status === "error" ||
+                tc.status === "running"
+              }
+            />
           ))}
         </div>
       )}

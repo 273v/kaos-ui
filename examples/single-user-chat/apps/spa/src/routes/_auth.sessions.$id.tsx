@@ -20,7 +20,7 @@ import {
 } from "@273v/kaos-ui-react/hooks";
 import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bug, Download, FileText, Quote, Settings } from "lucide-react";
+import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -87,6 +87,7 @@ function ChatDetail() {
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(debugDefault);
+  const [verboseTools, setVerboseTools] = useState(false);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -199,6 +200,22 @@ function ChatDetail() {
 
           <button
             type="button"
+            onClick={() => setVerboseTools((v) => !v)}
+            disabled={!meta}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
+              verboseTools ? "bg-muted text-foreground" : ""
+            }`}
+            title={
+              verboseTools ? "Tool details expanded by default" : "Show tool details by default"
+            }
+            aria-label="Toggle verbose tool details"
+            aria-pressed={verboseTools}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setInspectorOpen((v) => !v)}
             disabled={!meta}
             className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
@@ -256,7 +273,7 @@ function ChatDetail() {
 
             <div className="space-y-1 divide-y divide-border/60">
               {stream.state.messages.map((m) => (
-                <Message key={m.id} message={m} />
+                <Message key={m.id} message={m} verboseTools={verboseTools} />
               ))}
             </div>
 
@@ -295,6 +312,8 @@ function ChatDetail() {
                   ? new Set([removeFile.variables])
                   : undefined
               }
+              maxVisible={3}
+              onShowAll={() => setDocsOpen(true)}
             />
           </div>
         )}

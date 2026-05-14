@@ -3,9 +3,14 @@
  * the current session. Each chip: filename, size, parse-status pill
  * (ready / failed), X button to delete. Parse failures get a red ring
  * + tooltip with the error.
+ *
+ * Long file lists get capped at `maxVisible` (default 3) with a
+ * "+N more" pill that calls `onShowAll` — typically wired to open
+ * the <DocumentExplorer> panel.
  */
 
-import { Loader2, X } from "lucide-react";
+import { ChevronRight, Loader2, X } from "lucide-react";
+import { useMemo } from "react";
 
 import type { FileMeta } from "../lib/files.js";
 
@@ -14,6 +19,10 @@ interface Props {
   onRemove: (filename: string) => void;
   /** Filenames currently mid-delete (renders a spinner instead of X). */
   removing?: Set<string>;
+  /** Maximum number of inline chips before collapsing to "+N more". */
+  maxVisible?: number;
+  /** Called when the user clicks the overflow pill. Typically opens the explorer. */
+  onShowAll?: () => void;
 }
 
 function formatSize(bytes: number): string {
@@ -22,15 +31,27 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FileChips({ files, onRemove, removing }: Props) {
-  if (files.length === 0) return null;
+export function FileChips({ files, onRemove, removing, maxVisible = 3, onShowAll }: Props) {
+  // Failed files are pinned to the front of the visible window — they're
+  // the ones the user is most likely to want to retry/delete. Ready
+  // files fill the remaining slots in upload order.
+  const ordered = useMemo(() => {
+    const failed = files.filter((f) => f.parse.status === "failed");
+    const ready = files.filter((f) => f.parse.status !== "failed");
+    return [...failed, ...ready];
+  }, [files]);
+
+  if (ordered.length === 0) return null;
+
+  const visible = ordered.slice(0, maxVisible);
+  const overflow = ordered.length - visible.length;
 
   return (
     <ul
       aria-label={`Uploaded files (${files.length})`}
       className="flex flex-wrap items-center gap-2 mb-2 list-none p-0 m-0"
     >
-      {files.map((f) => {
+      {visible.map((f) => {
         const failed = f.parse.status === "failed";
         const isRemoving = removing?.has(f.filename) === true;
         return (
@@ -70,6 +91,25 @@ export function FileChips({ files, onRemove, removing }: Props) {
           </li>
         );
       })}
+      {overflow > 0 && (
+        <li>
+          <button
+            type="button"
+            onClick={onShowAll}
+            disabled={!onShowAll}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60 disabled:cursor-default"
+            title={
+              onShowAll
+                ? "Show all uploaded documents"
+                : `${overflow} more file${overflow === 1 ? "" : "s"}`
+            }
+            aria-label={`Show ${overflow} more file${overflow === 1 ? "" : "s"}`}
+          >
+            +{overflow} more
+            {onShowAll && <ChevronRight className="h-3 w-3" />}
+          </button>
+        </li>
+      )}
     </ul>
   );
 }
