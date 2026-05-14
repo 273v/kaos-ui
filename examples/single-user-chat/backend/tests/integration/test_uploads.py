@@ -153,7 +153,105 @@ def test_upload_filename_sanitization(client: TestClient) -> None:
     )
     assert r.status_code == status.HTTP_201_CREATED, r.text
     saved_name = r.json()["file"]["filename"]
-    # Directory components stripped; only the basename remains.
     assert "/" not in saved_name
     assert ".." not in saved_name
     assert saved_name == "passwd.pdf"
+
+
+# ── GET /v1/chat/sessions/{id}/files (P1-2) ─────────────────────────
+
+
+def test_list_files_requires_auth(app) -> None:
+    bare = TestClient(app)
+    r = bare.get("/v1/chat/sessions/anything/files")
+    assert r.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_list_files_404_for_unknown_session(client: TestClient) -> None:
+    r = client.get("/v1/chat/sessions/does-not-exist/files")
+    assert r.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_list_files_empty_for_new_session(client: TestClient) -> None:
+    sid = _create_session(client)
+    r = client.get(f"/v1/chat/sessions/{sid}/files")
+    assert r.status_code == status.HTTP_200_OK
+    body = r.json()
+    assert body["session_id"] == sid
+    assert body["files"] == []
+
+
+def test_list_files_returns_uploaded_files(client: TestClient) -> None:
+    """Two uploads → list returns both with parse statuses."""
+    sid = _create_session(client)
+
+    r1 = client.post(
+        f"/v1/chat/sessions/{sid}/files",
+        files={"file": ("a.pdf", _MINIMAL_PDF, "application/pdf")},
+    )
+    assert r1.status_code == status.HTTP_201_CREATED
+
+    r2 = client.post(
+        f"/v1/chat/sessions/{sid}/files",
+        files={"file": ("b.pdf", _MINIMAL_PDF, "application/pdf")},
+    )
+    assert r2.status_code == status.HTTP_201_CREATED
+
+    listing = client.get(f"/v1/chat/sessions/{sid}/files")
+    assert listing.status_code == status.HTTP_200_OK
+    files = listing.json()["files"]
+    assert {f["filename"] for f in files} == {"a.pdf", "b.pdf"}
+    assert all(f["parse"]["status"] == "ready" for f in files)
+    assert all(f["size_bytes"] == len(_MINIMAL_PDF) for f in files)
+
+
+# ── DELETE /v1/chat/sessions/{id}/files/{filename} (P1-2) ───────────
+
+
+def test_delete_file_requires_auth(app) -> None:
+    bare = TestClient(app)
+    r = bare.delete("/v1/chat/sessions/x/files/y.pdf")
+    assert r.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_delete_file_404_for_unknown_session(client: TestClient) -> None:
+    r = client.delete("/v1/chat/sessions/nope/files/missing.pdf")
+    assert r.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_delete_file_404_for_unknown_filename(client: TestClient) -> None:
+    sid = _create_session(client)
+    r = client.delete(f"/v1/chat/sessions/{sid}/files/never-uploaded.pdf")
+    assert r.status_code == status.HTTP_404_NOT_FOUND
+    detail = r.json()["detail"]
+    assert "what" in detail and "how_to_fix" in detail
+
+
+def test_delete_file_removes_from_listing(client: TestClient) -> None:
+    """Upload + delete → list no longer contains the file."""
+    sid = _create_session(client)
+    r = client.post(
+        f"/v1/chat/sessions/{sid}/files",
+        files={"file": ("to-remove.pdf", _MINIMAL_PDF, "application/pdf")},
+    )
+    assert r.status_code == status.HTTP_201_CREATED
+
+    # Confirm it's in the listing first.
+    listed_before = {
+        f["filename"] for f in client.get(f"/v1/chat/sessions/{sid}/files").json()["files"]
+    }
+    assert "to-remove.pdf" in listed_before
+
+    # Delete.
+    del_r = client.delete(f"/v1/chat/sessions/{sid}/files/to-remove.pdf")
+    assert del_r.status_code == status.HTTP_204_NO_CONTENT
+
+    # Gone.
+    listed_after = {
+        f["filename"] for f in client.get(f"/v1/chat/sessions/{sid}/files").json()["files"]
+    }
+    assert "to-remove.pdf" not in listed_after
+
+    # Second delete returns 404.
+    del_again = client.delete(f"/v1/chat/sessions/{sid}/files/to-remove.pdf")
+    assert del_again.status_code == status.HTTP_404_NOT_FOUND

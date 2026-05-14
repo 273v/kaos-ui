@@ -159,3 +159,10 @@ class UploadResponse(BaseModel):
             "read-only tool surface against the uploaded content."
         ),
     )
+
+
+class FileListResponse(BaseModel):
+    """GET /v1/chat/sessions/{id}/files response."""
+
+    session_id: str
+    files: list[FileMeta]

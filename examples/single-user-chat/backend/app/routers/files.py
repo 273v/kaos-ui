@@ -24,11 +24,14 @@ from app.auth import require_auth
 from app.deps import get_runtime, get_session_store, get_settings
 from app.exceptions import SessionNotFoundError
 from app.logging_setup import app_logger
-from app.models import UploadResponse
+from app.models import FileListResponse, UploadResponse
 from app.persistence.sessions import SessionStore
 from app.services.uploads import (
+    FileNotFoundError,
     UploadParseError,
     UploadValidationError,
+    delete_session_file,
+    list_session_files,
     store_and_parse,
 )
 from app.settings import AppSettings
@@ -130,3 +133,50 @@ async def upload_file(
         file=file_meta,
         tools_enabled=meta.tools_enabled,
     )
+
+
+@router.get(
+    "/sessions/{session_id}/files",
+    response_model=FileListResponse,
+)
+async def list_files(
+    session_id: str,
+    store: StoreDep,
+    runtime: RuntimeDep,
+) -> FileListResponse:
+    """Return every uploaded file for this session, with parse status."""
+    # Validate the session exists; if not, this is a 404, not an empty list
+    # — the SPA needs to distinguish "session has no files" from "session
+    # never existed."
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    files = await list_session_files(runtime=runtime, session_id=session_id)
+    return FileListResponse(session_id=session_id, files=files)
+
+
+@router.delete(
+    "/sessions/{session_id}/files/{filename:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_file(
+    session_id: str,
+    filename: str,
+    store: StoreDep,
+    runtime: RuntimeDep,
+) -> None:
+    """Remove an uploaded file (bytes + AST sidecar + meta sidecar)."""
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    try:
+        await delete_session_file(runtime=runtime, session_id=session_id, filename=filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"what": exc.what, "how_to_fix": exc.how_to_fix},
+        ) from exc

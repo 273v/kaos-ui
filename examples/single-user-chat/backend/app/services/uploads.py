@@ -253,6 +253,68 @@ async def store_and_parse(
     return meta
 
 
+async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[FileMeta]:
+    """Return the FileMeta for every uploaded file in the session.
+
+    Walks the VFS prefix ``sessions/{id}/files/`` and reads each
+    ``*.meta.json`` sidecar. Files whose meta sidecar is missing or
+    unreadable are skipped (defensive — old or partially-written
+    uploads shouldn't 500 the list endpoint).
+    """
+    prefix = f"sessions/{session_id}/files/"
+    paths = await runtime.vfs.list(prefix)
+    out: list[FileMeta] = []
+    for path in sorted(paths):
+        if not path.endswith(".meta.json"):
+            continue
+        try:
+            raw = await runtime.vfs.read(path)
+            out.append(FileMeta.model_validate_json(raw))
+        except Exception as exc:
+            logger.warning(
+                "skipping unreadable meta sidecar path=%s: %s",
+                path,
+                exc,
+                extra={"session_id": session_id, "meta_path": path},
+            )
+    return out
+
+
+class FileNotFoundError(UploadError):
+    """No such file in the session's VFS prefix."""
+
+
+async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename: str) -> None:
+    """Remove the original bytes + .kaos.json + .meta.json siblings.
+
+    Raises ``FileNotFoundError`` (404 in the route) if the meta
+    sidecar is absent — we use that as the canonical "this file
+    exists for this session" signal. The original-bytes file and
+    the AST sibling are removed best-effort (a missing AST sibling
+    is normal when the parse failed).
+    """
+    safe = _safe_filename(filename)
+    base = _vfs_path(session_id, safe)
+    meta_path = f"{base}.meta.json"
+
+    if not await runtime.vfs.exists(meta_path):
+        raise FileNotFoundError(
+            what=f"no file {filename!r} in session {session_id}",
+            how_to_fix="check GET /v1/chat/sessions/{id}/files for valid names",
+        )
+
+    for path in (base, f"{base}.kaos.json"):
+        if await runtime.vfs.exists(path):
+            await runtime.vfs.delete(path)
+    await runtime.vfs.delete(meta_path)
+    logger.info(
+        "deleted upload session=%s file=%s",
+        session_id,
+        safe,
+        extra={"session_id": session_id, "upload_filename": safe},
+    )
+
+
 def _ensure_quiet_thirdparty_logging() -> None:
     """Some parsers (pypdfium2, python-pptx) emit verbose info logs.
 
