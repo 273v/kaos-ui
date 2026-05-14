@@ -224,28 +224,16 @@ proxy (`oauth2-proxy`) — Streamlit sees only the proxy and trusts the
 - [ ] No secrets in the diff (`git diff` then `gitleaks detect --staged`)
 - [ ] `.env` not staged (`git diff --cached --name-only | grep -v '^\.env$'`)
 
-## Required checklists (KAOS top-level)
+## Installing KAOS dependencies
 
-Apply these from the kaos-modules `docs/python/checklists/` directory
-to every change:
+The scaffold's `pyproject.toml` declares the KAOS packages it needs
+as PyPI dependencies. To install from PyPI:
 
-- 03-implement, 04-test, 05-quality, 07-commit
-
-## Local dev with kaos-modules workspace
-
-If you scaffolded this inside the `kaos-modules` workspace (i.e., the
-KAOS packages aren't on PyPI yet), append the following to
-`pyproject.toml` so `uv sync` resolves them locally:
-
-```toml
-[tool.uv.sources]
-kaos-core      = { path = "../kaos-core",      editable = true }
-kaos-content   = { path = "../kaos-content",   editable = true }
-kaos-agents    = { path = "../kaos-agents",    editable = true }
-kaos-llm-client = { path = "../kaos-llm-client", editable = true }
-kaos-pdf       = { path = "../kaos-pdf",       editable = true }
-kaos-office    = { path = "../kaos-office",    editable = true }
+```bash
+uv sync
 ```
 
-Adjust the relative paths to match where your scaffolded project sits.
-Once kaos-* are on PyPI, this entire block disappears.
+If you have a local checkout of the KAOS source you'd rather edit
+against, point `[tool.uv.sources]` at the local paths in your own
+`pyproject.toml` — that's project-local config and not part of the
+scaffold template.

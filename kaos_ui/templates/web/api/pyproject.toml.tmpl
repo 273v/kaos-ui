@@ -6,10 +6,10 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi[standard]>=0.115",
 ]
-# To add KAOS packages (when available on PyPI or via local path):
+# To add KAOS packages from PyPI:
 #   uv add kaos-core kaos-content kaos-pdf kaos-web
-# For monorepo development, add to [tool.uv.sources]:
-#   kaos-core = { path = "../kaos-core", editable = true }
+# To pin against a local checkout instead, set [tool.uv.sources] in
+# your own pyproject.toml (project-local, not part of this template).
 
 [dependency-groups]
 dev = [

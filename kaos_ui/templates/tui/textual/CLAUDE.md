@@ -134,21 +134,16 @@ is the right behavior when the user hits Enter twice.
 - [ ] `make build` produces a wheel
 - [ ] `pipx install dist/*.whl` then test the binary in a clean shell
 
-## Local dev with kaos-modules workspace
+## Installing KAOS dependencies
 
-If you scaffolded this inside the `kaos-modules` workspace (kaos-* not
-yet on PyPI), append to `pyproject.toml`:
+The scaffold's `pyproject.toml` declares the KAOS packages it needs
+as PyPI dependencies. To install from PyPI:
 
-```toml
-[tool.uv.sources]
-kaos-core      = { path = "../kaos-core",      editable = true }
-kaos-agents    = { path = "../kaos-agents",    editable = true }
-kaos-content   = { path = "../kaos-content",   editable = true }
-kaos-llm-client = { path = "../kaos-llm-client", editable = true }
+```bash
+uv sync
 ```
 
-## Required checklists (KAOS top-level)
-
-Apply these from `kaos-modules/docs/python/checklists/`:
-
-- 03-implement, 04-test, 05-quality, 07-commit
+If you have a local checkout of the KAOS source you'd rather edit
+against, point `[tool.uv.sources]` at the local paths in your own
+`pyproject.toml` — that's project-local config and not part of the
+scaffold template.

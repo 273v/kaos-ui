@@ -166,22 +166,17 @@ Alternative: front Caddy with `oauth2-proxy`; trust `X-Forwarded-Email`.
 | SSE dropped mid-stream | Caddy `flush_interval -1` set? Some upstreams (Cloudflare) buffer too |
 | `pnpm build` fails on `routeTree.gen` | Build script is `vite build` only — don't `tsc -b` first; use `pnpm typecheck` separately |
 
-## Local dev with kaos-modules workspace
+## Installing KAOS dependencies
 
-If you scaffolded inside the `kaos-modules` workspace (kaos-* not yet
-on PyPI), append to `backend/pyproject.toml`:
+The scaffold's `backend/pyproject.toml` declares the KAOS packages it
+needs as PyPI dependencies. To install from PyPI:
 
-```toml
-[tool.uv.sources]
-kaos-core      = { path = "../../kaos-core",      editable = true }
-kaos-content   = { path = "../../kaos-content",   editable = true }
-kaos-agents    = { path = "../../kaos-agents",    editable = true }
-kaos-llm-client = { path = "../../kaos-llm-client", editable = true }
-kaos-pdf       = { path = "../../kaos-pdf",       editable = true }
-kaos-office    = { path = "../../kaos-office",    editable = true }
+```bash
+cd backend
+uv sync
 ```
 
-## Required checklists
-
-Apply 03-implement, 04-test, 05-quality, 07-commit from
-`kaos-modules/docs/python/checklists/` per change.
+If you have a local checkout of the KAOS source you'd rather edit
+against, point `[tool.uv.sources]` at the local paths in your own
+`backend/pyproject.toml` — that's project-local config and not part
+of the scaffold template.
