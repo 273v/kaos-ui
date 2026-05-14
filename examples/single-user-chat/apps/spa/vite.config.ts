@@ -48,9 +48,7 @@ export default defineConfig({
             if (setCookie) {
               proxyRes.headers["set-cookie"] = (
                 Array.isArray(setCookie) ? setCookie : [setCookie]
-              ).map((cookie) =>
-                cookie.replace(/;\s*Secure/i, "").replace(/;\s*Domain=[^;]*/i, ""),
-              );
+              ).map((cookie) => cookie.replace(/;\s*Secure/i, "").replace(/;\s*Domain=[^;]*/i, ""));
             }
           });
         },

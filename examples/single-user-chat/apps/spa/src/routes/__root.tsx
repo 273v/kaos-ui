@@ -1,8 +1,16 @@
-// Root route. Phase 0: just renders <Outlet/>. Phase 2 wraps it in the
-// AppShell (sidebar + header) per docs/UX-LANGUAGE.md § 4.1.
+// Root route. Owns the router context type and renders a bare <Outlet/>.
+// The AppShell wraps protected routes via `_auth.tsx`.
 
-import { Outlet, createRootRoute } from "@tanstack/react-router";
+import type { QueryClient } from "@tanstack/react-query";
+import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
 
-export const Route = createRootRoute({
+import type { AuthContextValue } from "@/auth/context";
+
+export interface RouterContext {
+  auth: AuthContextValue;
+  queryClient: QueryClient;
+}
+
+export const Route = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
 });

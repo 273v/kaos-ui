@@ -1,0 +1,66 @@
+import type { ChatMessage } from "@/lib/chat-state";
+import { ToolCallBlock } from "./ToolCallBlock";
+import { UsageChip } from "./UsageChip";
+
+interface Props {
+  message: ChatMessage;
+}
+
+/**
+ * One message in the transcript. Flat role-labeled block (no bubbles)
+ * per UX-LANGUAGE.md § 4.2.
+ */
+export function Message({ message }: Props) {
+  const isUser = message.role === "user";
+  const isError = message.role === "error";
+  const isTool = message.role === "tool";
+
+  const roleLabel = isUser ? "You" : isError ? "Error" : isTool ? "Tool" : "Assistant";
+
+  return (
+    <article
+      className={`py-4 ${isError ? "border-l-2 border-destructive pl-3" : ""}`}
+      aria-label={`${roleLabel} message`}
+    >
+      <header className="mb-1">
+        <span
+          className={
+            "text-[11px] uppercase tracking-wide " +
+            (isError ? "text-destructive" : "text-muted-foreground font-serif")
+          }
+        >
+          {roleLabel}
+        </span>
+      </header>
+
+      <div
+        className={
+          "prose prose-sm max-w-none whitespace-pre-wrap leading-relaxed " +
+          (isError ? "text-destructive" : "text-foreground")
+        }
+      >
+        {message.content || (message.streaming ? "" : <em className="opacity-60">(empty)</em>)}
+        {message.streaming && (
+          <span
+            aria-hidden
+            className="ml-0.5 inline-block w-[1ch] -mb-0.5 animate-pulse text-accent"
+          >
+            ▍
+          </span>
+        )}
+      </div>
+
+      {message.tool_calls && message.tool_calls.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {message.tool_calls.map((tc) => (
+            <ToolCallBlock key={tc.id} call={tc} />
+          ))}
+        </div>
+      )}
+
+      {(message.tokens || message.cost_usd) && !message.streaming && (
+        <UsageChip tokens={message.tokens} costUsd={message.cost_usd} />
+      )}
+    </article>
+  );
+}

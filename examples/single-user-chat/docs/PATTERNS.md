@@ -160,6 +160,40 @@ Error: rootRouteNode must not be undefined. Make sure you've added your root rou
 ```
 The frontend dispatches on `data.type` (string discriminator). All payload fields are first-class — we don't need a secondary lookup against `event:` line.
 
-## Phase 2 (TBD)
+## Phase 2 (2026-05-14)
 
-(populate as discovered)
+### P-016: TanStack Router needs `_auth.sessions.tsx` AND `_auth.sessions.index.tsx` once `index.tsx` exists at root
+
+**Symptom.** With `index.tsx` (root `/`) and `_auth.tsx` (layout) both present, `pnpm typecheck` fails with `Conflicting configuration paths were found for the following routes: "/", "/"`.
+
+**Cause.** A bare `_auth.tsx` resolves to `/` (the pathless `_` prefix is transparent), conflicting with `index.tsx`. The conflict resolves as soon as a real child route under `_auth.` exists (e.g., `_auth.sessions.tsx`) — the layout then represents its prefix instead of `/`.
+
+**Fix.** Add at least one `_auth.*.tsx` child file before merging route changes. For the empty-state on `/sessions`, use `_auth.sessions.index.tsx` (it nests under `_auth.sessions.tsx`).
+
+### P-017: `chrome-devtools-mcp` defaults to headful — needs `--headless` arg on headless boxes
+
+**Symptom.** `mcp__chrome-devtools__new_page` errors with `Missing X server to start the headful browser. Either set headless to true or use xvfb-run`.
+
+**Cause.** The MCP config in `~/.claude.json` launches `chrome-devtools-mcp` without `--headless`. The default is headful, which needs an X server.
+
+**Fix.** Update `~/.claude.json` to add `--headless` to the `args` array:
+```json
+"chrome-devtools": {
+  "type": "stdio",
+  "command": "npx",
+  "args": ["chrome-devtools-mcp@latest", "--headless"]
+}
+```
+Then restart the Claude Code session so the MCP server picks up the new args. Until then, fall back to curl-based smoke verification through the vite proxy.
+
+### P-018: stale `~/.cache/chrome-devtools-mcp/chrome-profile/SingletonLock` blocks new MCP Chrome
+
+**Symptom.** `mcp__chrome-devtools__new_page` errors with `The browser is already running for /home/.../chrome-profile. Use --isolated to run multiple browser instances.`
+
+**Cause.** A prior MCP-launched Chrome left a `SingletonLock` (symlink) and possibly the actual process. New MCP invocations refuse to clobber it.
+
+**Fix.** Kill the stale Chrome (look for processes matching `--user-data-dir=$HOME/.cache/chrome-devtools-mcp/chrome-profile`) and `rm -f $HOME/.cache/chrome-devtools-mcp/chrome-profile/Singleton*` before reconnecting.
+
+### P-019: Vite proxy correctly forwards Authorization + SSE without buffering
+
+**Verified end-to-end (curl-smoke):** a `POST /v1/chat/sessions/{id}/messages` with `Accept: text/event-stream` through vite's `:5173/v1/*` proxy reached the backend, streamed all 6 expected events (`span`/`turn.start`, `intent_classified`, `text_delta`, `usage_observed`, `span`/`turn.complete`, `turn_summary`) with no buffering, and bumped the metadata sidecar's `message_count` to 1. The proxy is configured with default `flush_interval` behavior — no special directive needed; Vite's HTTP proxy passes through `text/event-stream` cleanly out of the box.
