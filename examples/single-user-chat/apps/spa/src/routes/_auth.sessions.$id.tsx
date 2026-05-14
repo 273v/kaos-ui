@@ -1,28 +1,33 @@
 // Chat detail route. Wires the streaming hook + composer + transcript +
 // settings sheet + per-session model override.
 
+import {
+  CitationsPanel,
+  Composer,
+  DropZone,
+  FileChips,
+  Message,
+  TurnStatus,
+} from "@273v/kaos-ui-react/chat";
+import { RunInspector } from "@273v/kaos-ui-react/debug";
+import {
+  useCitations,
+  useDeleteFile,
+  useSendMessage,
+  useSessionFiles,
+  useUploadFile,
+} from "@273v/kaos-ui-react/hooks";
+import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
 import { createFileRoute } from "@tanstack/react-router";
 import { Download, Quote, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
-import { CitationsPanel } from "@/components/chat/CitationsPanel";
-import { Composer } from "@/components/chat/Composer";
-import { DebugPanel } from "@/components/chat/DebugPanel";
-import { DropZone } from "@/components/chat/DropZone";
-import { FileChips } from "@/components/chat/FileChips";
-import { Message } from "@/components/chat/Message";
-import { TurnStatus } from "@/components/chat/TurnStatus";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
-import { useCitations } from "@/hooks/use-citations";
-import { useDeleteFile, useSessionFiles, useUploadFile } from "@/hooks/use-files";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
-import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
 import { useSessionMessages } from "@/hooks/use-session-messages";
-import type { ChatMessage } from "@/lib/chat-state";
-import { newId } from "@/lib/chat-state";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
 const SearchSchema = z.object({
@@ -73,10 +78,13 @@ function ChatDetail() {
   const stream = useSendMessage({ sessionId: id, initialMessages });
   const citations = useCitations(id, stream.state.messages);
 
+  const search = Route.useSearch();
+  const debugDefault = search.debug === "true" || search.debug === true;
   const [input, setInput] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(debugDefault);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -278,14 +286,17 @@ function ChatDetail() {
           <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
         )}
 
-        <DebugPanel events={stream.rawEvents} />
+        <RunInspector
+          events={stream.rawEvents}
+          open={inspectorOpen}
+          onClose={() => setInspectorOpen(false)}
+        />
       </div>
 
       <CitationsPanel
         open={citationsOpen}
         onClose={() => setCitationsOpen(false)}
         byMessage={citations.byMessage}
-        total={citations.total}
         pending={citations.pending}
         error={citations.error}
       />

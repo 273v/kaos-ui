@@ -10,6 +10,9 @@ importers:
 
   examples/single-user-chat/apps/spa:
     dependencies:
+      '@273v/kaos-ui-react':
+        specifier: workspace:*
+        version: link:../../../../packages/kaos-ui-react
       '@kaos-chat-example/ui':
         specifier: workspace:*
         version: link:../../packages/ui

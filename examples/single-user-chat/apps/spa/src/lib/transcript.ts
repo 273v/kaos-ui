@@ -4,8 +4,9 @@
 // backend has a /v1/chat/sessions/{id}/transcript route, but as a
 // stub for shareable-link use cases later (Phase 3+).
 
+import type { ChatMessage } from "@273v/kaos-ui-react/lib";
+
 import type { SessionMeta } from "@/lib/api-types";
-import type { ChatMessage } from "@/lib/chat-state";
 
 export interface TranscriptInput {
   meta: SessionMeta;

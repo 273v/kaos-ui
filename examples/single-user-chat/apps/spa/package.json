@@ -14,6 +14,7 @@
     "codegen": "openapi-ts"
   },
   "dependencies": {
+    "@273v/kaos-ui-react": "workspace:*",
     "@kaos-chat-example/ui": "workspace:*",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-router": "^1.120.3",

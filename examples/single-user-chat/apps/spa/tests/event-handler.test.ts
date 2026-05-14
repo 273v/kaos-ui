@@ -5,17 +5,17 @@
 // mutation. Each case here exercises one branch and asserts the
 // resulting state differs from the seed in a specific, expected way.
 
-import { describe, expect, it } from "vitest";
-
-import { type ChatMessage, newId } from "@/lib/chat-state";
 import {
+  ALL_EVENT_TYPES,
   applyEvent,
+  type ChatMessage,
   initialState,
   markAborted,
+  newId,
   pushUserAndAssistantPlaceholder,
   type TranscriptState,
-} from "@/lib/event-handler";
-import { ALL_EVENT_TYPES } from "@/lib/events";
+} from "@273v/kaos-ui-react/lib";
+import { describe, expect, it } from "vitest";
 
 function seedWithPlaceholder(): { state: TranscriptState; assistantId: string } {
   return pushUserAndAssistantPlaceholder(initialState, "hello");

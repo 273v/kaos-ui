@@ -6,13 +6,24 @@
 
 import "@kaos-chat-example/ui/fonts";
 import "@/styles/globals.css";
+import "@273v/kaos-ui-react/styles.css";
+import { KaosUIProvider, type Transport } from "@273v/kaos-ui-react/lib";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { type AuthContextValue, AuthProvider, useAuth } from "@/auth/context";
+import { loadToken } from "@/auth/storage";
 import { routeTree } from "./routeTree.gen";
+
+// Backend coordinates for every @273v/kaos-ui-react hook / component
+// in this app. `baseUrl` matches the example's POST /v1/chat/sessions/*
+// surface so the kaos-ui-react hooks hit the right routes.
+const transport: Transport = {
+  baseUrl: "/v1/chat",
+  getToken: () => loadToken(),
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -67,9 +78,11 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <RouterProviderWithAuth />
-      </AuthProvider>
+      <KaosUIProvider transport={transport}>
+        <AuthProvider>
+          <RouterProviderWithAuth />
+        </AuthProvider>
+      </KaosUIProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
