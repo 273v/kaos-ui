@@ -12,6 +12,7 @@ import { Message } from "@/components/chat/Message";
 import { TurnStatus } from "@/components/chat/TurnStatus";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
+import { useUploadFile } from "@/hooks/use-files";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
@@ -36,6 +37,7 @@ function ChatDetail() {
   const session = useSession(id);
   const history = useSessionMessages(id);
   const patch = usePatchMeta(id);
+  const upload = useUploadFile(id);
 
   // Map the wire shape `{role, content, added_at}` to our ChatMessage.
   const initialMessages = useMemo<ChatMessage[]>(() => {
@@ -182,6 +184,8 @@ function ChatDetail() {
         onStop={stream.abort}
         pending={stream.state.pending}
         placeholder={`Message ${meta?.title ?? "this conversation"}…`}
+        onAttach={(file) => upload.mutate(file)}
+        uploading={upload.isPending}
         leftChips={
           meta && (
             <ModelPickerChip

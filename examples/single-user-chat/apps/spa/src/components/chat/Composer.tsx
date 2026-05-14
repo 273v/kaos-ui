@@ -1,6 +1,8 @@
 import { Textarea } from "@kaos-chat-example/ui/components/ui/textarea";
-import { ArrowUp, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Loader2, Paperclip, Square } from "lucide-react";
 import { useEffect, useRef } from "react";
+
+import { SUPPORTED_UPLOAD_ACCEPT } from "@/lib/files";
 
 interface Props {
   value: string;
@@ -12,6 +14,10 @@ interface Props {
   placeholder?: string;
   /** Left-of-send chip row (e.g., model picker). */
   leftChips?: React.ReactNode;
+  /** Called once per file the user selects via the paperclip button. */
+  onAttach?: (file: File) => void;
+  /** True while an upload is in flight (disables the paperclip + shows a spinner). */
+  uploading?: boolean;
 }
 
 /**
@@ -29,8 +35,12 @@ export function Composer({
   pending,
   placeholder = "Send a message",
   leftChips,
+  onAttach,
+  uploading = false,
 }: Props) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachEnabled = !!onAttach && !uploading;
 
   // Autogrow must run on every keystroke, not just mount. We don't
   // read `value` inside the effect, but its change is what makes the
@@ -53,14 +63,44 @@ export function Composer({
       <div className="mx-auto max-w-3xl px-4 pt-3 pb-2">
         <div className="flex items-center gap-2 pb-2">
           {leftChips}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={SUPPORTED_UPLOAD_ACCEPT}
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = e.target.files;
+              if (!files || !onAttach) return;
+              for (const file of Array.from(files)) onAttach(file);
+              // Allow re-selecting the same file by clearing the input.
+              e.target.value = "";
+            }}
+          />
           <button
             type="button"
-            disabled
-            className="flex items-center gap-1 text-xs text-muted-foreground opacity-60 cursor-not-allowed"
-            title="Coming soon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!attachEnabled}
+            className={
+              attachEnabled
+                ? "flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                : "flex items-center gap-1 text-xs text-muted-foreground opacity-60 cursor-not-allowed"
+            }
+            title={
+              uploading
+                ? "Uploading…"
+                : onAttach
+                  ? "Attach a file (PDF, DOCX, PPTX)"
+                  : "Attach unavailable"
+            }
+            aria-label="Attach file"
           >
-            <Paperclip className="h-3 w-3" />
-            Attach
+            {uploading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Paperclip className="h-3 w-3" />
+            )}
+            {uploading ? "Uploading…" : "Attach"}
           </button>
         </div>
         <div className="relative">
