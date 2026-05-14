@@ -72,7 +72,16 @@ def _format_history(messages: list[HistoryMessage]) -> str:
 
 
 def _should_retitle(meta: SessionMeta) -> bool:
-    """Decide whether the post-turn hook should re-summarize."""
+    """Decide whether the post-turn hook should re-summarize.
+
+    Pre-existing sessions (created before this feature shipped) load
+    with `title_source="auto"` and `title_updated_at=None` because
+    Pydantic backfills the new fields with defaults. We do NOT want
+    to overwrite their heuristic titles on every turn — only on the
+    natural cadence (first turn, every 10 messages). The 24h stale
+    refresh only fires once we've previously auto-titled the session,
+    so it can't surprise older chats.
+    """
     if meta.title_source == "manual":
         return False
     if meta.message_count <= 2:
@@ -82,7 +91,9 @@ def _should_retitle(meta: SessionMeta) -> bool:
     if meta.message_count % _REFRESH_EVERY_MESSAGES == 0:
         return True
     if meta.title_updated_at is None:
-        return True
+        # Pre-existing session: leave its title alone until the next
+        # natural retitle boundary above.
+        return False
     age = datetime.now(UTC) - meta.title_updated_at
     return age >= _REFRESH_MAX_AGE
 
