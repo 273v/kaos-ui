@@ -102,37 +102,44 @@ def build_catalog() -> list[ModelEntry]:
 # a glob, confirm every tool matched is genuinely side-effect-free
 # (read / extract / search / classify).
 READ_ONLY_TOOL_GLOBS: tuple[str, ...] = (
-    # kaos-core: VFS + tool registry inspection — reads only.
+    # kaos-core: VFS reads + tool / artifact / config introspection.
+    # credentials-check is excluded — it exposes which auth secrets are
+    # configured, which we don't surface to the agent by default.
     "kaos-core-vfs-list",
     "kaos-core-vfs-read",
+    "kaos-core-vfs-stat",
     "kaos-core-list-tools",
     "kaos-core-list-resources",
     "kaos-core-tool-schema",
-    # kaos-pdf: text/page/render reads + classify. ParsePDF + RenderPage
-    # are read-only against the input file.
-    "kaos-pdf-parse",
-    "kaos-pdf-page-text",
-    "kaos-pdf-render-page",
-    "kaos-pdf-metadata",
-    "kaos-pdf-search",
-    "kaos-pdf-outline",
-    "kaos-pdf-classify",
-    # kaos-office: every entry is a read/parse path. Writers are out.
-    "kaos-office-read*",
-    "kaos-office-extract*",
-    "kaos-office-search*",
-    "kaos-office-list*",
-    # kaos-content: corpus + entity + summary queries, all read-only.
-    "kaos-content-search-document",
-    "kaos-content-chunk-document",
-    "kaos-content-summarize-document",
-    "kaos-content-extract*",
-    "kaos-content-filter*",
-    "kaos-content-corpus-*",
-    "kaos-content-sentences-*",
-    # kaos-citations: typed Bluebook/financial citation extraction.
-    # extract + validate + doctor are all readOnlyHint=True.
+    "kaos-core-artifacts-inspect",
+    "kaos-core-artifacts-list",
+    "kaos-core-config-show",
+    # kaos-pdf: every tool is read-only (extract / search / render /
+    # metadata / classify / outline). The 0.1.0a2 names are unhyphenated
+    # under each capability — `kaos-pdf-extract-parse`, etc.
+    "kaos-pdf-*",
+    # kaos-office: read / parse / metadata / search / list. The
+    # write-docx / write-pptx / write-xlsx tools are deliberately
+    # excluded — they would mutate the user's session storage.
+    "kaos-office-get-*",
+    "kaos-office-list-*",
+    "kaos-office-parse-*",
+    "kaos-office-metadata",
+    "kaos-office-xlsx-metadata",
+    "kaos-office-search",
+    "kaos-office-search-pptx",
+    # kaos-content: all tools are read-only over the parsed document
+    # AST — search / chunk / extract / corpus / sentences / serialize /
+    # stats / parse-markdown / dedup-semantic.
+    "kaos-content-*",
+    # kaos-citations: typed Bluebook / financial / accounting citation
+    # extraction. extract + validate + doctor are all readOnlyHint=True.
     "kaos-citations-*",
+    # kaos-source: 30 connectors — Federal Register / eCFR / EDGAR /
+    # GovInfo / GLEIF REST APIs, plus generic HTTP / archive / file
+    # metadata / forensic parsers (vcard / eml / mbox / pacer / exif).
+    # All read-oriented; materialize writes to the runtime VFS only.
+    "kaos-source-*",
 )
 
 

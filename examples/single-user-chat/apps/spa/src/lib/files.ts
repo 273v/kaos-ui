@@ -37,29 +37,18 @@ export interface FileListResponse {
 /**
  * Multipart upload to POST /v1/chat/sessions/{id}/files.
  *
- * Uses `apiFetch` (not `apiJson`) because the multipart body needs the
- * browser to set its own `Content-Type: multipart/form-data; boundary=…`
- * header — setting it ourselves to `application/json` would corrupt the
- * upload. We strip the default `Content-Type` by passing a `FormData`
- * body; `apiFetch` only sets it when there's no override.
- *
- * Note: `apiFetch` sets `Content-Type: application/json` by default;
- * for multipart we need to override that. We pass it via the headers
- * with an explicit deletion (`undefined`) which fetch then ignores.
+ * Uses `apiFetch` directly so the FormData body keeps the browser-set
+ * `Content-Type: multipart/form-data; boundary=…` header. `apiFetch`
+ * detects `body instanceof FormData` and skips its default JSON
+ * content-type — overriding it would corrupt the multipart parse and
+ * FastAPI 422s on the missing `file` form field.
  */
 export async function uploadFile(sessionId: string, file: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file, file.name);
 
-  // Override the default Content-Type so the browser picks the
-  // multipart boundary itself.
-  const headers = new Headers();
-  // Auth header gets applied by apiFetch from localStorage; do nothing
-  // here. The browser fills in Content-Type for the multipart body.
-
   const response = await apiFetch(`/v1/chat/sessions/${sessionId}/files`, {
     method: "POST",
-    headers,
     body: form,
   });
   if (!response.ok) {

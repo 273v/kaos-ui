@@ -29,6 +29,10 @@ dependencies = [
     "kaos-office>=0.1.0a2,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
     "kaos-citations>=0.1.0a2,<0.2",
+    # P2-1b: source discovery + materialization. Federal Register / eCFR /
+    # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
+    # parsers. Registers 30 read-only tools (`kaos-source-*`).
+    "kaos-source>=0.1.0a3,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",

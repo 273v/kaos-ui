@@ -56,14 +56,18 @@ def create_app(settings: AppSettings | None = None):
     # used downstream by the system-prompt augmentation in stream_proxy.
     runtime, tool_names = build_chat_runtime(vfs_path=settings.vfs_path)
 
-    # kaos-citations is not yet known to kaos-ui 0.1.0a1, so we register
-    # it here. Promote into kaos_ui.agents.build_chat_runtime alongside
-    # pdf/office/content when we cut kaos-ui 0.1.0a2 (task #92).
+    # kaos-citations + kaos-source are not yet known to kaos-ui 0.1.0a1;
+    # register them here. Promote into kaos_ui.agents.build_chat_runtime
+    # alongside pdf/office/content when we cut kaos-ui 0.1.0a2 (task #92).
     with contextlib.suppress(ImportError):
         from kaos_citations import register_citations_tools
 
         register_citations_tools(runtime)
-        tool_names = tuple(sorted(runtime.tools.list_tools()))
+    with contextlib.suppress(ImportError):
+        from kaos_source import register_source_tools
+
+        register_source_tools(runtime)
+    tool_names = tuple(sorted(runtime.tools.list_tools()))
 
     logger.info("registered %d kaos tools on runtime", len(tool_names))
 

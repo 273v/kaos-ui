@@ -19,10 +19,16 @@ interface Props {
   error: string | null;
 }
 
+// Cross-reference kinds (`Id.`, `supra`, `infra`) carry no information
+// without the citation they point back to — they're noise in a list view.
+// Hide them by default; the assistant's prose context still has them.
+const HIDDEN_KINDS = new Set(["id", "supra", "infra"]);
+
 function groupByKind(byMessage: Map<string, Citation[]>): Map<string, Citation[]> {
   const grouped = new Map<string, Citation[]>();
   for (const cites of byMessage.values()) {
     for (const c of cites) {
+      if (HIDDEN_KINDS.has(c.kind)) continue;
       const list = grouped.get(c.kind) ?? [];
       list.push(c);
       grouped.set(c.kind, list);
@@ -44,6 +50,11 @@ export function CitationsPanel({ open, onClose, byMessage, total, pending, error
   if (!open) return null;
   const groups = groupByKind(byMessage);
   const kinds = Array.from(groups.keys()).sort();
+  // Visible count excludes the hidden kinds (`id` / `supra` / `infra`).
+  // The hook's `total` includes them — falling back to it covers an
+  // empty `byMessage` so the placeholder copy still renders.
+  const visibleTotal = Array.from(groups.values()).reduce((acc, arr) => acc + arr.length, 0);
+  void total;
 
   return (
     <aside
@@ -54,7 +65,7 @@ export function CitationsPanel({ open, onClose, byMessage, total, pending, error
         <div className="flex items-center gap-2">
           <Quote className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">Citations</span>
-          <span className="text-xs text-muted-foreground tabular-nums">{total}</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{visibleTotal}</span>
           {pending && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
         <button
@@ -77,7 +88,7 @@ export function CitationsPanel({ open, onClose, byMessage, total, pending, error
       )}
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {total === 0 && !pending && (
+        {visibleTotal === 0 && !pending && (
           <p className="text-xs text-muted-foreground italic">
             No citations detected yet. Citations appear here after the agent's response is
             extracted.

@@ -21,8 +21,12 @@ export interface ApiError {
 
 export async function apiFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
   const token = loadToken();
+  // For multipart uploads (`body: FormData`) the browser must set
+  // `Content-Type: multipart/form-data; boundary=...` itself — setting
+  // a default `application/json` corrupts the parse and FastAPI 422s.
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const headers: HeadersInit = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(init.headers ?? {}),
   };
   if (token) {
