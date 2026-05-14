@@ -24,9 +24,21 @@ export interface ChatMessage {
   created_at: number;
   /** True while text_delta events are still accumulating for this message. */
   streaming: boolean;
+  /**
+   * Wall-clock ms when the turn STARTED — set when the assistant
+   * placeholder is created. `latency_ms` is `Date.now() - started_at`
+   * at turn-complete time.
+   */
+  started_at?: number;
   /** Aggregated per-turn usage; populated on `turn_summary`. */
   tokens?: number;
+  /** Sum of input tokens across all LLM calls in this turn. */
+  input_tokens?: number;
+  /** Sum of output tokens across all LLM calls in this turn. */
+  output_tokens?: number;
   cost_usd?: number;
+  /** Wall-clock duration of the turn in ms — set on turn complete / error. */
+  latency_ms?: number;
   /** Inline tool-call cards rendered inside the assistant message. */
   tool_calls?: ToolCallSummary[];
 }

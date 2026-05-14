@@ -112,10 +112,17 @@ def test_upload_201_with_failed_status_when_parser_rejects_corrupt_pdf(
 
 
 def test_upload_happy_path_persists_and_flips_tools(client: TestClient, app) -> None:
-    """Minimal valid PDF → 201 + parsed AST + tools_enabled flipped."""
-    sid = _create_session(client)
+    """Minimal valid PDF → 201 + parsed AST + tools_enabled flipped.
 
-    # Session starts with default_tools_enabled=False (AppSettings default).
+    Creates the session with `tools_enabled=False` explicitly to verify
+    the auto-flip behavior. The AppSettings default is `True`, but the
+    SPA can still opt a session out via the create-body, and uploading
+    a file should always turn tools back on.
+    """
+    r = client.post("/v1/chat/sessions", json={"tools_enabled": False})
+    assert r.status_code == status.HTTP_201_CREATED, r.text
+    sid = r.json()["id"]
+
     meta_before = client.get(f"/v1/chat/sessions/{sid}/meta").json()
     assert meta_before["tools_enabled"] is False
 

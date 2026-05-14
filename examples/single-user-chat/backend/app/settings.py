@@ -45,7 +45,7 @@ class AppSettings(ModuleSettings):
     # Per-session defaults (overridable via the SPA's settings drawer).
     default_model: str = "anthropic:claude-haiku-4-5"
     default_system_prompt: str = _DEFAULT_SYSTEM_PROMPT
-    default_tools_enabled: bool = False
+    default_tools_enabled: bool = True
 
     # Per-turn budget cap (USD). Threaded into MessageRequest.max_cost_usd.
     turn_budget_usd: float = 0.50

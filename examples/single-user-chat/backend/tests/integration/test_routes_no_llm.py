@@ -77,7 +77,9 @@ def test_create_session_round_trip(client):
     sid = meta["id"]
     assert meta["title"] == "test session"
     assert meta["model"] == "anthropic:claude-haiku-4-5"
-    assert meta["tools_enabled"] is False
+    # default_tools_enabled is True (AppSettings default — tools on by
+    # default so the agent can use uploaded files + kaos-source connectors).
+    assert meta["tools_enabled"] is True
     assert meta["message_count"] == 0
 
     # GET meta

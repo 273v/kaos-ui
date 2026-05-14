@@ -219,11 +219,20 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     }
 
     case "usage_observed": {
+      // The agent emits one usage_observed per LLM call within a turn,
+      // so we accumulate rather than overwrite — total_tokens here is
+      // the per-call total. Fall back to input + output when the
+      // provider doesn't include `total_tokens`.
+      const target = currentAssistant(state.messages);
+      const callTotal =
+        event.total_tokens ?? (event.input_tokens ?? 0) + (event.output_tokens ?? 0);
       return {
         ...state,
         messages: patchAssistant(state.messages, {
-          tokens: event.total_tokens ?? undefined,
-          cost_usd: event.cost_usd ?? undefined,
+          tokens: (target?.tokens ?? 0) + callTotal,
+          input_tokens: (target?.input_tokens ?? 0) + (event.input_tokens ?? 0),
+          output_tokens: (target?.output_tokens ?? 0) + (event.output_tokens ?? 0),
+          cost_usd: (target?.cost_usd ?? 0) + (event.cost_usd ?? 0),
         }),
       };
     }
@@ -257,14 +266,23 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     }
 
     case "turn_summary": {
+      // Prefer the turn_summary totals when present (they're the rolled-
+      // up authoritative numbers); fall back to whatever usage_observed
+      // accumulated. Either way, record latency_ms now.
+      const target = currentAssistant(state.messages);
+      const summaryTotal =
+        event.tokens_used ?? (event.input_tokens ?? 0) + (event.output_tokens ?? 0);
       return {
         ...state,
         status: { kind: "idle" },
         pending: false,
         messages: patchAssistant(state.messages, {
           content: event.text,
-          tokens: event.tokens_used,
-          cost_usd: event.cost_usd,
+          tokens: event.tokens_used != null ? summaryTotal : target?.tokens,
+          input_tokens: event.input_tokens ?? target?.input_tokens,
+          output_tokens: event.output_tokens ?? target?.output_tokens,
+          cost_usd: event.cost_usd ?? target?.cost_usd,
+          latency_ms: latencyFor(state.messages),
           streaming: false,
         }),
       };
@@ -279,6 +297,7 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     case "run_error": {
       const what = event.what ?? "The turn failed.";
       const target = currentAssistant(state.messages);
+      const latency = latencyFor(state.messages);
       const updated: ChatMessage[] = target
         ? state.messages.map((m) =>
             m.id === target.id
@@ -287,6 +306,7 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
                   role: "error" as const,
                   content: event.how_to_fix ? `${what}\n\n${event.how_to_fix}` : what,
                   streaming: false,
+                  latency_ms: latency,
                 }
               : m,
           )
@@ -320,6 +340,7 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
         banners: [...state.banners, { id: newId(), kind: "warn", text }],
         messages: patchAssistant(state.messages, {
           streaming: false,
+          latency_ms: latencyFor(state.messages),
         }),
       };
     }
@@ -358,6 +379,7 @@ export function pushUserAndAssistantPlaceholder(
   message: string,
 ): { state: TranscriptState; assistantId: string } {
   const assistantId = newId();
+  const now = Date.now();
   return {
     state: {
       ...state,
@@ -365,18 +387,26 @@ export function pushUserAndAssistantPlaceholder(
       status: { kind: "thinking" },
       messages: [
         ...state.messages,
-        { id: newId(), role: "user", content: message, created_at: Date.now(), streaming: false },
+        { id: newId(), role: "user", content: message, created_at: now, streaming: false },
         {
           id: assistantId,
           role: "assistant",
           content: "",
-          created_at: Date.now(),
+          created_at: now,
           streaming: true,
+          started_at: now,
         },
       ],
     },
     assistantId,
   };
+}
+
+/** Wall-clock latency since the in-flight assistant message started. */
+function latencyFor(messages: ChatMessage[]): number | undefined {
+  const target = currentAssistant(messages);
+  if (!target?.started_at) return undefined;
+  return Date.now() - target.started_at;
 }
 
 /** Mark the in-flight stream as aborted (UI shows "Stopped"). */

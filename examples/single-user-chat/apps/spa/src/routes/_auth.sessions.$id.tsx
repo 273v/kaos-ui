@@ -19,7 +19,7 @@ import {
 } from "@273v/kaos-ui-react/hooks";
 import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Quote, Settings } from "lucide-react";
+import { Bug, Download, Quote, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -172,6 +172,20 @@ function ChatDetail() {
             {citations.total > 0 && (
               <span className="tabular-nums text-[10px]">{citations.total}</span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setInspectorOpen((v) => !v)}
+            disabled={!meta}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
+              inspectorOpen ? "bg-muted text-foreground" : ""
+            }`}
+            title="Run inspector (live cost / events / JSON tree)"
+            aria-label="Toggle run inspector"
+            aria-pressed={inspectorOpen}
+          >
+            <Bug className="h-3.5 w-3.5" />
           </button>
 
           <button

@@ -78,8 +78,13 @@ export function Message({ message }: Props) {
         </div>
       )}
 
-      {(message.tokens || message.cost_usd) && !message.streaming && (
-        <UsageChip tokens={message.tokens} costUsd={message.cost_usd} />
+      {isAssistant && !message.streaming && (
+        <UsageChip
+          latencyMs={message.latency_ms}
+          tokens={message.tokens}
+          costUsd={message.cost_usd}
+          toolCount={message.tool_calls?.length}
+        />
       )}
     </article>
   );
