@@ -49,3 +49,20 @@ export {
 } from "./transport.js";
 
 export { renderMarkdown } from "./markdown.js";
+
+export type { StreamEvent, ReadSseStreamOptions } from "./streaming.js";
+export { readSseStream } from "./streaming.js";
+
+export type {
+  FileParseStatus,
+  FileMeta,
+  UploadResponse,
+  FileListResponse,
+} from "./files.js";
+export { uploadFile, listFiles, deleteFile, DEFAULT_UPLOAD_ACCEPT } from "./files.js";
+
+export type { Citation, ExtractCitationsResponse } from "./citations.js";
+export { extractCitations } from "./citations.js";
+
+export type { KaosQueryKey } from "./query-keys.js";
+export { kaosQueryKeys } from "./query-keys.js";

@@ -73,6 +73,7 @@
     }
   },
   "dependencies": {
+    "eventsource-parser": "^3.0.0",
     "lucide-react": "^0.510.0",
     "markdown-it": "^14.1.0"
   },
