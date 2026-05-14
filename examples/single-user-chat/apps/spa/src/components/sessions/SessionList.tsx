@@ -1,6 +1,7 @@
+import { useLocalStorage } from "@273v/kaos-ui-react/hooks";
 import { useParams } from "@tanstack/react-router";
 import { ArrowDownAZ, Clock, Star } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { useSessionList } from "@/hooks/use-session-list";
 import type { SessionSummary } from "@/lib/api-types";
@@ -40,14 +41,17 @@ function sortSessions(items: SessionSummary[], mode: SortMode): SessionSummary[]
 export function SessionList({ archived = false }: Props) {
   const params = useParams({ strict: false });
   const activeId = (params as { id?: string }).id;
-  const [sort, setSort] = useState<SortMode>("last_used");
+  // Sort + filter both persist via localStorage so the user's
+  // preference survives reloads.
+  const [sort, setSort] = useLocalStorage<SortMode>("kaos:session-sort", "last_used");
+  const [starredOnly, setStarredOnly] = useLocalStorage("kaos:session-starred-only", false);
 
   const query = useSessionList(archived);
 
-  const items = useMemo(
-    () => sortSessions(query.data?.sessions ?? [], sort),
-    [query.data?.sessions, sort],
-  );
+  const items = useMemo(() => {
+    const all = sortSessions(query.data?.sessions ?? [], sort);
+    return starredOnly ? all.filter((s) => s.starred) : all;
+  }, [query.data?.sessions, sort, starredOnly]);
 
   if (query.isLoading) {
     return (
@@ -63,19 +67,29 @@ export function SessionList({ archived = false }: Props) {
       </div>
     );
   }
-  if (items.length === 0) {
-    return (
-      <div className="px-3 py-2 text-xs text-muted-foreground">
-        {archived ? "Nothing archived." : "No conversations yet. Start one with “New chat”."}
-      </div>
-    );
-  }
-
   const SortIcon = SORT_LABELS[sort].icon;
+  const isEmpty = items.length === 0;
   return (
     <>
       {!archived && (
-        <div className="px-3 pb-1 pt-2 flex items-center justify-end">
+        <div className="px-3 pb-1 pt-2 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setStarredOnly((v) => !v)}
+            aria-pressed={starredOnly}
+            title={starredOnly ? "Show all sessions" : "Show starred sessions only"}
+            className={
+              "inline-flex items-center gap-1 text-[10px] uppercase tracking-wide rounded-md px-1.5 py-0.5 transition-colors " +
+              (starredOnly ? "text-warn bg-muted" : "text-muted-foreground hover:text-foreground")
+            }
+          >
+            <Star
+              className="h-3 w-3"
+              fill={starredOnly ? "currentColor" : "none"}
+              strokeWidth={starredOnly ? 1.5 : 2}
+            />
+            Starred
+          </button>
           <label className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer relative">
             <SortIcon className="h-3 w-3" />
             <span className="uppercase tracking-wide">{SORT_LABELS[sort].label}</span>
@@ -92,13 +106,23 @@ export function SessionList({ archived = false }: Props) {
           </label>
         </div>
       )}
-      <ul className="flex flex-col gap-0.5 px-2">
-        {items.map((s) => (
-          <li key={s.id}>
-            <SessionListItem session={s} active={s.id === activeId} />
-          </li>
-        ))}
-      </ul>
+      {isEmpty ? (
+        <div className="px-3 py-2 text-xs text-muted-foreground italic">
+          {archived
+            ? "Nothing archived."
+            : starredOnly
+              ? "No starred sessions. Star a row to pin it here."
+              : "No conversations yet. Start one with “New chat”."}
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-0.5 px-2">
+          {items.map((s) => (
+            <li key={s.id}>
+              <SessionListItem session={s} active={s.id === activeId} />
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }

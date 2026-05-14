@@ -20,6 +20,8 @@ export { useCitations } from "./use-citations.js";
 export type { ModelUsage, UseCostAggregationResult } from "./use-cost-aggregation.js";
 export { useCostAggregation } from "./use-cost-aggregation.js";
 
+export { useLocalStorage } from "./use-local-storage.js";
+
 // Re-export the transport-context reader from the lib layer so hook
 // consumers can import it from `@273v/kaos-ui-react/hooks` without
 // crossing subpath barriers.

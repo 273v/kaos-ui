@@ -15,6 +15,7 @@ import {
   useBackfillFiles,
   useCitations,
   useDeleteFile,
+  useLocalStorage,
   useSendMessage,
   useSessionFiles,
   useUploadFile,
@@ -102,7 +103,10 @@ function ChatDetail() {
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(debugDefault);
-  const [verboseTools, setVerboseTools] = useState(false);
+  // Persisted preference: once the user flips verbose tools on, it
+  // stays on across reloads + new sessions. Keyed under a stable
+  // string so a future "global UI prefs" page can introspect it.
+  const [verboseTools, setVerboseTools] = useLocalStorage("kaos:verbose-tools", false);
 
   const onSubmit = () => {
     const text = input.trim();
