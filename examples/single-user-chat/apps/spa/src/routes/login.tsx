@@ -21,6 +21,35 @@ export const Route = createFileRoute("/login")({
   component: LoginRoute,
 });
 
+/**
+ * Allowlist a `redirect` search param to known same-app paths.
+ *
+ * Rejects:
+ *   - any non-string / empty value → fall back to `/sessions`
+ *   - protocol-relative URLs (`//evil.com`) — these would navigate
+ *     off-origin via the browser's URL parser
+ *   - absolute URLs (`http://`, `mailto:`, `javascript:`, etc.)
+ *   - anything that doesn't start with a single `/`
+ *
+ * This is defense-in-depth — TanStack Router will already refuse to
+ * navigate to anything that doesn't match a registered route, but a
+ * future refactor that uses `window.location.assign(redirect)` would
+ * regress without this guard.
+ */
+export function safeRedirect(raw: string | undefined): string {
+  if (typeof raw !== "string" || raw.length === 0) return "/sessions";
+  if (!raw.startsWith("/")) return "/sessions";
+  if (raw.startsWith("//")) return "/sessions"; // protocol-relative
+  if (raw.startsWith("/\\")) return "/sessions"; // path-traversal trick
+  // Reject any character outside printable ASCII to dodge unicode
+  // visual-confusion tricks (zero-width space, RTL override, etc.).
+  // Same-app paths only need ASCII; consumers wanting real Unicode
+  // in URLs should percent-encode (which is ASCII-safe).
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately filters control chars.
+  if (!/^[\x20-\x7e]+$/.test(raw)) return "/sessions";
+  return raw;
+}
+
 function LoginRoute() {
   const { redirect } = Route.useSearch();
   const navigate = useNavigate();
@@ -31,7 +60,7 @@ function LoginRoute() {
     mutationFn: (t: string) => auth.login(t),
     onSuccess: () => {
       navigate({
-        to: redirect ?? "/sessions",
+        to: safeRedirect(redirect),
         replace: true,
       });
     },

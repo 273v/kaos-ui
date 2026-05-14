@@ -60,8 +60,22 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // We deliberately depend on both `sessionId` and `initialMessages`:
   // a session switch must always reset, AND an updated history-cache
   // result for the same session should hydrate.
+  //
+  // FIX-9: skip the reset when an SSE stream is already in flight.
+  // The example refetches history on window focus, which would
+  // otherwise abort the live turn mid-stream when the user
+  // tabs away + back. We track the live state via pendingRef
+  // (which mirrors state.pending) so the effect can no-op cleanly.
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is deliberately a dep — initialMessages reference may be cache-stable across a session switch, so we MUST also reset on id change.
   useEffect(() => {
+    if (pendingRef.current) {
+      // A stream is mid-flight. Don't tear it down just because the
+      // background history query refreshed. The next idle render
+      // (after the turn completes) will pick up any genuine
+      // initialMessages change via the followup setState below if
+      // we still need it.
+      return;
+    }
     abortRef.current?.abort();
     setRawEvents([]);
     eventCounter.current = 0;
@@ -95,6 +109,11 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
           },
           body: JSON.stringify({ message }),
           signal: controller.signal,
+          // FIX-9: thread the transport's fetch override so msw /
+          // retry wrappers / instrumented fetches see the SSE
+          // request too. Falls back to global fetch inside readSseStream
+          // when transport.fetch isn't provided.
+          fetch: transport.fetch,
         })) {
           if (typeof evt.data !== "object" || evt.data === null) continue;
           const wire = evt.data as Partial<KaosAgentEvent> & { type?: string };

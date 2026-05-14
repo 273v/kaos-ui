@@ -72,6 +72,10 @@ async def upload_file(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    # 413 fast-path: trust the Content-Length the upstream proxy
+    # delivered, when present. Caddy / nginx set this from the
+    # multipart body it parses, so we reject obviously-too-large
+    # uploads before ever touching the body.
     if file.size is not None and file.size > settings.max_upload_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -84,18 +88,37 @@ async def upload_file(
             },
         )
 
-    data = await file.read()
-    if len(data) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail={
-                "what": f"upload is {len(data)} bytes, max is {settings.max_upload_bytes}",
-                "how_to_fix": (
-                    "split the file or compress it; "
-                    f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"
-                ),
-            },
-        )
+    # FIX-11: stream-read in chunks so a body without a trustworthy
+    # Content-Length (or one that lies) can't OOM the process. We
+    # bail at the FIRST chunk that pushes us past the cap — the
+    # cumulative buffer is bounded at `max_upload_bytes + chunk`.
+    _UPLOAD_CHUNK_BYTES = 64 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > settings.max_upload_bytes:
+            # Drop accumulated chunks + close the upload tempfile.
+            chunks.clear()
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "what": (
+                        f"upload exceeded {settings.max_upload_bytes} bytes "
+                        f"while streaming"
+                    ),
+                    "how_to_fix": (
+                        "split the file or compress it; "
+                        f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"
+                    ),
+                },
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
 
     try:
         file_meta = await store_and_parse(

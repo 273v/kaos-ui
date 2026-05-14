@@ -77,15 +77,16 @@ class AppSettings(ModuleSettings):
     auto_title_model: str = "anthropic:claude-haiku-4-5"
     summarizer_model: str = "anthropic:claude-haiku-4-5"
     # Soft char-cap on the input the summarizer sends to the LLM.
-    # 800k chars ≈ 200k tokens — comfortable inside Haiku 4.5 +
-    # Sonnet 4.6's context windows with headroom for the instruction
-    # template. This is a RUNAWAY-COST GUARD, not a quality knob: a
-    # full SEC filing or deal-room PDF must NOT be silently truncated
-    # to a head-excerpt (the prior 12k-char cap was wrong for legal
-    # use). Raise the cap (or switch to Sonnet, whose context is 1M)
-    # if your documents routinely exceed this. Track logged-truncation
-    # events to know when you've crossed the line.
-    summary_input_cap_chars: int = 800_000
+    # This bounds ONLY the at-upload-time `summary` field — a 2-3
+    # sentence "what kind of document is this?" snippet. It is NOT
+    # the chat-context cap (see `_PER_FILE_PROMPT_BUDGET` in
+    # services/uploads.py for that). A 10k-char head covers the
+    # caption / parties / definitions / recitals of a typical legal
+    # document, which is enough to identify type + key entities.
+    # Users who want a deeper "summarize this whole document"
+    # treatment should call `kaos-content-corpus-summarize` from
+    # the chat interface instead.
+    summary_input_cap_chars: int = 10_000
 
     # File-upload pipeline (P1-1).
     # Max accepted bytes per upload — 25 MiB by default. Large enough for

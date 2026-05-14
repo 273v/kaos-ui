@@ -31,19 +31,29 @@ export interface StreamEvent {
 
 export interface ReadSseStreamOptions extends RequestInit {
   signal?: AbortSignal;
+  /**
+   * Custom fetch implementation. When omitted, the global `fetch` is
+   * used. The transport's `fetch` should be threaded in here so
+   * test stubs (msw) and retry wrappers see the SSE request too —
+   * otherwise the streaming path silently bypasses
+   * `<KaosUIProvider transport={{ fetch }}>`. See FIX-9.
+   */
+  fetch?: typeof fetch;
 }
 
 export async function* readSseStream(
   url: string,
   init: ReadSseStreamOptions = {},
 ): AsyncIterableIterator<StreamEvent> {
-  const response = await fetch(url, {
-    ...init,
+  const { fetch: customFetch, ...requestInit } = init;
+  const f = customFetch ?? globalThis.fetch;
+  const response = await f(url, {
+    ...requestInit,
     credentials: "include",
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
-      ...(init.headers ?? {}),
+      ...(requestInit.headers ?? {}),
     },
   });
   if (!response.ok || !response.body) {
