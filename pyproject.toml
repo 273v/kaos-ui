@@ -46,7 +46,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "kaos-mcp>=0.1.0",
   "pytest>=8.3.5",
   "pytest-asyncio>=0.26.0",
   "pytest-cov>=6.0.0",
@@ -115,10 +114,6 @@ branch = true
 
 [tool.uv]
 package = true
-
-[tool.uv.sources]
-kaos-core = { path = "../kaos-core", editable = true }
-kaos-mcp = { path = "../kaos-mcp", editable = true }
 
 [tool.ruff]
 line-length = 100
