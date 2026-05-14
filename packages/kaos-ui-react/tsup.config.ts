@@ -20,7 +20,12 @@ export default defineConfig({
   },
   format: ["esm", "cjs"],
   dts: true,
-  splitting: false,
+  // `splitting: true` is REQUIRED for multi-entry packages that share
+  // module-level state (createContext, singletons, etc.). Without it,
+  // tsup duplicates the shared modules into every entry bundle, which
+  // produces multiple TransportContext instances and breaks the
+  // provider/consumer pairing across subpath imports.
+  splitting: true,
   sourcemap: false,
   clean: true,
   treeshake: true,
