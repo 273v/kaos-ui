@@ -3,6 +3,10 @@ build/
 dist/
 *.egg-info/
 
+# Node
+node_modules/
+*.tsbuildinfo
+
 # Caches
 .benchmarks/
 .coverage

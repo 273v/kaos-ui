@@ -1,0 +1,16 @@
+{
+  "name": "kaos-ui-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.1.0",
+  "scripts": {
+    "build": "pnpm -r --filter @273v/kaos-ui-react build",
+    "build:all": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "test": "pnpm -r test",
+    "install:ci": "pnpm install --frozen-lockfile",
+    "verify:deps": "pnpm audit signatures"
+  }
+}

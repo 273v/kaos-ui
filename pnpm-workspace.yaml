@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
-  - "apps/*"
+  - "examples/single-user-chat/packages/*"
+  - "examples/single-user-chat/apps/*"
 
 # KAOS Node supply-chain baseline:
 # - delay newly published dependency versions for 72 hours
@@ -16,4 +17,5 @@ strictDepBuilds: true
 dangerouslyAllowAllBuilds: false
 savePrefix: ""
 allowBuilds:
+  '@biomejs/biome': true
   esbuild: true

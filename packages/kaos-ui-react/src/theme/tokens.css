@@ -1,0 +1,173 @@
+/*
+ * @273v/kaos-ui-react — design tokens + base styles.
+ *
+ * Consumers import this once at app root:
+ *   import "@273v/kaos-ui-react/styles.css";
+ *
+ * The tokens are CSS variables on :root so consumers can override
+ * the palette without forking the components. The defaults are
+ * intentionally neutral; the kelvin.legal / 273V product surfaces
+ * override them via a separate theme file.
+ *
+ * Palette names follow the shadcn convention so this slots cleanly
+ * into apps that already use shadcn primitives.
+ */
+
+:root {
+  /* Surface — backgrounds, foreground text, muted variants. */
+  --kaos-background: 0 0% 100%;
+  --kaos-foreground: 222 47% 11%;
+  --kaos-card: 0 0% 100%;
+  --kaos-card-foreground: 222 47% 11%;
+  --kaos-muted: 210 40% 96%;
+  --kaos-muted-foreground: 215 16% 47%;
+  --kaos-border: 214 32% 91%;
+  --kaos-input: 214 32% 91%;
+
+  /* Accent — primary CTA + ring color. */
+  --kaos-accent: 222 47% 11%;
+  --kaos-accent-foreground: 210 40% 98%;
+  --kaos-primary: 222 47% 11%;
+  --kaos-primary-foreground: 210 40% 98%;
+  --kaos-ring: 222 47% 11%;
+
+  /* Status — destructive + warn. */
+  --kaos-destructive: 0 84% 60%;
+  --kaos-destructive-foreground: 210 40% 98%;
+  --kaos-warn: 38 92% 50%;
+  --kaos-warn-foreground: 222 47% 11%;
+
+  /* JSON tree palette (light theme). Matches the kaos-agents viewer. */
+  --jt-key: #1d4ed8;
+  --jt-str: #047857;
+  --jt-num: #b45309;
+  --jt-bool: #be185d;
+  --jt-null: #6b7280;
+  --jt-punct: #475569;
+  --jt-meta: #64748b;
+  --jt-caret: #94a3b8;
+  --jt-hover: rgba(99, 102, 241, 0.1);
+  --jt-sel: rgba(99, 102, 241, 0.2);
+}
+
+html.dark,
+:root.dark {
+  --kaos-background: 222 47% 11%;
+  --kaos-foreground: 210 40% 98%;
+  --kaos-card: 222 47% 11%;
+  --kaos-card-foreground: 210 40% 98%;
+  --kaos-muted: 217 33% 17%;
+  --kaos-muted-foreground: 215 20% 65%;
+  --kaos-border: 217 33% 17%;
+  --kaos-input: 217 33% 17%;
+  --kaos-accent: 210 40% 98%;
+  --kaos-accent-foreground: 222 47% 11%;
+  --kaos-primary: 210 40% 98%;
+  --kaos-primary-foreground: 222 47% 11%;
+  --kaos-ring: 212 27% 84%;
+  --kaos-destructive: 0 63% 31%;
+  --kaos-destructive-foreground: 210 40% 98%;
+  --kaos-warn: 38 92% 50%;
+  --kaos-warn-foreground: 222 47% 11%;
+
+  --jt-key: #93c5fd;
+  --jt-str: #86efac;
+  --jt-num: #fcd34d;
+  --jt-bool: #f9a8d4;
+  --jt-null: #94a3b8;
+  --jt-punct: #94a3b8;
+  --jt-meta: #94a3b8;
+  --jt-caret: #64748b;
+  --jt-hover: rgba(99, 102, 241, 0.15);
+  --jt-sel: rgba(99, 102, 241, 0.28);
+}
+
+/* JSON tree (used by <JsonTree>). The component leans on these
+ * utility classes; they're plain CSS so consumers who don't use
+ * Tailwind can still render the tree correctly. */
+.kaos-jt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.kaos-jt-key { color: var(--jt-key); }
+.kaos-jt-str { color: var(--jt-str); }
+.kaos-jt-num { color: var(--jt-num); }
+.kaos-jt-bool { color: var(--jt-bool); }
+.kaos-jt-null { color: var(--jt-null); font-style: italic; }
+.kaos-jt-punct { color: var(--jt-punct); }
+.kaos-jt-meta { color: var(--jt-meta); font-style: italic; }
+.kaos-jt-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 1px 4px 1px 0;
+  border-radius: 3px;
+}
+.kaos-jt-row:hover { background: var(--jt-hover); }
+.kaos-jt-row.kaos-jt-selected { background: var(--jt-sel); }
+.kaos-jt-caret {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--jt-caret);
+  text-align: center;
+  user-select: none;
+  cursor: pointer;
+}
+.kaos-jt-children {
+  border-left: 1px dashed rgba(127, 127, 127, 0.25);
+  margin-left: 6px;
+  padding-left: 8px;
+}
+
+/* Markdown body — used by <MessageMarkdown> + tool result panels.
+ * Minimal; consumers can layer their own typography on top. */
+.kaos-md > * + * { margin-top: 0.75em; }
+.kaos-md h1, .kaos-md h2, .kaos-md h3 {
+  font-weight: 600;
+  line-height: 1.25;
+}
+.kaos-md h1 { font-size: 1.5em; }
+.kaos-md h2 { font-size: 1.25em; }
+.kaos-md h3 { font-size: 1.1em; }
+.kaos-md ul, .kaos-md ol { padding-left: 1.5em; }
+.kaos-md ul { list-style: disc; }
+.kaos-md ol { list-style: decimal; }
+.kaos-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: hsl(var(--kaos-muted));
+}
+.kaos-md pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.75em 1em;
+  border-radius: 6px;
+  background: hsl(var(--kaos-muted));
+  overflow-x: auto;
+}
+.kaos-md pre code {
+  padding: 0;
+  background: transparent;
+}
+.kaos-md table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.kaos-md th, .kaos-md td {
+  border: 1px solid hsl(var(--kaos-border));
+  padding: 0.4em 0.75em;
+}
+.kaos-md th {
+  background: hsl(var(--kaos-muted));
+  font-weight: 600;
+}
+.kaos-md a {
+  color: hsl(var(--kaos-primary));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
