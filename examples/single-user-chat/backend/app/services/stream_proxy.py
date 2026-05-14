@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import httpx
@@ -22,6 +22,8 @@ from app.logging_setup import app_logger
 from app.models import SessionMeta
 
 logger = app_logger("stream_proxy")
+
+_NO_TOOLS_PATTERN = "__kaos_chat_example_no_tools__"
 
 
 def _bearer_from_env() -> str:
@@ -33,12 +35,59 @@ def _bearer_from_env() -> str:
     return os.environ.get("KAOS_AGENTS_API_API_TOKEN", "")
 
 
-def _build_forward_body(meta: SessionMeta, message: str, max_cost_usd: float) -> dict[str, Any]:
+def _tool_patterns(meta: SessionMeta) -> list[str]:
+    """Translate the example-app toggle to kaos-agents glob semantics.
+
+    In kaos-agents 0.1.0a1 an empty tools list means "no explicit filter",
+    which bridges every runtime tool. Use a deliberately unmatched glob for
+    disabled sessions so the UI toggle is a real execution gate.
+    """
+    if meta.tools_enabled:
+        return ["*"]
+    return [_NO_TOOLS_PATTERN]
+
+
+def _instructions_with_tool_state(
+    meta: SessionMeta,
+    available_tool_names: Sequence[str] | None,
+) -> str:
+    if not meta.tools_enabled:
+        return (
+            f"{meta.system_prompt}\n\n"
+            "Tools are disabled for this session. You cannot call KAOS tools in this "
+            "turn, and if the user asks what tools you can use, say that no KAOS "
+            "tools are enabled for this session."
+        )
+
+    tool_names = sorted({name for name in available_tool_names or () if name})
+    if not tool_names:
+        return (
+            f"{meta.system_prompt}\n\n"
+            "Tools are enabled for this session, but the backend did not register any "
+            "KAOS tools."
+        )
+
+    catalog = "\n".join(f"- {name}" for name in tool_names)
+    return (
+        f"{meta.system_prompt}\n\n"
+        f"Tools are enabled for this session. Available KAOS tool names "
+        f"({len(tool_names)}):\n{catalog}\n\n"
+        "When the user asks what tools you can use, answer from this list."
+    )
+
+
+def _build_forward_body(
+    meta: SessionMeta,
+    message: str,
+    max_cost_usd: float,
+    *,
+    available_tool_names: Sequence[str] | None = None,
+) -> dict[str, Any]:
     return {
         "message": message,
         "model": meta.model,
-        "instructions": meta.system_prompt,
-        "tools": ["*"] if meta.tools_enabled else [],
+        "instructions": _instructions_with_tool_state(meta, available_tool_names),
+        "tools": _tool_patterns(meta),
         "max_cost_usd": max_cost_usd,
     }
 
@@ -50,6 +99,7 @@ async def stream_chat(
     meta: SessionMeta,
     message: str,
     max_cost_usd: float,
+    available_tool_names: Sequence[str] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Yield `{event, data}` records ready for `sse_starlette`.
 
@@ -57,7 +107,12 @@ async def stream_chat(
     Pure pass-through — the frontend dispatches on the 15 wire types
     per ARCHITECTURE.md § 5.3.
     """
-    body = _build_forward_body(meta, message, max_cost_usd)
+    body = _build_forward_body(
+        meta,
+        message,
+        max_cost_usd,
+        available_tool_names=available_tool_names,
+    )
     headers = {
         "Authorization": f"Bearer {bearer_token}",
         "Accept": "text/event-stream",

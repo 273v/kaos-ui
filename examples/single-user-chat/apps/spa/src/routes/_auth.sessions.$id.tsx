@@ -3,7 +3,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { Download, Settings } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 
 import { Composer } from "@/components/chat/Composer";
@@ -15,6 +15,9 @@ import { SettingsSheet } from "@/components/settings/SettingsSheet";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
+import { useSessionMessages } from "@/hooks/use-session-messages";
+import type { ChatMessage } from "@/lib/chat-state";
+import { newId } from "@/lib/chat-state";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
 const SearchSchema = z.object({
@@ -31,8 +34,22 @@ export const Route = createFileRoute("/_auth/sessions/$id")({
 function ChatDetail() {
   const { id } = Route.useParams();
   const session = useSession(id);
+  const history = useSessionMessages(id);
   const patch = usePatchMeta(id);
-  const stream = useSendMessage({ sessionId: id });
+
+  // Map the wire shape `{role, content, added_at}` to our ChatMessage.
+  const initialMessages = useMemo<ChatMessage[]>(() => {
+    if (!history.data) return [];
+    return history.data.messages.map((m) => ({
+      id: newId(),
+      role: m.role === "system" ? "system" : m.role,
+      content: m.content,
+      created_at: m.added_at * 1000,
+      streaming: false,
+    }));
+  }, [history.data]);
+
+  const stream = useSendMessage({ sessionId: id, initialMessages });
 
   const [input, setInput] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);

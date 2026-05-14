@@ -1,4 +1,11 @@
-import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/auth/context";
@@ -27,6 +34,7 @@ function readCollapsed(): boolean {
 export function Sidebar() {
   const auth = useAuth();
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsed());
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -82,6 +90,27 @@ export function Sidebar() {
 
           <div className="flex-1 overflow-y-auto pt-2">
             <SessionList />
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen((v) => !v)}
+                className="w-full flex items-center gap-1.5 px-3 py-1 text-[11px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
+              >
+                {archivedOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <Archive className="h-3 w-3" />
+                <span>Archived</span>
+              </button>
+              {archivedOpen && (
+                <div className="pt-1">
+                  <SessionList archived />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="border-t border-border p-2">

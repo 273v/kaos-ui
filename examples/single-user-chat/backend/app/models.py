@@ -87,3 +87,24 @@ class SendMessageBody(BaseModel):
 class ArchiveResponse(BaseModel):
     ok: Literal[True] = True
     archived_at: datetime
+
+
+class HistoryMessage(BaseModel):
+    """Single transcript turn rendered for the SPA.
+
+    The kaos-agents wire format stores message items as
+    `"user: <content>"` / `"assistant: <content>"` strings. We split
+    role from content here so the SPA can render with the same
+    Message component used for live-stream turns.
+    """
+
+    role: Literal["user", "assistant", "system"]
+    content: str
+    added_at: float
+
+
+class HistoryResponse(BaseModel):
+    session_id: str
+    turn_count: int
+    item_count: int
+    messages: list[HistoryMessage]

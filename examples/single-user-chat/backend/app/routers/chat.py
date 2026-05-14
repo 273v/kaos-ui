@@ -24,6 +24,8 @@ from app.logging_setup import app_logger
 from app.models import (
     ArchiveResponse,
     CreateSessionBody,
+    HistoryMessage,
+    HistoryResponse,
     PatchMetaBody,
     SendMessageBody,
     SessionListResponse,
@@ -162,6 +164,12 @@ async def send_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     bearer = _bearer_from_request(request)
+    runtime = getattr(request.app.state, "kaos_runtime", None)
+    available_tool_names = (
+        tuple(sorted(runtime.tools.list_tools()))
+        if meta.tools_enabled and runtime is not None
+        else ()
+    )
 
     async def event_generator():
         try:
@@ -171,6 +179,7 @@ async def send_message(
                 meta=meta,
                 message=body.message,
                 max_cost_usd=settings.turn_budget_usd,
+                available_tool_names=available_tool_names,
             ):
                 yield evt
         finally:
@@ -188,10 +197,79 @@ async def send_message(
     )
 
 
+@router.get("/sessions/{session_id}/messages", response_model=HistoryResponse)
+async def get_history(
+    session_id: str,
+    request: Request,
+    store: StoreDep,
+    upstream: UpstreamDep,
+) -> HistoryResponse:
+    """Fetch prior conversation messages from kaos-agents SessionMemory.
+
+    Returns an empty list (not 404) when the session has no turns yet —
+    the SPA seeds the transcript with whatever this returns on route mount.
+    """
+    # Ensure our metadata exists; if not, 404 here rather than letting
+    # the upstream call leak a confusing message.
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    bearer = _bearer_from_request(request)
+    r = await upstream.get(
+        f"/v1/sessions/{session_id}/memory/messages",
+        headers={"Authorization": f"Bearer {bearer}"},
+    )
+    if r.status_code == 404:
+        # Session exists in our sidecar but has no turns yet on the
+        # agent side — return an empty history rather than 404ing.
+        return HistoryResponse(session_id=session_id, turn_count=0, item_count=0, messages=[])
+    if r.status_code >= 400:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"upstream /memory/messages {r.status_code}: {r.text[:300]}",
+        )
+
+    raw = r.json()
+    # kaos-agents stores messages as 'user: ...' / 'assistant: ...'
+    # strings inside `items[].content`. Split role from text.
+    parsed: list[HistoryMessage] = []
+    for item in raw.get("items", []):
+        content_str = item.get("content", "")
+        role: str = "assistant"
+        text: str = content_str
+        for prefix, mapped in (
+            ("user: ", "user"),
+            ("assistant: ", "assistant"),
+            ("system: ", "system"),
+        ):
+            if content_str.startswith(prefix):
+                role = mapped
+                text = content_str[len(prefix) :]
+                break
+        parsed.append(
+            HistoryMessage(
+                role=role,  # type: ignore[arg-type]
+                content=text,
+                added_at=float(item.get("added_at", 0.0)),
+            )
+        )
+    # kaos-agents returns newest-first; flip to chronological for the SPA.
+    parsed.sort(key=lambda m: m.added_at)
+    return HistoryResponse(
+        session_id=session_id,
+        turn_count=int(raw.get("turn_count", 0)),
+        item_count=int(raw.get("item_count", len(parsed))),
+        messages=parsed,
+    )
+
+
 @router.get("/sessions/{session_id}/transcript")
 async def transcript_stub(session_id: str) -> dict[str, str]:
-    """Phase 3 task #22 will implement Markdown + JSON export."""
+    """Transcript export is implemented client-side (see lib/transcript.ts).
+    Server-side export for shareable-link use cases lives in a later phase."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="transcript export lands in Phase 3",
+        detail="server-side transcript export not in v1; use the client-side download.",
     )

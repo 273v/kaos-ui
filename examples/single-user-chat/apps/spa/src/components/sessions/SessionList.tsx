@@ -3,20 +3,30 @@ import { useParams } from "@tanstack/react-router";
 import { useSessionList } from "@/hooks/use-session-list";
 import { SessionListItem } from "./SessionListItem";
 
+interface Props {
+  /** Show archived sessions instead of active ones. */
+  archived?: boolean;
+}
+
 /**
- * Vertical session list shown inside the sidebar.
+ * Vertical session list shown inside the sidebar. Renders the active
+ * namespace by default; pass `archived` to render the archived list.
  *
  * Highlights the active route's `:id` param (TanStack Router supplies
  * an empty object when the user is on /sessions/ without an id).
  */
-export function SessionList() {
+export function SessionList({ archived = false }: Props) {
   const params = useParams({ strict: false });
   const activeId = (params as { id?: string }).id;
 
-  const query = useSessionList();
+  const query = useSessionList(archived);
 
   if (query.isLoading) {
-    return <div className="px-3 py-2 text-xs text-muted-foreground">Loading sessions…</div>;
+    return (
+      <div className="px-3 py-2 text-xs text-muted-foreground">
+        Loading{archived ? " archived" : ""}…
+      </div>
+    );
   }
   if (query.isError) {
     return (
@@ -30,7 +40,7 @@ export function SessionList() {
   if (items.length === 0) {
     return (
       <div className="px-3 py-2 text-xs text-muted-foreground">
-        No conversations yet. Start one with “New chat”.
+        {archived ? "Nothing archived." : "No conversations yet. Start one with “New chat”."}
       </div>
     );
   }
