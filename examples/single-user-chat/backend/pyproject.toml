@@ -14,11 +14,16 @@ dependencies = [
     # Verified on PyPI 2026-05-14; see docs/PRD.md § 12.
     "kaos-agents>=0.1.0a1,<0.2",
     "kaos-core>=0.1.0a6,<0.2",
+    # kaos-ui ships the canonical `kaos_ui.agents` helpers (disk runtime
+    # + KaosContext bridge patch + tool catalog injection + tool-glob
+    # sentinel). Consumed from PyPI 0.1.0a1.
+    "kaos-ui>=0.1.0a1,<0.2",
     # NOT transitive from kaos-agents 0.1.0a1 — declare explicitly.
     "kaos-llm-core>=0.1.0a7,<0.2",
     "kaos-llm-client>=0.1.0a3,<0.2",
     # Optional content/extraction tools — only invoked when a session
-    # has tools_enabled=True.
+    # has tools_enabled=True. kaos_ui.agents.build_chat_runtime
+    # registers these conditionally via contextlib.suppress(ImportError).
     "kaos-content[markdown]>=0.1.0a6,<0.2",
     "kaos-pdf>=0.1.0a2,<0.2",
     "kaos-office>=0.1.0a2,<0.2",

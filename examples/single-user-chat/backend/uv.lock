@@ -418,6 +418,20 @@ wheels = [
 ]
 
 [[package]]
+name = "kaos-ui"
+version = "0.1.0a1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "kaos-core" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/8a/fe30a039c20c710a08e8b8b021c6be7526ee87993069df85dd648e8f11f4/kaos_ui-0.1.0a1.tar.gz", hash = "sha256:027ffdbb2fe70d0546740b7a33aa84a3f78cb563f1d306d068b55f8d55a2a735", size = 140222, upload-time = "2026-05-14T16:42:47.436Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/f3/9a4b4c59da4df09b99c67a38df79659f25685a392759ec9764dd3d5aab86/kaos_ui-0.1.0a1-py3-none-any.whl", hash = "sha256:f9fd2a1df42931a2cef25366bb43d8c9842d64a0571c66eef03f38ce1ecb37cb", size = 196667, upload-time = "2026-05-14T16:42:45.863Z" },
+]
+
+[[package]]
 name = "lxml"
 version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -892,6 +906,7 @@ dependencies = [
     { name = "kaos-llm-core" },
     { name = "kaos-office" },
     { name = "kaos-pdf" },
+    { name = "kaos-ui" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sse-starlette" },
@@ -919,6 +934,7 @@ requires-dist = [
     { name = "kaos-llm-core", specifier = ">=0.1.0a7,<0.2" },
     { name = "kaos-office", specifier = ">=0.1.0a2,<0.2" },
     { name = "kaos-pdf", specifier = ">=0.1.0a2,<0.2" },
+    { name = "kaos-ui", specifier = ">=0.1.0a1,<0.2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pydantic-settings", specifier = ">=2.8,<3" },
     { name = "sse-starlette", specifier = ">=2.1,<3" },

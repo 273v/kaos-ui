@@ -17,13 +17,12 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import httpx
+from kaos_ui.agents import NO_TOOLS_PATTERN, augment_instructions
 
 from app.logging_setup import app_logger
 from app.models import SessionMeta
 
 logger = app_logger("stream_proxy")
-
-_NO_TOOLS_PATTERN = "__kaos_chat_example_no_tools__"
 
 
 def _bearer_from_env() -> str:
@@ -50,36 +49,7 @@ def _tool_patterns(meta: SessionMeta) -> list[str]:
         from app.services.catalog import READ_ONLY_TOOL_GLOBS
 
         return list(READ_ONLY_TOOL_GLOBS)
-    return [_NO_TOOLS_PATTERN]
-
-
-def _instructions_with_tool_state(
-    meta: SessionMeta,
-    available_tool_names: Sequence[str] | None,
-) -> str:
-    if not meta.tools_enabled:
-        return (
-            f"{meta.system_prompt}\n\n"
-            "Tools are disabled for this session. You cannot call KAOS tools in this "
-            "turn, and if the user asks what tools you can use, say that no KAOS "
-            "tools are enabled for this session."
-        )
-
-    tool_names = sorted({name for name in available_tool_names or () if name})
-    if not tool_names:
-        return (
-            f"{meta.system_prompt}\n\n"
-            "Tools are enabled for this session, but the backend did not register any "
-            "KAOS tools."
-        )
-
-    catalog = "\n".join(f"- {name}" for name in tool_names)
-    return (
-        f"{meta.system_prompt}\n\n"
-        f"Tools are enabled for this session. Available KAOS tool names "
-        f"({len(tool_names)}):\n{catalog}\n\n"
-        "When the user asks what tools you can use, answer from this list."
-    )
+    return [NO_TOOLS_PATTERN]
 
 
 def _build_forward_body(
@@ -92,7 +62,11 @@ def _build_forward_body(
     return {
         "message": message,
         "model": meta.model,
-        "instructions": _instructions_with_tool_state(meta, available_tool_names),
+        "instructions": augment_instructions(
+            base_prompt=meta.system_prompt,
+            tools_enabled=meta.tools_enabled,
+            available_tool_names=available_tool_names,
+        ),
         "tools": _tool_patterns(meta),
         "max_cost_usd": max_cost_usd,
     }

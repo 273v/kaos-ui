@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from kaos_ui.agents import NO_TOOLS_PATTERN
 
 from app.models import SessionMeta
-from app.services.stream_proxy import _NO_TOOLS_PATTERN, _build_forward_body
+from app.services.stream_proxy import _build_forward_body
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +30,7 @@ def _meta(*, tools_enabled: bool) -> SessionMeta:
 def test_forward_body_disables_tools_with_no_match_filter() -> None:
     body = _build_forward_body(_meta(tools_enabled=False), "hello", 0.5)
 
-    assert body["tools"] == [_NO_TOOLS_PATTERN]
+    assert body["tools"] == [NO_TOOLS_PATTERN]
     assert "Tools are disabled for this session" in body["instructions"]
 
 
