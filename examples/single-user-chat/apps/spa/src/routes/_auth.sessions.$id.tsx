@@ -8,11 +8,13 @@ import { z } from "zod";
 
 import { Composer } from "@/components/chat/Composer";
 import { DebugPanel } from "@/components/chat/DebugPanel";
+import { DropZone } from "@/components/chat/DropZone";
+import { FileChips } from "@/components/chat/FileChips";
 import { Message } from "@/components/chat/Message";
 import { TurnStatus } from "@/components/chat/TurnStatus";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
-import { useUploadFile } from "@/hooks/use-files";
+import { useDeleteFile, useSessionFiles, useUploadFile } from "@/hooks/use-files";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
@@ -38,6 +40,21 @@ function ChatDetail() {
   const history = useSessionMessages(id);
   const patch = usePatchMeta(id);
   const upload = useUploadFile(id);
+  const files = useSessionFiles(id);
+  const removeFile = useDeleteFile(id);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const onAttach = (file: File) => {
+    setUploadError(null);
+    upload.mutate(file, {
+      onError: (err: unknown) => {
+        const what =
+          typeof err === "object" && err !== null && "what" in err
+            ? String((err as { what: unknown }).what)
+            : "Upload failed.";
+        setUploadError(what);
+      },
+    });
+  };
 
   // Map the wire shape `{role, content, added_at}` to our ChatMessage.
   const initialMessages = useMemo<ChatMessage[]>(() => {
@@ -177,6 +194,41 @@ function ChatDetail() {
         </div>
       </div>
 
+      <DropZone onDrop={onAttach} disabled={!meta} />
+
+      {uploadError && (
+        <div className="mx-auto max-w-3xl px-4">
+          <div
+            role="alert"
+            className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          >
+            <span>{uploadError}</span>
+            <button
+              type="button"
+              onClick={() => setUploadError(null)}
+              className="text-destructive/70 hover:text-destructive text-xs"
+              aria-label="Dismiss upload error"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {files.data && files.data.files.length > 0 && (
+        <div className="mx-auto max-w-3xl px-4">
+          <FileChips
+            files={files.data.files}
+            onRemove={(name) => removeFile.mutate(name)}
+            removing={
+              removeFile.variables && removeFile.isPending
+                ? new Set([removeFile.variables])
+                : undefined
+            }
+          />
+        </div>
+      )}
+
       <Composer
         value={input}
         onChange={setInput}
@@ -184,7 +236,7 @@ function ChatDetail() {
         onStop={stream.abort}
         pending={stream.state.pending}
         placeholder={`Message ${meta?.title ?? "this conversation"}…`}
-        onAttach={(file) => upload.mutate(file)}
+        onAttach={onAttach}
         uploading={upload.isPending}
         leftChips={
           meta && (
