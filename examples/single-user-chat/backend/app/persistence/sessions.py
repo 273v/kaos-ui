@@ -145,6 +145,8 @@ class SessionStore:
                     created_at=meta.created_at,
                     message_count=meta.message_count,
                     archived=meta.archived,
+                    starred=meta.starred,
+                    title_source=meta.title_source,
                 )
             )
         # Newest first by activity, falling back to created_at.
@@ -173,17 +175,31 @@ class SessionStore:
         model: str | None = None,
         system_prompt: str | None = None,
         tools_enabled: bool | None = None,
+        starred: bool | None = None,
+        title_source: str | None = None,
+        title_updated_at: datetime | None = None,
     ) -> SessionMeta:
         meta = await self._read_meta(session_id)
         updates: dict[str, object] = {}
         if title is not None:
             updates["title"] = title
+            # Title patches that come through the public route are
+            # treated as MANUAL unless the caller explicitly says
+            # otherwise (the auto-titler passes `title_source="auto"`).
+            if title_source is None:
+                updates["title_source"] = "manual"
         if model is not None:
             updates["model"] = model
         if system_prompt is not None:
             updates["system_prompt"] = system_prompt
         if tools_enabled is not None:
             updates["tools_enabled"] = tools_enabled
+        if starred is not None:
+            updates["starred"] = starred
+        if title_source is not None:
+            updates["title_source"] = title_source
+        if title_updated_at is not None:
+            updates["title_updated_at"] = title_updated_at
         new_meta = meta.model_copy(update=updates)
         await self._write_meta(new_meta)
         return new_meta

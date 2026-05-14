@@ -145,6 +145,92 @@ async def _parse_offloaded(temp_path: Path, ext: str) -> Any:
     return await loop.run_in_executor(_PARSER_EXECUTOR, _parse_sync, temp_path, ext)
 
 
+# Soft cap on summarizer input. Haiku's context is huge but anything
+# beyond ~12k chars is rarely improved by the marginal tokens — the
+# summary picks up document type + key entities + main subject from
+# the head + a long tail of repetition. We trim once on the head;
+# alternative approaches (chunk + map-reduce) are out of scope for v1.
+_SUMMARY_INPUT_CAP = 12_000
+_SUMMARY_MODEL = "anthropic:claude-haiku-4-5"
+
+
+async def _enrich_parsed_doc(
+    *,
+    parsed_doc: Any,
+    session_id: str,
+    filename: str,
+) -> tuple[int | None, str | None]:
+    """Compute token count + a 2-3 sentence summary for a parsed document.
+
+    Both are best-effort. Tokenizer failures or LLM outages leave the
+    corresponding field null; the upload still succeeds. The caller
+    persists whatever we return into the FileMeta sidecar.
+
+    Why this lives here, not in a separate Program file: the summary
+    contract IS the file's meta sidecar shape, so co-locating the
+    serializer + tokenizer + LLM call keeps the upload pipeline
+    readable as a linear pass.
+    """
+    # Step 1: serialize the AST to markdown. ContentDocument is the
+    # common shape PDF/DOCX/PPTX parsers return.
+    try:
+        from kaos_content import serialize_markdown
+
+        text = serialize_markdown(parsed_doc)
+    except Exception as exc:
+        logger.warning(
+            "serialize_markdown failed for session=%s file=%s: %s",
+            session_id,
+            filename,
+            exc,
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+        return None, None
+
+    # Step 2: token count via kaos-nlp-core Tokenizer (Unicode-aware,
+    # not LLM-specific — gives a stable estimate independent of the
+    # current model's BPE).
+    token_count: int | None = None
+    try:
+        from kaos_nlp_core.tokenizer import Tokenizer
+
+        token_count = len(Tokenizer().tokenize(text))
+    except Exception as exc:
+        logger.warning(
+            "tokenize failed for session=%s file=%s: %s",
+            session_id,
+            filename,
+            exc,
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+
+    # Step 3: LLM summary via kaos-llm-core.starter.summarize (the
+    # canonical Program wrapper). Capped on input length to bound cost;
+    # `style="concise"` gives 2-3 sentences focused on type + entities
+    # + subject.
+    summary: str | None = None
+    try:
+        from kaos_llm_core.starter import summarize
+
+        head = text[:_SUMMARY_INPUT_CAP]
+        summary = await summarize(
+            head,
+            model=_SUMMARY_MODEL,
+            max_words=80,
+            style="concise",
+        )
+    except Exception as exc:
+        logger.warning(
+            "summarize failed for session=%s file=%s: %s",
+            session_id,
+            filename,
+            exc,
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+
+    return token_count, summary
+
+
 def _serialize_doc(doc: Any) -> bytes:
     """Best-effort JSON serialization of the parsed AST.
 
@@ -227,9 +313,18 @@ async def store_and_parse(
         temp_path.unlink(missing_ok=True)
 
     # 3. Persist the parsed AST sidecar (only on success).
+    token_count: int | None = None
+    summary: str | None = None
     if parsed_doc is not None and parse_status.status == "ready":
         ast_bytes = _serialize_doc(parsed_doc)
         await vfs.write(f"{vfs_path}.kaos.json", ast_bytes)
+        # Token count + LLM summary are best-effort enrichments.
+        # Failures leave them null but never block the upload.
+        token_count, summary = await _enrich_parsed_doc(
+            parsed_doc=parsed_doc,
+            session_id=session_id,
+            filename=filename,
+        )
 
     # 4. Per-file metadata sidecar.
     meta = FileMeta(
@@ -238,6 +333,8 @@ async def store_and_parse(
         content_type=content_type,
         uploaded_at=datetime.now(UTC),
         parse=parse_status,
+        token_count=token_count,
+        summary=summary,
     )
     meta_bytes = meta.model_dump_json().encode("utf-8")
     await vfs.write(f"{vfs_path}.meta.json", meta_bytes)
@@ -251,6 +348,63 @@ async def store_and_parse(
             extra={"session_id": session_id, "upload_filename": filename},
         )
     return meta
+
+
+async def backfill_session_files(
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    overwrite: bool = False,
+) -> int:
+    """Recompute token_count + summary for ready-parsed files that are
+    missing them.
+
+    Reads each `.kaos.json` AST sidecar (skipping files whose parse
+    failed), runs `_enrich_parsed_doc`, and rewrites the `.meta.json`
+    sidecar with the new fields. Returns the count of files updated.
+
+    `overwrite=False` is the default — files that already have BOTH a
+    token_count and a summary are skipped. Pass `True` to refresh
+    everything (useful after a summarizer prompt change).
+    """
+    from kaos_content import ContentDocument
+
+    prefix = f"sessions/{session_id}/files/"
+    paths = sorted(await runtime.vfs.list(prefix))
+    meta_paths = [p for p in paths if p.endswith(".meta.json")]
+    updated = 0
+    for meta_path in meta_paths:
+        try:
+            raw = await runtime.vfs.read(meta_path)
+            meta = FileMeta.model_validate_json(raw)
+        except Exception:
+            continue
+        if meta.parse.status != "ready":
+            continue
+        if not overwrite and meta.token_count is not None and meta.summary is not None:
+            continue
+        # AST sidecar path: strip the trailing .meta.json + add .kaos.json.
+        ast_path = meta_path[: -len(".meta.json")] + ".kaos.json"
+        try:
+            ast_raw = await runtime.vfs.read(ast_path)
+            doc = ContentDocument.model_validate_json(ast_raw)
+        except Exception as exc:
+            logger.warning(
+                "backfill: AST read failed for %s: %s",
+                ast_path,
+                exc,
+                extra={"session_id": session_id, "meta_path": meta_path},
+            )
+            continue
+        token_count, summary = await _enrich_parsed_doc(
+            parsed_doc=doc,
+            session_id=session_id,
+            filename=meta.filename,
+        )
+        new_meta = meta.model_copy(update={"token_count": token_count, "summary": summary})
+        await runtime.vfs.write(meta_path, new_meta.model_dump_json().encode("utf-8"))
+        updated += 1
+    return updated
 
 
 async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[FileMeta]:

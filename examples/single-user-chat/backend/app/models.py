@@ -47,6 +47,15 @@ class SessionMeta(BaseModel):
     last_message_at: datetime | None = None
     message_count: int = 0
     archived: bool = False
+    # User favorite — sidebar lifts these to the top when sorted.
+    starred: bool = False
+    # "auto" titles get re-summarized as the conversation grows;
+    # "manual" titles (user renamed via the settings sheet or the
+    # inline pencil) stick until the user changes them again.
+    title_source: Literal["manual", "auto"] = "auto"
+    # Wall-clock of the last auto-title generation. Used to throttle
+    # re-summarization (default cadence: every 10 messages OR 24h).
+    title_updated_at: datetime | None = None
 
 
 class SessionSummary(BaseModel):
@@ -59,6 +68,8 @@ class SessionSummary(BaseModel):
     created_at: datetime
     message_count: int
     archived: bool = False
+    starred: bool = False
+    title_source: Literal["manual", "auto"] = "auto"
 
 
 class SessionListResponse(BaseModel):
@@ -87,6 +98,7 @@ class PatchMetaBody(BaseModel):
     model: str | None = Field(default=None, max_length=_MAX_MODEL_LEN)
     system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
+    starred: bool | None = None
 
 
 class SendMessageBody(BaseModel):
@@ -145,6 +157,11 @@ class FileMeta(BaseModel):
     content_type: str | None = None
     uploaded_at: datetime
     parse: FileParseStatus
+    # Populated post-parse via kaos-nlp-core + kaos-llm-core. Both are
+    # best-effort — a parse failure or summarizer outage leaves them
+    # null, but the file is still persisted.
+    token_count: int | None = None
+    summary: str | None = None
 
 
 class UploadResponse(BaseModel):

@@ -267,13 +267,73 @@ async def send_message(
         finally:
             # Increment by 1: a turn is (user message + assistant reply),
             # not two messages. Set title on first turn from the user
-            # input, truncated at word boundary.
+            # input as an IMMEDIATE heuristic so the sidebar updates
+            # right away — the LLM auto-titler runs as a background
+            # task and replaces it with something better a moment
+            # later (and again every 10 turns / 24h, until the user
+            # renames manually).
             try:
                 if is_first_turn:
-                    await store.patch(session_id, title=_derive_title(body.message))
-                await store.touch(session_id, increment_messages=1)
+                    await store.patch(
+                        session_id,
+                        title=_derive_title(body.message),
+                        title_source="auto",
+                    )
+                await store.touch(session_id, increment_messages=2)
             except Exception:
                 logger.exception("failed to touch session %s after stream", session_id)
+
+            # Fire-and-forget LLM-titler. We don't await this — the
+            # caller has already received the full SSE stream, and the
+            # title patch will surface on the next sidebar refresh.
+            try:
+                import asyncio
+
+                from app.services.title import maybe_retitle_session
+
+                async def _fetch_history(sid: str):
+                    from urllib.parse import quote
+
+                    r = await upstream.get(
+                        f"/v1/sessions/{quote(sid)}/memory/messages",
+                        headers={"Authorization": f"Bearer {bearer}"},
+                    )
+                    if r.status_code >= 400:
+                        return []
+                    raw = r.json()
+                    parsed: list[HistoryMessage] = []
+                    for item in raw.get("items", []):
+                        content_str = item.get("content", "")
+                        role: str = "assistant"
+                        text: str = content_str
+                        for prefix, mapped in (
+                            ("user: ", "user"),
+                            ("assistant: ", "assistant"),
+                            ("system: ", "system"),
+                        ):
+                            if content_str.startswith(prefix):
+                                role = mapped
+                                text = content_str[len(prefix) :]
+                                break
+                        parsed.append(
+                            HistoryMessage(
+                                role=role,  # type: ignore[arg-type]
+                                content=text,
+                                added_at=float(item.get("added_at", 0.0)),
+                            )
+                        )
+                    parsed.sort(key=lambda m: m.added_at)
+                    return parsed
+
+                asyncio.create_task(
+                    maybe_retitle_session(
+                        store=store,
+                        session_id=session_id,
+                        fetch_history=_fetch_history,
+                    )
+                )
+            except Exception:
+                logger.exception("failed to schedule auto-titler for %s", session_id)
 
     return EventSourceResponse(
         event_generator(),

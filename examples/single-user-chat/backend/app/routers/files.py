@@ -30,6 +30,7 @@ from app.services.uploads import (
     FileNotFoundError,
     UploadParseError,
     UploadValidationError,
+    backfill_session_files,
     delete_session_file,
     list_session_files,
     store_and_parse,
@@ -155,6 +156,29 @@ async def list_files(
 
     files = await list_session_files(runtime=runtime, session_id=session_id)
     return FileListResponse(session_id=session_id, files=files)
+
+
+@router.post("/sessions/{session_id}/files:backfill")
+async def backfill_files(
+    session_id: str,
+    store: StoreDep,
+    runtime: RuntimeDep,
+    overwrite: bool = False,
+) -> dict[str, int]:
+    """Recompute token_count + summary for files missing them.
+
+    Useful after a backend upgrade that adds new sidecar fields, or
+    after the summarizer was offline at upload time. Pass
+    ``?overwrite=true`` to refresh every file regardless.
+    """
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    updated = await backfill_session_files(
+        runtime=runtime, session_id=session_id, overwrite=overwrite
+    )
+    return {"updated": updated}
 
 
 @router.delete(

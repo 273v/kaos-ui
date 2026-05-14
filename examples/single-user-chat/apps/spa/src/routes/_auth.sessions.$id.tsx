@@ -4,6 +4,7 @@
 import {
   CitationsPanel,
   Composer,
+  DocumentExplorer,
   DropZone,
   FileChips,
   Message,
@@ -19,7 +20,7 @@ import {
 } from "@273v/kaos-ui-react/hooks";
 import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bug, Download, Quote, Settings } from "lucide-react";
+import { Bug, Download, FileText, Quote, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -84,6 +85,7 @@ function ChatDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(debugDefault);
 
   const onSubmit = () => {
@@ -155,6 +157,27 @@ function ChatDetail() {
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setDocsOpen((v) => !v)}
+            disabled={!meta}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
+              docsOpen ? "bg-muted text-foreground" : ""
+            }`}
+            title={
+              files.data && files.data.files.length > 0
+                ? `${files.data.files.length} documents`
+                : "Documents"
+            }
+            aria-label="Toggle documents panel"
+            aria-pressed={docsOpen}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {files.data && files.data.files.length > 0 && (
+              <span className="tabular-nums text-[10px]">{files.data.files.length}</span>
+            )}
+          </button>
 
           <button
             type="button"
@@ -306,6 +329,13 @@ function ChatDetail() {
           onClose={() => setInspectorOpen(false)}
         />
       </div>
+
+      <DocumentExplorer
+        open={docsOpen}
+        onClose={() => setDocsOpen(false)}
+        files={files.data?.files ?? []}
+        loading={files.isLoading}
+      />
 
       <CitationsPanel
         open={citationsOpen}

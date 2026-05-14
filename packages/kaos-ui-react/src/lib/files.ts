@@ -20,6 +20,10 @@ export interface FileMeta {
   content_type: string | null;
   uploaded_at: string;
   parse: FileParseStatus;
+  /** Token count from kaos-nlp-core Tokenizer; null if tokenize failed. */
+  token_count?: number | null;
+  /** kaos-llm-core summary (~2-3 sentences); null if no LLM key / outage. */
+  summary?: string | null;
 }
 
 export interface UploadResponse {

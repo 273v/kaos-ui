@@ -23,6 +23,8 @@ export interface SessionMeta {
   last_message_at: string | null;
   message_count: number;
   archived: boolean;
+  starred: boolean;
+  title_source: "manual" | "auto";
 }
 
 export interface SessionSummary {
@@ -33,6 +35,8 @@ export interface SessionSummary {
   created_at: string;
   message_count: number;
   archived: boolean;
+  starred: boolean;
+  title_source: "manual" | "auto";
 }
 
 export interface SessionListResponse {
@@ -52,4 +56,5 @@ export interface PatchMetaBody {
   model?: string;
   system_prompt?: string;
   tools_enabled?: boolean;
+  starred?: boolean;
 }
