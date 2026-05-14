@@ -8,6 +8,7 @@ from fastapi import Request
 
 if TYPE_CHECKING:
     import httpx
+    from kaos_core import KaosRuntime
 
     from app.persistence.sessions import SessionStore
     from app.settings import AppSettings
@@ -26,3 +27,8 @@ def get_session_store(request: Request) -> SessionStore:
 def get_upstream_client(request: Request) -> httpx.AsyncClient:
     """In-process httpx client (ASGITransport) to the kaos-agents routes."""
     return request.app.state.upstream_client
+
+
+def get_runtime(request: Request) -> KaosRuntime:
+    """Per-request access to the shared KaosRuntime (VFS + tools)."""
+    return request.app.state.kaos_runtime

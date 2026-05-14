@@ -29,7 +29,7 @@ from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
-from app.routers import chat, health, models
+from app.routers import chat, files, health, models
 from app.settings import AppSettings
 
 
@@ -86,6 +86,7 @@ def create_app(settings: AppSettings | None = None):
     app.include_router(health.router, prefix="/v1")
     app.include_router(models.router, prefix="/v1")
     app.include_router(chat.router, prefix="/v1/chat")
+    app.include_router(files.router, prefix="/v1/chat")
 
     return app
 

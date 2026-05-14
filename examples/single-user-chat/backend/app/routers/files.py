@@ -1,0 +1,132 @@
+"""/v1/chat/sessions/{session_id}/files — upload + parse.
+
+P1-1 of the upload pipeline. Owns the route surface; the heavy lifting
+(filename sanitization, parser dispatch, VFS persistence, parse-status
+sidecar) lives in ``app.services.uploads``.
+
+Per-session contract:
+- Uploads land in the runtime VFS at ``sessions/{id}/files/{name}``.
+- A ``.kaos.json`` sibling holds the parsed ``ContentDocument`` AST.
+- A ``.meta.json`` sibling holds the per-file metadata + parse status.
+- The session's ``tools_enabled`` flag is auto-flipped to True so the
+  agent can use the read-only tool surface against the uploaded
+  content on the next turn (RAG-by-default per the v2 plan).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from kaos_core import KaosRuntime
+
+from app.auth import require_auth
+from app.deps import get_runtime, get_session_store, get_settings
+from app.exceptions import SessionNotFoundError
+from app.logging_setup import app_logger
+from app.models import UploadResponse
+from app.persistence.sessions import SessionStore
+from app.services.uploads import (
+    UploadParseError,
+    UploadValidationError,
+    store_and_parse,
+)
+from app.settings import AppSettings
+
+router = APIRouter(tags=["files"], dependencies=[Depends(require_auth)])
+logger = app_logger("files_router")
+
+SettingsDep = Annotated[AppSettings, Depends(get_settings)]
+StoreDep = Annotated[SessionStore, Depends(get_session_store)]
+RuntimeDep = Annotated[KaosRuntime, Depends(get_runtime)]
+
+
+def _validation_detail(exc: UploadValidationError | UploadParseError) -> dict[str, str]:
+    detail = {"what": exc.what, "how_to_fix": exc.how_to_fix}
+    if exc.alternative:
+        detail["alternative"] = exc.alternative
+    return detail
+
+
+@router.post(
+    "/sessions/{session_id}/files",
+    response_model=UploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_file(
+    session_id: str,
+    file: Annotated[UploadFile, File(description="Upload .pdf / .docx / .pptx")],
+    settings: SettingsDep,
+    store: StoreDep,
+    runtime: RuntimeDep,
+) -> UploadResponse:
+    """Accept one file, persist + parse, auto-flip tools_enabled."""
+    try:
+        meta = await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if file.size is not None and file.size > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "what": (f"upload is {file.size} bytes, max is {settings.max_upload_bytes}"),
+                "how_to_fix": (
+                    "split the file or compress it; "
+                    f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"
+                ),
+            },
+        )
+
+    data = await file.read()
+    if len(data) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "what": f"upload is {len(data)} bytes, max is {settings.max_upload_bytes}",
+                "how_to_fix": (
+                    "split the file or compress it; "
+                    f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"
+                ),
+            },
+        )
+
+    try:
+        file_meta = await store_and_parse(
+            runtime=runtime,
+            session_id=session_id,
+            raw_filename=file.filename or "upload",
+            data=data,
+            content_type=file.content_type,
+            supported_extensions=settings.supported_upload_extensions,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=_validation_detail(exc),
+        ) from exc
+    except UploadParseError as exc:
+        logger.warning(
+            "parser failed for session=%s file=%s",
+            session_id,
+            file.filename,
+            extra={"session_id": session_id, "upload_filename": file.filename},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_detail(exc),
+        ) from exc
+
+    if not meta.tools_enabled:
+        meta = await store.patch(session_id, tools_enabled=True)
+        logger.info(
+            "auto-flipped tools_enabled=True for session=%s after upload",
+            session_id,
+            extra={"session_id": session_id, "upload_filename": file_meta.filename},
+        )
+
+    return UploadResponse(
+        session_id=session_id,
+        file=file_meta,
+        tools_enabled=meta.tools_enabled,
+    )

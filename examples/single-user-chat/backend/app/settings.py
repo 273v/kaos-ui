@@ -50,6 +50,16 @@ class AppSettings(ModuleSettings):
     # Per-turn budget cap (USD). Threaded into MessageRequest.max_cost_usd.
     turn_budget_usd: float = 0.50
 
+    # File-upload pipeline (P1-1).
+    # Max accepted bytes per upload — 25 MiB by default. Large enough for
+    # a typical SEC filing or a deal-room PDF, small enough to keep the
+    # sync-parser path responsive.
+    max_upload_bytes: int = 25 * 1024 * 1024
+    # Extensions we dispatch a parser for. XLSX intentionally absent —
+    # kaos-office's parse_xlsx returns TabularDocument (different type
+    # from ContentDocument), wiring deferred to a follow-up.
+    supported_upload_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx")
+
     model_config = SettingsConfigDict(
         env_prefix="APP_",
         env_file=(".env", "../.env"),

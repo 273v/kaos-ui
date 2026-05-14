@@ -117,3 +117,45 @@ class HistoryResponse(BaseModel):
     turn_count: int
     item_count: int
     messages: list[HistoryMessage]
+
+
+# ── file uploads (P1-1) ───────────────────────────────────────────────
+
+
+class FileParseStatus(BaseModel):
+    """Parse outcome for one uploaded file.
+
+    ``ready`` means the file was parsed and a `.kaos.json` AST sidecar
+    exists in the VFS alongside the original bytes. ``failed`` means
+    parsing raised — the original bytes were still saved.
+    """
+
+    status: Literal["ready", "failed"]
+    error: str | None = None
+
+
+class FileMeta(BaseModel):
+    """Per-file metadata persisted alongside the upload in the VFS.
+
+    Lives at ``sessions/{session_id}/files/{filename}.meta.json``.
+    """
+
+    filename: str
+    size_bytes: int
+    content_type: str | None = None
+    uploaded_at: datetime
+    parse: FileParseStatus
+
+
+class UploadResponse(BaseModel):
+    """POST /v1/chat/sessions/{id}/files response."""
+
+    session_id: str
+    file: FileMeta
+    tools_enabled: bool = Field(
+        description=(
+            "Reflects the session's tools_enabled flag AFTER the upload. "
+            "Uploading auto-flips this to True so the agent can use the "
+            "read-only tool surface against the uploaded content."
+        ),
+    )

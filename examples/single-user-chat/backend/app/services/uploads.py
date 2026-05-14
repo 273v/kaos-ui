@@ -1,0 +1,266 @@
+"""File upload + parse pipeline.
+
+POST /v1/chat/sessions/{id}/files accepts a multipart upload; this
+module owns everything that happens after we have ``(filename,
+bytes)`` in memory:
+
+1. Persist the original bytes to the runtime VFS at
+   ``sessions/{session_id}/files/{filename}`` so the agent's bridged
+   tools can read them.
+2. Dispatch a parser by extension (PDF / DOCX / PPTX) and parse to a
+   ``kaos_content.ContentDocument`` AST.
+3. Persist the parsed AST as JSON to a sibling VFS path
+   (``.kaos.json``) so we don't re-parse on every retrieval.
+4. Persist a per-file metadata sidecar (``.meta.json``) with the
+   parse outcome.
+
+The parsers are synchronous and (in the PDF case) not thread-safe at
+the PDFium layer. We funnel every parse call through a single-thread
+``ThreadPoolExecutor`` so concurrent uploads serialize at the parser
+boundary while the rest of the FastAPI request stays async.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any
+
+from kaos_core import KaosRuntime
+
+from app.exceptions import AppError
+from app.logging_setup import app_logger
+from app.models import FileMeta, FileParseStatus
+
+logger = app_logger("uploads")
+
+# Single-worker executor. PDFium holds a global C lock; the other
+# parsers are sync but happy to be serialized too. Keeps semantics
+# predictable across concurrent uploads without a thread pool size
+# that varies by host.
+_PARSER_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="upload-parser")
+
+
+class UploadError(AppError):
+    """Upload failed in a way the route translates to a 4xx response.
+
+    Carries the kaos-* agent-friendly triple (``what`` / ``how_to_fix`` /
+    optional ``alternative``). The message string used by ``AppError``
+    is just ``what`` so logs stay scannable; the full triple lives in
+    ``self.details`` and surfaces on the wire via the route.
+    """
+
+    def __init__(self, *, what: str, how_to_fix: str, alternative: str | None = None) -> None:
+        details: dict[str, Any] = {"what": what, "how_to_fix": how_to_fix}
+        if alternative is not None:
+            details["alternative"] = alternative
+        super().__init__(what, **details)
+        self.what = what
+        self.how_to_fix = how_to_fix
+        self.alternative = alternative
+
+
+class UploadValidationError(UploadError):
+    """Caller sent us something we won't accept (size, extension, name)."""
+
+
+class UploadParseError(UploadError):
+    """Bytes saved but the parser refused them."""
+
+
+# ── filename sanitization ──────────────────────────────────────────
+
+
+_MAX_FILENAME_LEN = 200
+_ALLOWED_FILENAME_CHARS = set(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-+ ",
+)
+
+
+def _safe_filename(raw: str) -> str:
+    """Strip directory components + bound length + restrict charset.
+
+    Defense in depth — the VFS itself rejects ``..`` traversal, but
+    we still normalize at the boundary so the on-disk path is
+    predictable.
+    """
+    base = Path(raw).name  # drop any directory the client snuck in
+    if not base or base in (".", ".."):
+        raise UploadValidationError(
+            what=f"invalid filename: {raw!r}",
+            how_to_fix="upload a file with a non-empty name",
+        )
+    if len(base) > _MAX_FILENAME_LEN:
+        raise UploadValidationError(
+            what=f"filename longer than {_MAX_FILENAME_LEN} chars: {base[:30]!r}…",
+            how_to_fix=f"rename the file to ≤ {_MAX_FILENAME_LEN} characters",
+        )
+    cleaned = "".join(c if c in _ALLOWED_FILENAME_CHARS else "_" for c in base)
+    return cleaned
+
+
+def _vfs_path(session_id: str, filename: str) -> str:
+    return f"sessions/{session_id}/files/{filename}"
+
+
+# ── parser dispatch ────────────────────────────────────────────────
+
+
+def _parse_sync(temp_path: Path, ext: str) -> Any:
+    """Synchronous parser dispatch by extension.
+
+    Returns whatever the parser returns. PDF/DOCX/PPTX return
+    ``ContentDocument``; future XLSX support would return
+    ``TabularDocument`` (different shape — not enabled in P1).
+    """
+    if ext == ".pdf":
+        # kaos-pdf 0.1.0a2 exports `extract_pdf` (the ContentDocument-
+        # returning canonical parser). Newer monorepo HEAD has a
+        # `parse_pdf` alias — use the published name for forward-compat
+        # against the PyPI release we depend on.
+        from kaos_pdf import extract_pdf
+
+        return extract_pdf(temp_path)
+    if ext == ".docx":
+        from kaos_office import parse_docx
+
+        return parse_docx(temp_path)
+    if ext == ".pptx":
+        from kaos_office import parse_pptx
+
+        return parse_pptx(temp_path)
+    raise UploadValidationError(
+        what=f"unsupported file extension {ext!r}",
+        how_to_fix="upload one of: .pdf, .docx, .pptx",
+    )
+
+
+async def _parse_offloaded(temp_path: Path, ext: str) -> Any:
+    """Run the sync parser inside the single-thread executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_PARSER_EXECUTOR, _parse_sync, temp_path, ext)
+
+
+def _serialize_doc(doc: Any) -> bytes:
+    """Best-effort JSON serialization of the parsed AST.
+
+    ``ContentDocument`` is a Pydantic v2 model — ``model_dump_json`` is
+    the canonical serializer. We don't accept anything else from the
+    dispatcher in P1, so a missing method would be a parser-API drift
+    we'd want to know about.
+    """
+    if hasattr(doc, "model_dump_json"):
+        return doc.model_dump_json().encode("utf-8")
+    raise UploadParseError(
+        what="parsed document does not expose model_dump_json()",
+        how_to_fix="parser API drift — file an issue against kaos-content",
+    )
+
+
+# ── public entrypoint ──────────────────────────────────────────────
+
+
+async def store_and_parse(
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    raw_filename: str,
+    data: bytes,
+    content_type: str | None = None,
+    supported_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx"),
+) -> FileMeta:
+    """Persist + parse one uploaded file. Caller validates size before
+    handing us the bytes (route is the place to surface a 413 with the
+    configured limit).
+
+    Returns the ``FileMeta`` describing the saved file and the parse
+    outcome. Even when parsing fails, the original bytes are persisted
+    — that's the contract: the user uploaded a file, the file is
+    available for direct retrieval (e.g., a future "download my
+    upload" feature), only the AST is missing.
+    """
+    filename = _safe_filename(raw_filename)
+    ext = Path(filename).suffix.lower()
+    if ext not in supported_extensions:
+        raise UploadValidationError(
+            what=f"unsupported file extension {ext!r}",
+            how_to_fix=f"upload one of: {', '.join(supported_extensions)}",
+        )
+
+    vfs_path = _vfs_path(session_id, filename)
+    vfs = runtime.vfs
+
+    # 1. Original bytes → VFS.
+    await vfs.write(vfs_path, data)
+
+    # 2. Parse → AST. We need a real filesystem path; the parsers
+    # don't read VFS paths. Write to a NamedTemporaryFile, parse, drop.
+    # delete=False because the parser may keep a handle open across
+    # the with-exit on some platforms; we clean up by hand.
+    parse_status: FileParseStatus
+    parsed_doc: Any | None = None
+    with NamedTemporaryFile(prefix="kaos-upload-", suffix=ext, delete=False) as tf:
+        temp_path = Path(tf.name)
+        tf.write(data)
+    try:
+        parsed_doc = await _parse_offloaded(temp_path, ext)
+        parse_status = FileParseStatus(status="ready")
+    except UploadError:
+        # Validation already-typed; re-raise so the route translates it.
+        temp_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        logger.warning(
+            "parse failed for session=%s file=%s ext=%s: %s",
+            session_id,
+            filename,
+            ext,
+            exc,
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+        parse_status = FileParseStatus(status="failed", error=str(exc)[:500])
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    # 3. Persist the parsed AST sidecar (only on success).
+    if parsed_doc is not None and parse_status.status == "ready":
+        ast_bytes = _serialize_doc(parsed_doc)
+        await vfs.write(f"{vfs_path}.kaos.json", ast_bytes)
+
+    # 4. Per-file metadata sidecar.
+    meta = FileMeta(
+        filename=filename,
+        size_bytes=len(data),
+        content_type=content_type,
+        uploaded_at=datetime.now(UTC),
+        parse=parse_status,
+    )
+    meta_bytes = meta.model_dump_json().encode("utf-8")
+    await vfs.write(f"{vfs_path}.meta.json", meta_bytes)
+
+    if parse_status.status == "ready":
+        logger.info(
+            "upload+parse ok session=%s file=%s size=%d",
+            session_id,
+            filename,
+            len(data),
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+    return meta
+
+
+def _ensure_quiet_thirdparty_logging() -> None:
+    """Some parsers (pypdfium2, python-pptx) emit verbose info logs.
+
+    Quiet them at INFO level so the structured-log stream stays useful.
+    Idempotent; safe to call at import time.
+    """
+    for name in ("pypdfium2", "pdfminer", "openpyxl"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+_ensure_quiet_thirdparty_logging()
