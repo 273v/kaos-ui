@@ -33,7 +33,12 @@ def test_forward_body_disables_tools_with_no_match_filter() -> None:
     assert "Tools are disabled for this session" in body["instructions"]
 
 
-def test_forward_body_enables_all_tools_and_includes_catalog() -> None:
+def test_forward_body_enables_tools_with_readonly_allowlist_and_catalog() -> None:
+    """HIGH #3 — tools_enabled=True must forward the curated read-only
+    allowlist, NOT a wildcard. The UI label "Enable read-only tools" is
+    only true if we keep the glob bounded."""
+    from app.services.catalog import READ_ONLY_TOOL_GLOBS
+
     body = _build_forward_body(
         _meta(tools_enabled=True),
         "what tools can you use",
@@ -41,7 +46,24 @@ def test_forward_body_enables_all_tools_and_includes_catalog() -> None:
         available_tool_names=("kaos-pdf-search-document", "kaos-core-list-tools"),
     )
 
-    assert body["tools"] == ["*"]
+    # tools field is the curated allowlist, not "*".
+    assert body["tools"] == list(READ_ONLY_TOOL_GLOBS)
+    assert "*" not in body["tools"]
+    # And the system prompt still names the tools the agent can actually use.
     assert "Available KAOS tool names (2)" in body["instructions"]
     assert "- kaos-core-list-tools" in body["instructions"]
     assert "- kaos-pdf-search-document" in body["instructions"]
+
+
+def test_readonly_allowlist_excludes_write_globs() -> None:
+    """Belt+suspenders — the curated allowlist must NOT contain a
+    universal wildcard or any name suggestive of writes."""
+    from app.services.catalog import READ_ONLY_TOOL_GLOBS
+
+    assert "*" not in READ_ONLY_TOOL_GLOBS
+    assert "**" not in READ_ONLY_TOOL_GLOBS
+    forbidden_substrings = ("write", "delete", "rm", "send", "upload", "edit", "modify")
+    for glob in READ_ONLY_TOOL_GLOBS:
+        low = glob.lower()
+        for bad in forbidden_substrings:
+            assert bad not in low, f"allowlist glob {glob!r} contains forbidden substring {bad!r}"

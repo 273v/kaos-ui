@@ -40,11 +40,15 @@ localhost {
 	}
 
 	# ───── /v1 → FastAPI backend ──────────────────────────────
-	handle_path /v1/* {
-		# rewrite /v1/foo → /v1/foo for the backend (no path strip).
-		# flush_interval -1 keeps SSE flowing chunk-by-chunk; Caddy
-		# auto-detects text/event-stream but the explicit setting is
-		# documented belt-and-suspenders (see Caddy issue #4247).
+	# Use `handle`, NOT `handle_path`. `handle_path /v1/*` would STRIP
+	# the /v1 prefix before forwarding, sending /v1/models as /models
+	# to uvicorn — which then 404s every API call. Verified during the
+	# HIGH #1 review pass. See docs/PATTERNS.md P-022.
+	#
+	# flush_interval -1 keeps SSE flowing chunk-by-chunk; Caddy
+	# auto-detects text/event-stream but the explicit setting is
+	# documented belt-and-suspenders (see Caddy issue #4247).
+	handle /v1/* {
 		reverse_proxy backend:8000 {
 			flush_interval -1
 		}

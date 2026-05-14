@@ -50,12 +50,6 @@ class AppSettings(ModuleSettings):
     # Per-turn budget cap (USD). Threaded into MessageRequest.max_cost_usd.
     turn_budget_usd: float = 0.50
 
-    # The upstream URL our stream-proxy posts to. In single-process
-    # deployments this is the same uvicorn process; we still call HTTP
-    # because the bundled create_app() routes have rich auth/tenant
-    # logic we don't want to bypass.
-    upstream_url: str = "http://127.0.0.1:8000"
-
     model_config = SettingsConfigDict(
         env_prefix="APP_",
         env_file=(".env", "../.env"),

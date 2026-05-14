@@ -35,6 +35,12 @@ export function useSendMessage(opts: UseSendMessageOptions) {
   const [rawEvents, setRawEvents] = useState<DebugEvent[]>([]);
   const eventCounter = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // MEDIUM #5 — pendingRef mirrors state.pending so the send() gate
+  // reads the live value, not a stale closure. Pre-fix, two rapid
+  // submits both saw state.pending=false at function-close time and
+  // both kicked off SSE streams, with the second abort marking the
+  // first stream's assistant placeholder as "stopped."
+  const pendingRef = useRef(false);
   const qc = useQueryClient();
 
   // Reset + hydrate on session switch OR when the prior-messages query
@@ -48,6 +54,7 @@ export function useSendMessage(opts: UseSendMessageOptions) {
     abortRef.current?.abort();
     setRawEvents([]);
     eventCounter.current = 0;
+    pendingRef.current = false;
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       setState({ ...initialState, messages: opts.initialMessages });
     } else {
@@ -57,8 +64,8 @@ export function useSendMessage(opts: UseSendMessageOptions) {
 
   const send = useCallback(
     async (message: string) => {
-      if (state.pending) return;
-      abortRef.current?.abort();
+      if (pendingRef.current) return;
+      pendingRef.current = true;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -97,6 +104,11 @@ export function useSendMessage(opts: UseSendMessageOptions) {
           }
         }
       } catch (err) {
+        // MEDIUM #4 — reader errors (server disconnect, network drop)
+        // are now re-thrown by readSseStream so we catch them here and
+        // ALWAYS finalize the streaming placeholder. Pre-fix, errors
+        // were swallowed and the placeholder stayed in `streaming=true`
+        // forever ("Thinking…" spinner of doom).
         if ((err as Error)?.name === "AbortError") {
           setState((prev) => markAborted(prev));
         } else {
@@ -104,16 +116,18 @@ export function useSendMessage(opts: UseSendMessageOptions) {
             applyEvent(prev, {
               type: "run_error",
               what: (err as Error).message ?? "Stream failed.",
+              how_to_fix: "Check that the backend is reachable; reload the page if it's stuck.",
             }),
           );
         }
       } finally {
-        // After the stream closes, refresh session metadata (msg count).
+        pendingRef.current = false;
+        // After the stream closes (or errors), refresh session metadata.
         qc.invalidateQueries({ queryKey: queryKeys.session(opts.sessionId) });
         qc.invalidateQueries({ queryKey: queryKeys.sessions() });
       }
     },
-    [opts.sessionId, qc, state.pending],
+    [opts.sessionId, qc],
   );
 
   const abort = useCallback(() => {

@@ -41,9 +41,15 @@ def _tool_patterns(meta: SessionMeta) -> list[str]:
     In kaos-agents 0.1.0a1 an empty tools list means "no explicit filter",
     which bridges every runtime tool. Use a deliberately unmatched glob for
     disabled sessions so the UI toggle is a real execution gate.
+
+    When enabled, only the curated read-only allowlist is exposed
+    (HIGH #3 fix). The UI label says "Enable read-only tools" — this
+    keeps that promise even if a future kaos module adds write tools.
     """
     if meta.tools_enabled:
-        return ["*"]
+        from app.services.catalog import READ_ONLY_TOOL_GLOBS
+
+        return list(READ_ONLY_TOOL_GLOBS)
     return [_NO_TOOLS_PATTERN]
 
 
@@ -119,6 +125,19 @@ async def stream_chat(
         "Content-Type": "application/json",
     }
 
+    # LOW #1 fix — reuse `kaos_llm_client.transport.parse_sse_stream`
+    # instead of a hand-rolled line parser. It already handles:
+    #   * multi-line `data:` accumulation
+    #   * blank-line dispatch boundaries
+    #   * `[DONE]` sentinel termination
+    #   * wall-clock max-duration enforcement
+    #   * CRLF/LF normalization
+    # The kaos-agents wire format puts the event-type discriminator
+    # inside the JSON payload as `type`, so we don't need the SSE
+    # `event:` field for routing — we recover it from `data["type"]`
+    # and forward both for sse-starlette compatibility.
+    from kaos_llm_client.transport import parse_sse_stream
+
     async with client.stream(
         "POST",
         f"/v1/sessions/{meta.id}/messages",
@@ -143,13 +162,10 @@ async def stream_chat(
             }
             return
 
-        event_name = "message"
-        async for raw_line in response.aiter_lines():
-            if raw_line == "":
-                continue
-            if raw_line.startswith("event: "):
-                event_name = raw_line[len("event: ") :].strip()
-            elif raw_line.startswith("data: "):
-                data = raw_line[len("data: ") :]
-                yield {"event": event_name, "data": data}
-            # other prefixes (id:, retry:, comments) ignored
+        async for payload in parse_sse_stream(response):
+            # `payload` is the already-decoded `data:` JSON dict. Use
+            # its `type` field for the SSE event-name; re-encode as
+            # JSON for sse-starlette's wire format. Default to
+            # "message" (SSE spec default) for shape-malformed events.
+            event_name = (payload.get("type") if isinstance(payload, dict) else None) or "message"
+            yield {"event": event_name, "data": json.dumps(payload)}

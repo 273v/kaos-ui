@@ -13,6 +13,47 @@ def test_health(client):
     assert r.json() == {"status": "ok"}
 
 
+def test_auth_gate_on_extension_routes(app):
+    """CRITICAL #1 regression — /v1/chat/* and /v1/models must require auth.
+
+    Pre-fix, these routes were public, which let invalid tokens pass
+    the SPA's login probe (CRITICAL #2). Both fixes verified by this
+    test: unauthenticated requests get 401, valid bearer gets 2xx.
+    """
+    from fastapi.testclient import TestClient
+
+    from tests.conftest import TEST_TOKEN  # ty: ignore[unresolved-import]
+
+    # No-auth client — fresh, no preset Authorization header.
+    bare = TestClient(app)
+
+    # Health stays public (docker healthcheck needs it).
+    assert bare.get("/v1/health").status_code == 200
+
+    # Everything else requires auth.
+    for path in [
+        "/v1/models",
+        "/v1/chat/sessions",
+        "/v1/chat/sessions/anything/meta",
+    ]:
+        assert bare.get(path).status_code == 401, f"{path} did not 401 without auth"
+
+    assert bare.post("/v1/chat/sessions", json={}).status_code == 401
+    assert bare.patch("/v1/chat/sessions/x/meta", json={}).status_code == 401
+    assert bare.post("/v1/chat/sessions/x/archive").status_code == 401
+    assert bare.post("/v1/chat/sessions/x/messages", json={"message": "hi"}).status_code == 401
+
+    # Wrong bearer also 401s.
+    wrong = TestClient(app, headers={"Authorization": "Bearer wrong-token-32-chars-long-padding"})
+    assert wrong.get("/v1/models").status_code == 401
+    assert wrong.get("/v1/chat/sessions").status_code == 401
+
+    # Valid bearer flips to 2xx.
+    good = TestClient(app, headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    assert good.get("/v1/models").status_code == 200
+    assert good.get("/v1/chat/sessions").status_code == 200
+
+
 def test_models_catalog_shape(client):
     r = client.get("/v1/models")
     assert r.status_code == 200
@@ -120,6 +161,37 @@ def test_transcript_stub_501(client):
     sid = r.json()["id"]
     r = client.get(f"/v1/chat/sessions/{sid}/transcript")
     assert r.status_code == 501
+
+
+def test_validation_rejects_oversize_inputs(client):
+    """MEDIUM #3 — bounded inputs."""
+    # title too long
+    r = client.post("/v1/chat/sessions", json={"title": "x" * 200})
+    assert r.status_code == 422
+    # system_prompt too long
+    r = client.post("/v1/chat/sessions", json={"system_prompt": "p" * 10000})
+    assert r.status_code == 422
+    # message too long
+    sid = client.post("/v1/chat/sessions", json={}).json()["id"]
+    r = client.post(
+        f"/v1/chat/sessions/{sid}/messages",
+        json={"message": "m" * 20000},
+    )
+    assert r.status_code == 422
+
+
+def test_validation_rejects_unknown_model_id(client):
+    """MEDIUM #3 — model must be in the curated catalog."""
+    r = client.post("/v1/chat/sessions", json={"model": "anthropic:fake-model-x"})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "Unknown model id" in str(detail) or "Unknown model id" in detail.get("what", "")
+
+
+def test_list_limit_clamped(client):
+    """MEDIUM #3 — list?limit out of bounds rejected."""
+    assert client.get("/v1/chat/sessions?limit=0").status_code == 422
+    assert client.get("/v1/chat/sessions?limit=10000").status_code == 422
 
 
 def test_kaos_agents_passthrough_routes_mounted(client):

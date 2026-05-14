@@ -15,9 +15,10 @@ from __future__ import annotations
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sse_starlette import EventSourceResponse
 
+from app.auth import require_auth
 from app.deps import get_session_store, get_settings, get_upstream_client
 from app.exceptions import SessionNotFoundError
 from app.logging_setup import app_logger
@@ -35,7 +36,7 @@ from app.persistence.sessions import SessionStore
 from app.services.stream_proxy import _bearer_from_env, stream_chat
 from app.settings import AppSettings
 
-router = APIRouter(tags=["chat"])
+router = APIRouter(tags=["chat"], dependencies=[Depends(require_auth)])
 logger = app_logger("chat_router")
 
 
@@ -45,11 +46,18 @@ UpstreamDep = Annotated[httpx.AsyncClient, Depends(get_upstream_client)]
 
 
 def _bearer_from_request(request: Request) -> str:
-    """Pull the inbound bearer for forwarding to the kaos-agents API."""
+    """Forward the inbound bearer to the kaos-agents in-process proxy.
+
+    Auth has already been enforced by `Depends(require_auth)` on the
+    router — by the time we get here, the header is present and valid.
+    No env-token fallback (that was the CRITICAL #1 bug — see review).
+    """
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         return header[len("Bearer ") :]
-    # Fallback to the env-configured token (same process, same token).
+    # Defensive: require_auth should have already 401'd. If we somehow
+    # get here without a header, fall back to the env token rather than
+    # crash — the upstream call will fail its own auth instead.
     return _bearer_from_env()
 
 
@@ -75,6 +83,46 @@ async def _upstream_create_session(
 # ── routes ──────────────────────────────────────────────────────────
 
 
+def _derive_title(first_message: str, *, max_len: int = 60) -> str:
+    """Pick a short title from the first user message (MEDIUM #7).
+
+    Strips whitespace, collapses runs, truncates at a word boundary so
+    we don't leave dangling characters. Falls back to "Untitled" for
+    empty / whitespace-only input.
+    """
+    text = " ".join(first_message.split())
+    if not text:
+        return "Untitled"
+    if len(text) <= max_len:
+        return text
+    # Truncate at the last space before max_len so we don't slice a word.
+    cutoff = text.rfind(" ", 0, max_len)
+    if cutoff <= 0:
+        cutoff = max_len
+    return text[:cutoff].rstrip() + "…"
+
+
+def _validate_model_id(model_id: str) -> None:
+    """MEDIUM #3 — body.model must be one of our curated catalog ids.
+
+    Pre-fix, a caller could pass any string (incl. a hallucinated model
+    id), get a 201 from us, then a confusing upstream error on first
+    turn. Validate at the boundary instead.
+    """
+    from app.services.catalog import build_catalog
+
+    valid = {entry.id for entry in build_catalog()}
+    if model_id not in valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "what": f"Unknown model id {model_id!r}.",
+                "how_to_fix": "Pass one of the ids returned by GET /v1/models.",
+                "alternative_tool": "GET /v1/models",
+            },
+        )
+
+
 @router.post("/sessions", response_model=SessionMeta, status_code=status.HTTP_201_CREATED)
 async def create_session(
     body: CreateSessionBody,
@@ -89,6 +137,9 @@ async def create_session(
     the namespace, (2) write our metadata sidecar.
     """
     from app.persistence.sessions import new_session_id
+
+    if body.model is not None:
+        _validate_model_id(body.model)
 
     sid = new_session_id()
     bearer = _bearer_from_request(request)
@@ -109,7 +160,7 @@ async def create_session(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     store: StoreDep,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = None,
     archived: bool = False,
 ) -> SessionListResponse:
@@ -127,6 +178,8 @@ async def get_meta(session_id: str, store: StoreDep) -> SessionMeta:
 
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)
 async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> SessionMeta:
+    if body.model is not None:
+        _validate_model_id(body.model)
     try:
         return await store.patch(
             session_id,
@@ -165,11 +218,28 @@ async def send_message(
 
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)
-    available_tool_names = (
-        tuple(sorted(runtime.tools.list_tools()))
-        if meta.tools_enabled and runtime is not None
-        else ()
-    )
+    available_tool_names: tuple[str, ...]
+    if meta.tools_enabled and runtime is not None:
+        # Filter the runtime's tool surface by the read-only allowlist
+        # (HIGH #3) before telling the agent about it. The proxy also
+        # passes the same allowlist as `tools` so kaos-agents enforces
+        # the gate — this catalog is defense-in-depth on the prompt side.
+        import fnmatch
+
+        from app.services.catalog import READ_ONLY_TOOL_GLOBS
+
+        all_names = sorted(runtime.tools.list_tools())
+        available_tool_names = tuple(
+            name
+            for name in all_names
+            if any(fnmatch.fnmatchcase(name, glob) for glob in READ_ONLY_TOOL_GLOBS)
+        )
+    else:
+        available_tool_names = ()
+
+    # MEDIUM #7 — auto-derive a title from the first user message so
+    # the sidebar isn't a sea of "Untitled".
+    is_first_turn = meta.message_count == 0 and meta.title == "Untitled"
 
     async def event_generator():
         try:
@@ -183,9 +253,13 @@ async def send_message(
             ):
                 yield evt
         finally:
-            # Bump metadata regardless of stream outcome — partial
-            # turns still produced messages.
+            # Bump turn count (MEDIUM #7: this is per-turn, not per-message
+            # — increment by 1 here is correct since a turn is a user
+            # message + assistant reply). Set title on first turn from the
+            # user input, truncated at word boundary.
             try:
+                if is_first_turn:
+                    await store.patch(session_id, title=_derive_title(body.message))
                 await store.touch(session_id, increment_messages=1)
             except Exception:
                 logger.exception("failed to touch session %s after stream", session_id)

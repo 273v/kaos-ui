@@ -2,16 +2,21 @@
 
 Static, curated subset of `kaos_llm_client.cost.MODEL_PRICING`. See
 `app.services.catalog` for the registry-guard logic.
+
+Auth-gated: requires the same bearer as the kaos-agents-native routes
+(CRITICAL #1 fix — pre-fix, this route was public, which let invalid
+tokens pass the login probe).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth import require_auth
 from app.models import ModelListResponse
 from app.services.catalog import build_catalog
 
-router = APIRouter(tags=["models"])
+router = APIRouter(tags=["models"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/models", response_model=ModelListResponse)

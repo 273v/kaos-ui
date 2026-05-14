@@ -65,6 +65,54 @@ async def test_touch_bumps_counter_and_timestamp(session_store):
     assert bumped2.message_count == 3
 
 
+async def test_list_global_newest_first_across_pages(session_store):
+    """MEDIUM #8 — pre-fix, list_page returned lexicographic first then
+    sorted within the page only, so globally-newest could end up on a
+    later page. Verify all entries sort globally by last_message_at."""
+    # Create 5 sessions, touch them in deliberately-non-creation order.
+    items = []
+    for i in range(5):
+        meta = await session_store.create(
+            title=f"s{i}", model="anthropic:claude-haiku-4-5", system_prompt=""
+        )
+        items.append(meta.id)
+
+    # Touch the LAST-created session first → its last_message_at is oldest.
+    await session_store.touch(items[-1], increment_messages=1)
+    # Then touch the FIRST-created session → its last_message_at is newest.
+    await session_store.touch(items[0], increment_messages=1)
+
+    sums, cursor = await session_store.list(limit=2)
+    assert cursor is not None  # more pages remain
+    # The first page must contain the globally-newest session id (items[0]),
+    # not just the lexicographic-first page entry.
+    assert items[0] in [s.id for s in sums]
+
+
+async def test_list_cursor_paginates_correctly(session_store):
+    """MEDIUM #8 — cursor offset works."""
+    for i in range(7):
+        await session_store.create(
+            title=f"row {i}", model="anthropic:claude-haiku-4-5", system_prompt=""
+        )
+
+    page1, cursor1 = await session_store.list(limit=3)
+    assert len(page1) == 3
+    assert cursor1 == "3"
+
+    page2, cursor2 = await session_store.list(limit=3, cursor=cursor1)
+    assert len(page2) == 3
+    assert cursor2 == "6"
+
+    page3, cursor3 = await session_store.list(limit=3, cursor=cursor2)
+    assert len(page3) == 1
+    assert cursor3 is None
+
+    # No id appears twice across pages.
+    seen_ids = [s.id for s in (*page1, *page2, *page3)]
+    assert len(set(seen_ids)) == 7
+
+
 async def test_list_newest_first(session_store):
     a = await session_store.create(title="A", model="anthropic:claude-haiku-4-5", system_prompt="")
     b = await session_store.create(title="B", model="anthropic:claude-haiku-4-5", system_prompt="")

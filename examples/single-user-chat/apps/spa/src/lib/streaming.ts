@@ -90,9 +90,12 @@ export async function* readSseStream(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  let readerError: Error | null = null;
 
   // Drive the reader on a separate microtask chain so the consumer
-  // can pull events as they arrive.
+  // can pull events as they arrive. MEDIUM #4 — pre-fix, errors were
+  // swallowed, leaving the consumer waiting forever and the UI stuck
+  // on "Thinking…". We now capture and re-throw on the next pull.
   (async () => {
     try {
       while (true) {
@@ -101,8 +104,8 @@ export async function* readSseStream(
         parser.feed(decoder.decode(value, { stream: true }));
         wakeUp();
       }
-    } catch {
-      // Surface as stream-end; the consumer's ``done`` short-circuits.
+    } catch (err) {
+      readerError = err instanceof Error ? err : new Error(String(err));
     } finally {
       done = true;
       wakeUp();
@@ -114,7 +117,10 @@ export async function* readSseStream(
       yield queue.shift() as StreamEvent;
       continue;
     }
-    if (done) return;
+    if (done) {
+      if (readerError) throw readerError;
+      return;
+    }
     await new Promise<void>((resolve) => {
       resolveNext = resolve;
     });

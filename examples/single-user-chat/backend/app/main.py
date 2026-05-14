@@ -150,11 +150,27 @@ def create_app(settings: AppSettings | None = None):
     # SessionStore reuses the same VFS so our metadata sidecar lives
     # alongside kaos-agents memory under the same .kaos-vfs/ root.
     app.state.session_store = SessionStore(vfs=runtime.vfs)
+
+    # In-process httpx client (ASGITransport) for the chat proxy.
+    # Constructed eagerly so the first request doesn't wait, and
+    # closed on shutdown via FastAPI's event hook (MEDIUM #9 fix —
+    # previously the client leaked at process exit).
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://kaos-agents.internal",
         timeout=httpx.Timeout(None, connect=10.0),
     )
+
+    # `on_event("shutdown")` is the deprecated-but-still-supported way
+    # to hook teardown on a FastAPI app we don't own (create_agent_app
+    # installed its own lifespan; composing a second one cleanly would
+    # require subclassing). Modern lifespan-context is what kaos-ui's
+    # own helper (kaos_ui/agents.py) lays out for the next iteration.
+    @app.on_event("shutdown")  # ty: ignore[deprecated]
+    async def _close_upstream_client() -> None:
+        client = getattr(app.state, "upstream_client", None)
+        if client is not None:
+            await client.aclose()
 
     app.include_router(health.router, prefix="/v1")
     app.include_router(models.router, prefix="/v1")

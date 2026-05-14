@@ -13,12 +13,15 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kaos_core.logging import get_logger
 
 from kaos_ui.exceptions import ScaffoldError, TargetExistsError
 from kaos_ui.manifest import TEMPLATES, get_manifest, resolve_kind
+
+if TYPE_CHECKING:
+    from kaos_ui.settings import KaosUISettings
 
 logger = get_logger("kaos.ui.scaffolder")
 
@@ -31,7 +34,20 @@ def _slugify(name: str) -> str:
     return slug.strip("_")
 
 
-def _build_variables(name: str, kind: str) -> dict[str, str]:
+def _build_variables(
+    name: str,
+    kind: str,
+    *,
+    settings: KaosUISettings | None = None,
+) -> dict[str, str]:
+    """PROJECT #2 fix — toolchain versions now come from ``KaosUISettings``
+    (and through it, ``KAOS_UI_PYTHON_VERSION`` / ``KAOS_UI_NODE_VERSION``
+    env vars). Pre-fix they were hardcoded to "3.14" / "24" regardless
+    of settings, which made the documented overrides dead.
+    """
+    from kaos_ui.settings import KaosUISettings
+
+    cfg = settings or KaosUISettings()
     slug = _slugify(name)
     # NPM scope names allow hyphens but not underscores; produce a
     # parallel hyphenated variant for use as an npm scope or workspace
@@ -43,8 +59,8 @@ def _build_variables(name: str, kind: str) -> dict[str, str]:
         "KAOS_PROJECT_SLUG": slug,
         "KAOS_PYTHON_MODULE": slug.replace("-", "_"),
         "KAOS_NPM_SLUG": npm_slug,
-        "KAOS_PYTHON_VERSION": "3.14",
-        "KAOS_NODE_VERSION": "24",
+        "KAOS_PYTHON_VERSION": cfg.python_version,
+        "KAOS_NODE_VERSION": cfg.node_version,
         "KAOS_TEMPLATE": kind,
     }
 
@@ -109,6 +125,7 @@ def scaffold(
     *,
     ssr: bool = False,
     dry_run: bool = False,
+    settings: KaosUISettings | None = None,
 ) -> dict[str, Any]:
     """Materialize a template kind into a target directory.
 
@@ -119,6 +136,10 @@ def scaffold(
         target_dir: Where to create the project. Defaults to ``./<name>``.
         ssr: For ``web:spa``, use TanStack Start (SSR) instead of SPA.
         dry_run: If True, return the file list without writing.
+        settings: ``KaosUISettings`` override. When None (default) the
+            standard env-resolution chain is used. PROJECT #2 fix —
+            settings now drive the python_version / node_version
+            substitutions AND the optional templates_dir override.
 
     Returns:
         Dict with ``template``, ``name``, ``target``, ``files`` keys.
@@ -128,9 +149,26 @@ def scaffold(
         TargetExistsError: ``target_dir`` exists and is not empty.
         ScaffoldError: any I/O failure during materialization.
     """
+    from kaos_ui.settings import KaosUISettings
+
+    cfg = settings or KaosUISettings()
+
     canonical = resolve_kind(template)
     manifest = get_manifest(canonical)
     template_dir = manifest.template_dir
+
+    # If the user overrode the templates root via settings, honor it
+    # by rebasing the manifest's relative subpath onto cfg.templates_dir.
+    if cfg.templates_dir is not None:
+        # `manifest.template_dir` is rooted at the bundled templates dir;
+        # take the trailing path components and re-root under the override.
+        from kaos_ui.manifest import _TEMPLATES_ROOT
+
+        try:
+            relative = template_dir.relative_to(_TEMPLATES_ROOT)
+        except ValueError:
+            relative = Path(template_dir.name)
+        template_dir = cfg.templates_dir / relative
 
     if not template_dir.is_dir():
         msg = (
@@ -143,7 +181,7 @@ def scaffold(
     if target_dir is None:
         target_dir = Path.cwd() / name
 
-    variables = _build_variables(name, canonical)
+    variables = _build_variables(name, canonical, settings=cfg)
 
     exclude_prefixes: list[str] = []
     if canonical == "web:spa":

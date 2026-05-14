@@ -179,6 +179,7 @@ function ChatDetail() {
         value={input}
         onChange={setInput}
         onSubmit={onSubmit}
+        onStop={stream.abort}
         pending={stream.state.pending}
         placeholder={`Message ${meta?.title ?? "this conversation"}…`}
         leftChips={

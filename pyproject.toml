@@ -38,6 +38,12 @@ dev = [
   "ruff>=0.11.0",
   "ty>=0.0.1a17",
 ]
+# The `kaos_ui.agents` helpers wrap kaos-agents 0.1.0a1 behaviour but
+# kaos-ui itself doesn't depend on kaos-agents at runtime — consuming
+# apps install kaos-agents directly. Tests for `kaos_ui.agents` skip
+# when kaos-agents isn't on the path (`pytest.importorskip`); the
+# `single-user-chat` example exercises the helper end-to-end through
+# its own pinned kaos-agents.
 
 [project.scripts]
 kaos-ui = "kaos_ui.cli:main"

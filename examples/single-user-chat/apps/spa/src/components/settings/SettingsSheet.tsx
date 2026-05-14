@@ -4,7 +4,7 @@
 import { Button } from "@kaos-chat-example/ui/components/ui/button";
 import { Textarea } from "@kaos-chat-example/ui/components/ui/textarea";
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useModels } from "@/hooks/use-models";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
@@ -43,6 +43,41 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const sheetRef = useRef<HTMLElement | null>(null);
+
+  // Trap focus inside the sheet while open. Tab cycles within; on close
+  // we restore focus to the trigger (the calling code keeps a ref). LOW #2.
+  useEffect(() => {
+    if (!open) return;
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    // Move initial focus into the dialog so screen readers announce it.
+    const firstFocusable = sheet.querySelector<HTMLElement>(
+      'input, textarea, select, button, [tabindex]:not([tabindex="-1"])',
+    );
+    firstFocusable?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const focusables = sheet.querySelectorAll<HTMLElement>(
+        'input, textarea, select, button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
   if (!open) return null;
 
   const onSave = async () => {
@@ -59,8 +94,10 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     <>
       <div className="fixed inset-0 z-40 bg-foreground/10" onClick={onClose} aria-hidden />
       <aside
+        ref={sheetRef}
         className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-background border-l border-border shadow-none overflow-y-auto"
         role="dialog"
+        aria-modal="true"
         aria-label="Session settings"
       >
         <header className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-background">

@@ -66,22 +66,32 @@ class SessionListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# MEDIUM #3 — bounded inputs. Pre-fix, system_prompt was unbounded so a
+# 10 MB persisted prompt + huge messages were possible. Bounds match the
+# kaos-llm-client context-window floor (~32k tokens ≈ 100k chars), with
+# headroom for the model + message and a single fixed turn budget.
+_MAX_TITLE_LEN = 120
+_MAX_PROMPT_LEN = 8000
+_MAX_MESSAGE_LEN = 16000
+_MAX_MODEL_LEN = 80  # 'provider:model-name-with-dashes-x.y' fits well below
+
+
 class CreateSessionBody(BaseModel):
-    title: str | None = None
-    model: str | None = None
-    system_prompt: str | None = None
+    title: str | None = Field(default=None, max_length=_MAX_TITLE_LEN)
+    model: str | None = Field(default=None, max_length=_MAX_MODEL_LEN)
+    system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
 
 
 class PatchMetaBody(BaseModel):
-    title: str | None = None
-    model: str | None = None
-    system_prompt: str | None = None
+    title: str | None = Field(default=None, max_length=_MAX_TITLE_LEN)
+    model: str | None = Field(default=None, max_length=_MAX_MODEL_LEN)
+    system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
 
 
 class SendMessageBody(BaseModel):
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=_MAX_MESSAGE_LEN)
 
 
 class ArchiveResponse(BaseModel):

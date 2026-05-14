@@ -118,11 +118,19 @@ class SessionStore:
         cursor: str | None = None,
         archived: bool = False,
     ) -> tuple[builtins.list[SessionSummary], str | None]:
+        """Return sessions newest-first.
+
+        MEDIUM #8 — pre-fix this called `list_page` first and sorted the
+        page only, so the first page could miss globally-newest sessions.
+        Single-user scale stays comfortably below the slow-path threshold
+        (a few thousand at most), so we read every meta, sort by
+        last_message_at, then slice. A cursor is the int offset of the
+        next item; a None cursor means start at 0.
+        """
         ns = _ARCHIVED_NS if archived else _NS
-        page = await self._vfs.list_page(ns, cursor=cursor, limit=limit)
+        all_paths = await self._vfs.list(ns)
         summaries: list[SessionSummary] = []
-        for path in page.items:
-            # path looks like single-user-chat/sessions/{id}/meta.json
+        for path in all_paths:
             try:
                 raw = await self._vfs.read(path)
                 meta = SessionMeta.model_validate_json(raw)
@@ -141,12 +149,23 @@ class SessionStore:
                     archived=meta.archived,
                 )
             )
-        # Newest first.
+        # Newest first by activity, falling back to created_at.
         summaries.sort(
             key=lambda s: s.last_message_at or s.created_at,
             reverse=True,
         )
-        return summaries, page.next_cursor
+        # Apply cursor + limit slice. Cursor is an int-as-string offset
+        # so it survives JSON round-trip in the API response.
+        start = 0
+        if cursor:
+            try:
+                start = max(0, int(cursor))
+            except ValueError:
+                start = 0
+        end = start + limit
+        page = summaries[start:end]
+        next_cursor = str(end) if end < len(summaries) else None
+        return page, next_cursor
 
     async def patch(
         self,

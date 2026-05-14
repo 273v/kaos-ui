@@ -90,6 +90,49 @@ def build_catalog() -> list[ModelEntry]:
     return out
 
 
+# ── Read-only KAOS tool allowlist ────────────────────────────────────
+#
+# When a session has `tools_enabled=True`, the proxy sends THIS glob
+# list as `MessageRequest.tools`. Anything outside the allowlist will
+# never be bridged into the agent's ReAct loop, even if a future kaos-
+# module adds write tools to the runtime.
+#
+# Defense-in-depth for HIGH #3: the UI label says "Enable read-only
+# tools", and this list keeps that promise even as the toolset grows.
+# Audit before adding a glob: confirm every tool matched by the glob
+# is genuinely side-effect-free (read / extract / search / classify).
+READ_ONLY_TOOL_GLOBS: tuple[str, ...] = (
+    # kaos-core: VFS + tool registry inspection — reads only.
+    "kaos-core-vfs-list",
+    "kaos-core-vfs-read",
+    "kaos-core-list-tools",
+    "kaos-core-list-resources",
+    "kaos-core-tool-schema",
+    # kaos-pdf: text/page/render reads + classify. ParsePDF + RenderPage
+    # are read-only against the input file.
+    "kaos-pdf-parse",
+    "kaos-pdf-page-text",
+    "kaos-pdf-render-page",
+    "kaos-pdf-metadata",
+    "kaos-pdf-search",
+    "kaos-pdf-outline",
+    "kaos-pdf-classify",
+    # kaos-office: every entry is a read/parse path. Writers are out.
+    "kaos-office-read*",
+    "kaos-office-extract*",
+    "kaos-office-search*",
+    "kaos-office-list*",
+    # kaos-content: corpus + entity + summary queries, all read-only.
+    "kaos-content-search-document",
+    "kaos-content-chunk-document",
+    "kaos-content-summarize-document",
+    "kaos-content-extract*",
+    "kaos-content-filter*",
+    "kaos-content-corpus-*",
+    "kaos-content-sentences-*",
+)
+
+
 # Import-time validation. If the registry has drifted, the backend
 # refuses to start — better than serving a 200 with a broken picker.
 _validate_catalog()
