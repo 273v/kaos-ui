@@ -25,7 +25,9 @@ For contributor workflow and detailed standards, read:
   (`web:api`, `web:spa`, `dashboard:streamlit`, `tui:textual`,
   `module`, `workflow`) + four read-only MCP tools
   (`kaos-ui-list-templates`, `kaos-ui-template-info`,
-  `kaos-ui-scaffold`, `kaos-ui-doctor`).
+  `kaos-ui-scaffold`, `kaos-ui-doctor`) registered via
+  `kaos_ui.register_ui_tools(runtime)` (the kaos-mcp `--module ui`
+  loader contract). `register_kaos_ui_tools` is a backwards-compat alias.
 - Do not add provider clients, LLM clients, document extractors, or
   server packages here. The runtime depends only on `kaos-core`,
   `pydantic`, and `pydantic-settings`.

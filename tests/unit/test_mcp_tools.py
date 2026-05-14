@@ -20,14 +20,17 @@ from kaos_ui.mcp.tools import (
     ScaffoldTool,
     TemplateInfoTool,
 )
-from kaos_ui.runtime import register_kaos_ui_tools
+from kaos_ui.runtime import register_kaos_ui_tools, register_ui_tools
 
 # ── metadata + registration ─────────────────────────────────────────
 
 
-def test_register_kaos_ui_tools_adds_all_four() -> None:
+def test_register_ui_tools_adds_all_four() -> None:
     runtime = KaosRuntime()
-    register_kaos_ui_tools(runtime)
+    count = register_ui_tools(runtime)
+    # kaos-mcp's --module loader contract: return int tool count, not runtime.
+    assert isinstance(count, int)
+    assert count == 4
     names = set(runtime.tools.list_tools())
     assert {
         "kaos-ui-list-templates",
@@ -35,6 +38,25 @@ def test_register_kaos_ui_tools_adds_all_four() -> None:
         "kaos-ui-scaffold",
         "kaos-ui-doctor",
     }.issubset(names)
+
+
+def test_register_kaos_ui_tools_is_backwards_compat_alias() -> None:
+    """The longer name remains exported so design-doc readers don't bit-rot."""
+    assert register_kaos_ui_tools is register_ui_tools
+
+
+def test_kaos_mcp_module_loader_naming_convention() -> None:
+    """``kaos-mcp serve --module ui`` looks up ``kaos_ui.register_ui_tools``
+    (the short-form ``register_<name>_tools`` convention shared with
+    ``kaos-pdf`` / ``kaos-web`` / ``kaos-office`` / ``kaos-reference``).
+
+    Without this name, the loader at ``kaos-mcp/kaos_mcp/cli.py:_load_modules``
+    crashes with ``'kaos_ui' has no 'register_ui_tools()' function``.
+    """
+    import kaos_ui
+
+    fn = getattr(kaos_ui, "register_ui_tools", None)
+    assert callable(fn), "kaos_ui.register_ui_tools must exist for kaos-mcp --module ui"
 
 
 def test_every_tool_declares_explicit_annotations() -> None:

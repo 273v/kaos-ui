@@ -70,13 +70,13 @@ jobs:
           /tmp/smoke/bin/python -c "
           import kaos_ui
           from kaos_core import KaosRuntime
-          from kaos_ui import TEMPLATES, scaffold
-          from kaos_ui.runtime import register_kaos_ui_tools
+          from kaos_ui import TEMPLATES, register_ui_tools, scaffold
           rt = KaosRuntime()
-          register_kaos_ui_tools(rt)
+          count = register_ui_tools(rt)
+          assert isinstance(count, int) and count == 4
           tools = sorted(rt.tools.list_tools())
           assert len(tools) == 4 and len(TEMPLATES) >= 6
-          print(f'kaos-ui {kaos_ui.__version__}: {len(TEMPLATES)} templates, {len(tools)} MCP tools')
+          print(f'kaos-ui {kaos_ui.__version__}: {len(TEMPLATES)} templates, {count} MCP tools')
           "
 
       - name: Generate CycloneDX SBOM

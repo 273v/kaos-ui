@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `register_kaos_ui_tools()` previously returned the `KaosRuntime`
+  instance and was named with the long form `register_kaos_<name>_tools`.
+  Both broke the `kaos-mcp serve --module ui` loader contract — it
+  expects a function named `register_<name>_tools` (short form) that
+  returns an `int` tool count (matching `kaos-pdf` / `kaos-web` /
+  `kaos-office` / `kaos-reference`). The canonical entry point is now
+  `kaos_ui.register_ui_tools` (returns `int`); the long form remains
+  as a backwards-compatible alias.
+
 ### Added
 - Apache-2.0 license metadata in `pyproject.toml`, plus `LICENSE` and
   `NOTICE` files at the project root.

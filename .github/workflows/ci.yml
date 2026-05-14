@@ -234,16 +234,18 @@ jobs:
               KaosUISettings,
               ScaffoldResult,
               TEMPLATES,
-              register_kaos_ui_tools,
+              register_ui_tools,
               scaffold,
           )
           from kaos_core import KaosRuntime
           rt = KaosRuntime()
-          register_kaos_ui_tools(rt)
+          # kaos-mcp loader contract: register_ui_tools returns int count.
+          count = register_ui_tools(rt)
+          assert isinstance(count, int) and count == 4, f'bad return: {count!r}'
           tools = sorted(rt.tools.list_tools())
           assert len(tools) == 4, f'expected 4 tools, got {len(tools)}: {tools}'
           assert len(TEMPLATES) >= 6, f'expected >=6 templates, got {len(TEMPLATES)}'
-          print(f'kaos-ui {kaos_ui.__version__}: {len(TEMPLATES)} templates, {len(tools)} MCP tools')
+          print(f'kaos-ui {kaos_ui.__version__}: {len(TEMPLATES)} templates, {count} MCP tools')
           "
           /tmp/smoke/bin/kaos-ui --help
 

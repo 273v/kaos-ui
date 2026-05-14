@@ -64,8 +64,7 @@ import asyncio
 from pathlib import Path
 
 from kaos_core import KaosRuntime
-from kaos_ui import scaffold
-from kaos_ui.runtime import register_kaos_ui_tools
+from kaos_ui import register_ui_tools, scaffold
 
 
 async def main() -> None:
@@ -75,7 +74,8 @@ async def main() -> None:
 
     # Or register the MCP tools onto a runtime:
     runtime = KaosRuntime()
-    register_kaos_ui_tools(runtime)
+    n = register_ui_tools(runtime)
+    print(f"registered {n} kaos-ui MCP tools")
     tool = runtime.tools.get_tool("kaos-ui-list-templates")
     res = await tool.execute({})
     print("templates:", res.structuredContent["count"])
