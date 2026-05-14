@@ -31,7 +31,7 @@ export interface ChatMessage {
   tool_calls?: ToolCallSummary[];
 }
 
-export type TurnStatus =
+export type TurnStatusKind =
   | { kind: "idle" }
   | { kind: "thinking" }
   | { kind: "tool"; tool: string }

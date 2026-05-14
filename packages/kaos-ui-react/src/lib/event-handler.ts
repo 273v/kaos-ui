@@ -8,7 +8,7 @@
  * time so consumers are forced to handle it.
  */
 
-import type { ChatMessage, ToolCallSummary, TurnStatus } from "./chat-state.js";
+import type { ChatMessage, ToolCallSummary, TurnStatusKind } from "./chat-state.js";
 import { newId } from "./chat-state.js";
 import type { KaosAgentEvent, SpanEvent } from "./events.js";
 
@@ -16,7 +16,7 @@ export interface TranscriptState {
   /** Ordered transcript shown in the conversation column. */
   messages: ChatMessage[];
   /** Live status pill above the composer / below the streaming message. */
-  status: TurnStatus;
+  status: TurnStatusKind;
   /** Banners that survive across turns (e.g., grounding refusals). */
   banners: { id: string; kind: "warn" | "error"; text: string }[];
   /** When true, the SSE stream is mid-flight — used to disable send. */

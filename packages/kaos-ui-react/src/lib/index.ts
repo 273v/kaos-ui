@@ -4,7 +4,7 @@ export type {
   MessageRole,
   ToolCallSummary,
   ChatMessage,
-  TurnStatus,
+  TurnStatusKind,
 } from "./chat-state.js";
 export { newId } from "./chat-state.js";
 
