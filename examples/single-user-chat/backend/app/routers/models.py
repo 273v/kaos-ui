@@ -3,9 +3,7 @@
 Static, curated subset of `kaos_llm_client.cost.MODEL_PRICING`. See
 `app.services.catalog` for the registry-guard logic.
 
-Auth-gated: requires the same bearer as the kaos-agents-native routes
-(CRITICAL #1 fix — pre-fix, this route was public, which let invalid
-tokens pass the login probe).
+Auth-gated: requires the same bearer as the kaos-agents-native routes.
 """
 
 from __future__ import annotations

@@ -46,7 +46,7 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
   const sheetRef = useRef<HTMLElement | null>(null);
 
   // Trap focus inside the sheet while open. Tab cycles within; on close
-  // we restore focus to the trigger (the calling code keeps a ref). LOW #2.
+  // we restore focus to the trigger (the calling code keeps a ref).
   useEffect(() => {
     if (!open) return;
     const sheet = sheetRef.current;

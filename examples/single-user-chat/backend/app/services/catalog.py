@@ -97,10 +97,10 @@ def build_catalog() -> list[ModelEntry]:
 # never be bridged into the agent's ReAct loop, even if a future kaos-
 # module adds write tools to the runtime.
 #
-# Defense-in-depth for HIGH #3: the UI label says "Enable read-only
-# tools", and this list keeps that promise even as the toolset grows.
-# Audit before adding a glob: confirm every tool matched by the glob
-# is genuinely side-effect-free (read / extract / search / classify).
+# Defense-in-depth: the UI label says "Enable read-only tools", and
+# this list keeps that promise even as the toolset grows. Before adding
+# a glob, confirm every tool matched is genuinely side-effect-free
+# (read / extract / search / classify).
 READ_ONLY_TOOL_GLOBS: tuple[str, ...] = (
     # kaos-core: VFS + tool registry inspection — reads only.
     "kaos-core-vfs-list",

@@ -35,7 +35,7 @@ follow.
 
 ---
 
-## P-020 — `create_app(runtime=None)` defaults to in-memory VFS, contradicting kaos-core
+## `create_app(runtime=None)` defaults to in-memory VFS, contradicting kaos-core
 
 **Symptom.** Conversations evaporate on backend restart. SessionMemory
 data exists in-process while the agent is replying, but the moment
@@ -76,7 +76,7 @@ disk-backed `KaosRuntime` and passes it to `create_app(runtime=...)`.
 
 ---
 
-## P-021 — `Runner` only attaches a `KaosContext` when `corpus is not None`, leaving bridged tools with no runtime
+## `Runner` only attaches a `KaosContext` when `corpus is not None`, leaving bridged tools with no runtime
 
 **Symptom.** Every tool call fails with
 `{"error": true, "message": "No runtime context..."}` even though
@@ -129,7 +129,7 @@ to auto-create the context if the Runner didn't.
 
 ---
 
-## P-022 — The agent is never told what tools it has
+## The agent is never told what tools it has
 
 **Symptom.** Even with tools registered on the runtime and the
 context fixed, asking the agent "what tools do you have access to?"
@@ -161,7 +161,7 @@ from the runtime and prepends it to `MessageRequest.instructions`.
 
 ---
 
-## P-023 — `KAOS_AGENTS_API_*` env var prefix is doubled (this one's just confusing, not broken)
+## `KAOS_AGENTS_API_*` env var prefix is doubled (confusing but not broken)
 
 `kaos_agents/api/settings.py` declares `env_prefix="KAOS_AGENTS_API_"`
 on a `KaosAgentsApiSettings` whose field names start with `api_`. So

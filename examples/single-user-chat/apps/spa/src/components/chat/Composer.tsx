@@ -6,7 +6,7 @@ interface Props {
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void;
-  /** Called when the user clicks Stop while a turn is in flight (MEDIUM #6). */
+  /** Called when the user clicks Stop while a turn is in flight. */
   onStop?: () => void;
   pending: boolean;
   placeholder?: string;
@@ -32,11 +32,11 @@ export function Composer({
 }: Props) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // LOW #3 — autogrow must run on every keystroke, not just mount.
-  // We don't read `value` inside the effect, but its change is what
-  // makes the DOM scrollHeight grow; biome's useExhaustiveDependencies
-  // strips `value` from the deps because it isn't referenced inside.
-  // Explicit suppression keeps the keystroke-driven autogrow correct.
+  // Autogrow must run on every keystroke, not just mount. We don't
+  // read `value` inside the effect, but its change is what makes the
+  // DOM scrollHeight grow; biome's useExhaustiveDependencies strips
+  // `value` from the deps because it isn't referenced inside. Explicit
+  // suppression keeps the keystroke-driven autogrow correct.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `value` change is the SIGNAL to remeasure scrollHeight — not a dep we read.
   useEffect(() => {
     const el = taRef.current;

@@ -105,23 +105,20 @@ def _cmd_new(args: argparse.Namespace) -> None:
         return
 
     if args.json:
-        _json_out({"command": "new", **result})
+        _json_out({"command": "new", **result.to_dict()})
         return
 
-    if result.get("dry_run"):
-        print(
-            f"Would create {args.name}/ from {result['template']!r} ({len(result['files'])} files)"
-        )
-        for f in result["files"]:
+    if result.dry_run:
+        print(f"Would create {args.name}/ from {result.template!r} ({len(result.files)} files)")
+        for f in result.files:
             print(f"  {f}")
         return
 
-    print(f"Created {result['target']} from {result['template']!r} ({len(result['files'])} files)")
+    print(f"Created {result.target} from {result.template!r} ({len(result.files)} files)")
 
-    # Next-steps hint from the manifest.
     from kaos_ui.manifest import get_manifest
 
-    manifest = get_manifest(result["template"])
+    manifest = get_manifest(result.template)
     if manifest.next_steps:
         print()
         for step in manifest.next_steps:

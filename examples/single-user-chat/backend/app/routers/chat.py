@@ -50,7 +50,6 @@ def _bearer_from_request(request: Request) -> str:
 
     Auth has already been enforced by `Depends(require_auth)` on the
     router — by the time we get here, the header is present and valid.
-    No env-token fallback (that was the CRITICAL #1 bug — see review).
     """
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
@@ -84,7 +83,7 @@ async def _upstream_create_session(
 
 
 def _derive_title(first_message: str, *, max_len: int = 60) -> str:
-    """Pick a short title from the first user message (MEDIUM #7).
+    """Pick a short title from the first user message.
 
     Strips whitespace, collapses runs, truncates at a word boundary so
     we don't leave dangling characters. Falls back to "Untitled" for
@@ -103,12 +102,7 @@ def _derive_title(first_message: str, *, max_len: int = 60) -> str:
 
 
 def _validate_model_id(model_id: str) -> None:
-    """MEDIUM #3 — body.model must be one of our curated catalog ids.
-
-    Pre-fix, a caller could pass any string (incl. a hallucinated model
-    id), get a 201 from us, then a confusing upstream error on first
-    turn. Validate at the boundary instead.
-    """
+    """Confirm ``model_id`` is one of the ids in our curated catalog."""
     from app.services.catalog import build_catalog
 
     valid = {entry.id for entry in build_catalog()}
@@ -221,9 +215,9 @@ async def send_message(
     available_tool_names: tuple[str, ...]
     if meta.tools_enabled and runtime is not None:
         # Filter the runtime's tool surface by the read-only allowlist
-        # (HIGH #3) before telling the agent about it. The proxy also
-        # passes the same allowlist as `tools` so kaos-agents enforces
-        # the gate — this catalog is defense-in-depth on the prompt side.
+        # before telling the agent about it. The proxy also passes the
+        # same allowlist as `tools` so kaos-agents enforces the gate —
+        # this catalog is defense-in-depth on the prompt side.
         import fnmatch
 
         from app.services.catalog import READ_ONLY_TOOL_GLOBS
@@ -237,8 +231,8 @@ async def send_message(
     else:
         available_tool_names = ()
 
-    # MEDIUM #7 — auto-derive a title from the first user message so
-    # the sidebar isn't a sea of "Untitled".
+    # First turn auto-derives a title from the user message so the
+    # sidebar isn't a sea of "Untitled".
     is_first_turn = meta.message_count == 0 and meta.title == "Untitled"
 
     async def event_generator():
@@ -253,10 +247,9 @@ async def send_message(
             ):
                 yield evt
         finally:
-            # Bump turn count (MEDIUM #7: this is per-turn, not per-message
-            # — increment by 1 here is correct since a turn is a user
-            # message + assistant reply). Set title on first turn from the
-            # user input, truncated at word boundary.
+            # Increment by 1: a turn is (user message + assistant reply),
+            # not two messages. Set title on first turn from the user
+            # input, truncated at word boundary.
             try:
                 if is_first_turn:
                     await store.patch(session_id, title=_derive_title(body.message))

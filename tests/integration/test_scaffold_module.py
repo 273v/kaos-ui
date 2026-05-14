@@ -1,17 +1,13 @@
 """Integration test for the ``module`` template.
 
-Closes audit-01 MCP-01: the module scaffold templates had drifted
-against the live ``kaos-core`` API (wrong import path, stale
-``runtime.register_tool()``, ``KaosTool`` shape pre-``metadata``/``execute``).
-The previous regression net was AST-parse + ruff which couldn't catch
-those — they're semantic/runtime errors. This test scaffolds the
-template, imports the rendered package against the real ``kaos-core``,
-calls ``register_*_tools(KaosRuntime())``, and exercises ``execute()``
-on the scaffolded ``ExampleTool``.
+Scaffolds the template, imports the rendered package against the real
+``kaos-core``, calls ``register_*_tools(KaosRuntime())``, and exercises
+``execute()`` on the scaffolded ``ExampleTool``. Guards against template
+drift relative to live ``kaos-core`` API shape — the structural
+``test_template_compiles.py`` cannot catch semantic / runtime errors.
 
 Marked ``integration`` because it imports the rendered package into
-the running interpreter (vs ``test_template_compiles.py`` which is
-purely structural).
+the running interpreter.
 """
 
 from __future__ import annotations

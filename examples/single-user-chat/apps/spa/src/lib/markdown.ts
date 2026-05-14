@@ -1,10 +1,6 @@
 // markdown-it instance with a strict link sanitizer + safe defaults.
 //
-// LOW #3 — pre-fix, assistant content was rendered as `whitespace-pre-wrap`
-// plain text, which meant **bold**, lists, code blocks, etc. shipped as
-// raw asterisks. The agent's output is markdown by convention.
-//
-// Sanitization choices:
+// The agent's output is markdown by convention. Sanitization choices:
 // - html: false → never trust raw <script> from the model
 // - linkify: false → only render explicit [text](url), not bare URLs
 //   (bare URLs are still readable as plain text)

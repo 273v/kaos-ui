@@ -11,14 +11,11 @@ routers on top:
     /v1/runs/*/approve   ← kaos-agents
     /openapi.json /docs  ← kaos-agents
 
-CRITICAL — kaos-agents' `create_app()` defaults to an in-memory VFS
-when called without an explicit runtime (see `kaos_agents/api/server.py`
-`_resolve_vfs`: `VFSConfig(default_backend=StorageBackend.MEMORY)`).
-That means every conversation evaporates on process restart. We pass
-a disk-backed `KaosRuntime` explicitly so SessionMemory persists at
-`{vfs_path}/kaos-agents/sessions/{id}/`.
-
-See docs/PATTERNS.md P-020.
+NOTE — kaos-agents' `create_app()` defaults to an in-memory VFS when
+called without an explicit runtime (see `kaos_agents/api/server.py`
+`_resolve_vfs`). That means every conversation evaporates on process
+restart. We pass a disk-backed `KaosRuntime` explicitly so SessionMemory
+persists at `{vfs_path}/kaos-agents/sessions/{id}/`. See UPSTREAM-NOTES.md.
 """
 
 from __future__ import annotations
@@ -44,7 +41,7 @@ def _install_tool_bridge_runtime_patch() -> None:
     bridged tool wrappers have no `KaosContext` with a `.runtime`
     attached at execution time, so every tool call returns
     `{"error": true, "message": "No runtime context..."}` — see
-    docs/PATTERNS.md P-021.
+    UPSTREAM-NOTES.md.
 
     Fix: wrap `bridge_runtime_tools` so it auto-creates a context with
     the runtime when none is supplied. Idempotent — runs once at import
@@ -153,8 +150,7 @@ def create_app(settings: AppSettings | None = None):
 
     # In-process httpx client (ASGITransport) for the chat proxy.
     # Constructed eagerly so the first request doesn't wait, and
-    # closed on shutdown via FastAPI's event hook (MEDIUM #9 fix —
-    # previously the client leaked at process exit).
+    # closed on shutdown via FastAPI's event hook.
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://kaos-agents.internal",

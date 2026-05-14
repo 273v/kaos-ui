@@ -14,11 +14,11 @@ def test_health(client):
 
 
 def test_auth_gate_on_extension_routes(app):
-    """CRITICAL #1 regression — /v1/chat/* and /v1/models must require auth.
+    """/v1/chat/* and /v1/models must require auth.
 
-    Pre-fix, these routes were public, which let invalid tokens pass
-    the SPA's login probe (CRITICAL #2). Both fixes verified by this
-    test: unauthenticated requests get 401, valid bearer gets 2xx.
+    Unauthenticated requests get 401; valid bearer gets 2xx. The SPA's
+    login probe targets an auth-gated route so the probe accurately
+    reflects whether the token is valid.
     """
     from fastapi.testclient import TestClient
 
@@ -164,7 +164,7 @@ def test_transcript_stub_501(client):
 
 
 def test_validation_rejects_oversize_inputs(client):
-    """MEDIUM #3 — bounded inputs."""
+    """Bounded inputs — title, system_prompt, message all clamped."""
     # title too long
     r = client.post("/v1/chat/sessions", json={"title": "x" * 200})
     assert r.status_code == 422
@@ -181,7 +181,7 @@ def test_validation_rejects_oversize_inputs(client):
 
 
 def test_validation_rejects_unknown_model_id(client):
-    """MEDIUM #3 — model must be in the curated catalog."""
+    """body.model must be one of the curated catalog ids."""
     r = client.post("/v1/chat/sessions", json={"model": "anthropic:fake-model-x"})
     assert r.status_code == 422
     detail = r.json()["detail"]
@@ -189,7 +189,7 @@ def test_validation_rejects_unknown_model_id(client):
 
 
 def test_list_limit_clamped(client):
-    """MEDIUM #3 — list?limit out of bounds rejected."""
+    """list?limit out of bounds rejected."""
     assert client.get("/v1/chat/sessions?limit=0").status_code == 422
     assert client.get("/v1/chat/sessions?limit=10000").status_code == 422
 

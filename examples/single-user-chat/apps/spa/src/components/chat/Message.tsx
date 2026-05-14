@@ -13,10 +13,10 @@ interface Props {
  * One message in the transcript. Flat role-labeled block (no bubbles)
  * per UX-LANGUAGE.md § 4.2.
  *
- * LOW #3 — assistant messages render as Markdown (links + lists +
- * bold + code blocks). User / tool / error messages stay
- * `whitespace-pre-wrap` plain text so the user sees exactly what they
- * typed and so tool stack traces don't get parsed weirdly.
+ * Assistant messages render as Markdown (links + lists + bold + code
+ * blocks). User / tool / error messages stay `whitespace-pre-wrap`
+ * plain text so the user sees exactly what they typed and so tool
+ * stack traces don't get parsed weirdly.
  */
 export function Message({ message }: Props) {
   const isUser = message.role === "user";

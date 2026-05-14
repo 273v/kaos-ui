@@ -21,5 +21,6 @@ Open http://localhost:8000/docs for the interactive API docs.
 ```bash
 uv run ruff format app/ tests/
 uv run ruff check --fix app/ tests/
+uv run ty check app/ tests/
 uv run pytest tests/ -v
 ```

@@ -12,6 +12,7 @@ import contextlib
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,42 @@ logger = get_logger("kaos.ui.scaffolder")
 _SKIP_SUBSTITUTE = {".png", ".jpg", ".ico", ".woff", ".woff2", ".ttf", ".eot"}
 
 
+@dataclass(frozen=True, slots=True)
+class ScaffoldResult:
+    """Typed result of a ``scaffold()`` call.
+
+    ``to_dict()`` is the serialization boundary for CLI/MCP/JSON output.
+    Mapping-style access (``result["template"]``) is preserved for
+    callers that still use the dict form.
+    """
+
+    template: str
+    name: str
+    target: str
+    files: tuple[str, ...]
+    dry_run: bool
+    ssr: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Stable dict shape for JSON/MCP serialization."""
+        payload: dict[str, Any] = {
+            "template": self.template,
+            "name": self.name,
+            "target": self.target,
+            "files": list(self.files),
+            "dry_run": self.dry_run,
+        }
+        if self.ssr is not None:
+            payload["ssr"] = self.ssr
+        return payload
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.to_dict().get(key, default)
+
+
 def _slugify(name: str) -> str:
     """Convert a project name to a Python-safe slug."""
     slug = re.sub(r"[^a-z0-9]+", "_", name.lower().strip())
@@ -40,10 +77,8 @@ def _build_variables(
     *,
     settings: KaosUISettings | None = None,
 ) -> dict[str, str]:
-    """PROJECT #2 fix — toolchain versions now come from ``KaosUISettings``
-    (and through it, ``KAOS_UI_PYTHON_VERSION`` / ``KAOS_UI_NODE_VERSION``
-    env vars). Pre-fix they were hardcoded to "3.14" / "24" regardless
-    of settings, which made the documented overrides dead.
+    """Toolchain versions come from ``KaosUISettings`` (and through it,
+    ``KAOS_UI_PYTHON_VERSION`` / ``KAOS_UI_NODE_VERSION`` env vars).
     """
     from kaos_ui.settings import KaosUISettings
 
@@ -126,7 +161,7 @@ def scaffold(
     ssr: bool = False,
     dry_run: bool = False,
     settings: KaosUISettings | None = None,
-) -> dict[str, Any]:
+) -> ScaffoldResult:
     """Materialize a template kind into a target directory.
 
     Args:
@@ -137,9 +172,9 @@ def scaffold(
         ssr: For ``web:spa``, use TanStack Start (SSR) instead of SPA.
         dry_run: If True, return the file list without writing.
         settings: ``KaosUISettings`` override. When None (default) the
-            standard env-resolution chain is used. PROJECT #2 fix —
-            settings now drive the python_version / node_version
-            substitutions AND the optional templates_dir override.
+            standard env-resolution chain is used. ``settings`` drives
+            the python_version / node_version substitutions and the
+            optional templates_dir override.
 
     Returns:
         Dict with ``template``, ``name``, ``target``, ``files`` keys.
@@ -198,14 +233,14 @@ def scaffold(
                 continue
             rendered_rel = _render_template_path(rel, variables)
             files.append(rendered_rel.as_posix())
-        return {
-            "template": canonical,
-            "name": name,
-            "target": str(target_dir),
-            "files": files,
-            "ssr": ssr if canonical == "web:spa" else None,
-            "dry_run": True,
-        }
+        return ScaffoldResult(
+            template=canonical,
+            name=name,
+            target=str(target_dir),
+            files=tuple(files),
+            dry_run=True,
+            ssr=ssr if canonical == "web:spa" else None,
+        )
 
     if target_dir.exists() and any(target_dir.iterdir()):
         msg = (
@@ -244,13 +279,13 @@ def scaffold(
         },
     )
 
-    return {
-        "template": canonical,
-        "name": name,
-        "target": str(target_dir),
-        "files": files,
-        "dry_run": False,
-    }
+    return ScaffoldResult(
+        template=canonical,
+        name=name,
+        target=str(target_dir),
+        files=tuple(files),
+        dry_run=False,
+    )
 
 
 def list_templates() -> dict[str, str]:
@@ -258,4 +293,4 @@ def list_templates() -> dict[str, str]:
     return dict(TEMPLATES)
 
 
-__all__ = ["TEMPLATES", "list_templates", "scaffold"]
+__all__ = ["TEMPLATES", "ScaffoldResult", "list_templates", "scaffold"]

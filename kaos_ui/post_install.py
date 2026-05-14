@@ -42,12 +42,10 @@ def plan(kind: str) -> list[PostInstallStep]:
 def _parse_chained(command: str, base_cwd: Path) -> list[tuple[list[str], Path]]:
     """Split a `cd X && y && z` chain into (argv, cwd) pairs.
 
-    PROJECT #3 fix — pre-fix, `subprocess.run(shlex.split("cd X && y"))`
-    treated `&&` as a positional argument to `cd`, which never worked.
-    We now hand-parse the `cd` + `&&` chain so manifest commands like
+    Hand-parses the `cd` + `&&` chain so manifest commands like
     `cd backend && uv sync && uv run pre-commit install` execute as
-    three steps with the right cwd, without enabling a shell (which
-    would invite injection from manifest-author-controlled strings).
+    three steps with the right cwd, without enabling a shell — which
+    would invite injection from manifest-author-controlled strings.
 
     Returns one (argv, cwd) tuple per chained command. Raises
     PostInstallError on anything we don't recognize.

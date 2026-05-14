@@ -35,11 +35,10 @@ export function useSendMessage(opts: UseSendMessageOptions) {
   const [rawEvents, setRawEvents] = useState<DebugEvent[]>([]);
   const eventCounter = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
-  // MEDIUM #5 — pendingRef mirrors state.pending so the send() gate
-  // reads the live value, not a stale closure. Pre-fix, two rapid
-  // submits both saw state.pending=false at function-close time and
-  // both kicked off SSE streams, with the second abort marking the
-  // first stream's assistant placeholder as "stopped."
+  // `pendingRef` mirrors `state.pending` so the send() gate reads the
+  // live value, not a stale closure. Without it, two rapid submits both
+  // see state.pending=false at function-close time and both kick off
+  // SSE streams.
   const pendingRef = useRef(false);
   const qc = useQueryClient();
 
@@ -104,11 +103,10 @@ export function useSendMessage(opts: UseSendMessageOptions) {
           }
         }
       } catch (err) {
-        // MEDIUM #4 — reader errors (server disconnect, network drop)
-        // are now re-thrown by readSseStream so we catch them here and
-        // ALWAYS finalize the streaming placeholder. Pre-fix, errors
-        // were swallowed and the placeholder stayed in `streaming=true`
-        // forever ("Thinking…" spinner of doom).
+        // Reader errors (server disconnect, network drop) are re-thrown
+        // by readSseStream so we catch them here and finalize the
+        // streaming placeholder. Otherwise the placeholder would stay
+        // in `streaming=true` forever.
         if ((err as Error)?.name === "AbortError") {
           setState((prev) => markAborted(prev));
         } else {

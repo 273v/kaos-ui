@@ -66,9 +66,8 @@ async def test_touch_bumps_counter_and_timestamp(session_store):
 
 
 async def test_list_global_newest_first_across_pages(session_store):
-    """MEDIUM #8 — pre-fix, list_page returned lexicographic first then
-    sorted within the page only, so globally-newest could end up on a
-    later page. Verify all entries sort globally by last_message_at."""
+    """All entries must sort globally by last_message_at, not within
+    a page — globally-newest must always land on the first page."""
     # Create 5 sessions, touch them in deliberately-non-creation order.
     items = []
     for i in range(5):
@@ -90,7 +89,7 @@ async def test_list_global_newest_first_across_pages(session_store):
 
 
 async def test_list_cursor_paginates_correctly(session_store):
-    """MEDIUM #8 — cursor offset works."""
+    """Cursor offset advances correctly across pages."""
     for i in range(7):
         await session_store.create(
             title=f"row {i}", model="anthropic:claude-haiku-4-5", system_prompt=""

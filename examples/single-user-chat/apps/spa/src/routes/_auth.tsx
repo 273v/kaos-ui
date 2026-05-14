@@ -28,9 +28,8 @@ function AuthedShell() {
   const createSession = useCreateSession();
   const navigate = useNavigate();
 
-  // LOW #2 — Cmd/Ctrl-K opens a new chat. Pre-fix the docs advertised
-  // this shortcut but no handler existed. Bound here so it works under
-  // any authenticated route (sidebar visible or not).
+  // Cmd/Ctrl-K opens a new chat. Bound here so it works under any
+  // authenticated route (sidebar visible or not).
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {

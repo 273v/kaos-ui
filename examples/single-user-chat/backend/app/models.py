@@ -66,10 +66,9 @@ class SessionListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-# MEDIUM #3 — bounded inputs. Pre-fix, system_prompt was unbounded so a
-# 10 MB persisted prompt + huge messages were possible. Bounds match the
-# kaos-llm-client context-window floor (~32k tokens ≈ 100k chars), with
-# headroom for the model + message and a single fixed turn budget.
+# Bounded inputs. Bounds match the kaos-llm-client context-window floor
+# (~32k tokens ≈ 100k chars), with headroom for the model + message and
+# a single fixed turn budget.
 _MAX_TITLE_LEN = 120
 _MAX_PROMPT_LEN = 8000
 _MAX_MESSAGE_LEN = 16000

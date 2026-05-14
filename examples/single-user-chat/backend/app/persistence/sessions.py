@@ -120,8 +120,6 @@ class SessionStore:
     ) -> tuple[builtins.list[SessionSummary], str | None]:
         """Return sessions newest-first.
 
-        MEDIUM #8 — pre-fix this called `list_page` first and sorted the
-        page only, so the first page could miss globally-newest sessions.
         Single-user scale stays comfortably below the slow-path threshold
         (a few thousand at most), so we read every meta, sort by
         last_message_at, then slice. A cursor is the int offset of the

@@ -34,9 +34,9 @@ def test_forward_body_disables_tools_with_no_match_filter() -> None:
 
 
 def test_forward_body_enables_tools_with_readonly_allowlist_and_catalog() -> None:
-    """HIGH #3 — tools_enabled=True must forward the curated read-only
-    allowlist, NOT a wildcard. The UI label "Enable read-only tools" is
-    only true if we keep the glob bounded."""
+    """tools_enabled=True must forward the curated read-only allowlist,
+    NOT a wildcard. The UI label "Enable read-only tools" is only true
+    if we keep the glob bounded."""
     from app.services.catalog import READ_ONLY_TOOL_GLOBS
 
     body = _build_forward_body(

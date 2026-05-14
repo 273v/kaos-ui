@@ -18,9 +18,9 @@ export function DebugPanel({ events }: Props) {
   const enabled = search.debug === "true" || search.debug === true;
   const ref = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to the latest event. LOW #3 — pre-fix the deps were
-  // `[]` so this only ran on mount and never followed new events.
-  // `events.length` is the signal; biome strips it as "unread" otherwise.
+  // Auto-scroll to the latest event. `events.length` is the signal;
+  // biome strips it as "unread" because the effect doesn't reference
+  // it directly, so we suppress the lint here.
   // biome-ignore lint/correctness/useExhaustiveDependencies: events.length change is the trigger to scroll, not something the effect reads.
   useEffect(() => {
     const el = ref.current;

@@ -14,9 +14,9 @@ interface Props {
  * Single sidebar row.
  * - h-9 height per UX-LANGUAGE § 4.6
  * - hover: bg-muted; active: bg-muted + 2px amber left-edge stripe
- * - Menu trigger lives OUTSIDE the link (LOW #2 fix — pre-fix the
- *   <button> was nested inside <a>, which lets clicks bubble back
- *   to the link and also confuses screen readers).
+ * - Menu trigger lives OUTSIDE the link. Nesting a button inside the
+ *   anchor would let clicks bubble back to the link and also confuse
+ *   screen readers.
  */
 export function SessionListItem({ session, active }: Props) {
   const [open, setOpen] = useState(false);

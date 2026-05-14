@@ -42,9 +42,9 @@ def _tool_patterns(meta: SessionMeta) -> list[str]:
     which bridges every runtime tool. Use a deliberately unmatched glob for
     disabled sessions so the UI toggle is a real execution gate.
 
-    When enabled, only the curated read-only allowlist is exposed
-    (HIGH #3 fix). The UI label says "Enable read-only tools" — this
-    keeps that promise even if a future kaos module adds write tools.
+    When enabled, only the curated read-only allowlist is exposed.
+    The UI label says "Enable read-only tools" — this keeps that
+    promise even if a future kaos module adds write tools.
     """
     if meta.tools_enabled:
         from app.services.catalog import READ_ONLY_TOOL_GLOBS
@@ -125,8 +125,8 @@ async def stream_chat(
         "Content-Type": "application/json",
     }
 
-    # LOW #1 fix — reuse `kaos_llm_client.transport.parse_sse_stream`
-    # instead of a hand-rolled line parser. It already handles:
+    # Reuse `kaos_llm_client.transport.parse_sse_stream` rather than
+    # hand-rolling a line parser. It already handles:
     #   * multi-line `data:` accumulation
     #   * blank-line dispatch boundaries
     #   * `[DONE]` sentinel termination

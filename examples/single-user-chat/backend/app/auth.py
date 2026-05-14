@@ -3,12 +3,6 @@
 Mirrors `kaos_agents.api.server._require_auth` (which is name-private
 upstream) so our `/v1/chat/*` and `/v1/models` routes enforce the same
 auth gate as the kaos-agents-native routes mounted on the same app.
-
-Critical fix (CRITICAL #1 from review): without this, anyone could
-list/patch/archive sessions and create upstream sessions because
-`_bearer_from_request` in stream_proxy fell back to the env token.
-That fallback is now ONLY used for the in-process proxy forward —
-we still re-authenticate every inbound request via this dep.
 """
 
 from __future__ import annotations
@@ -48,7 +42,7 @@ def require_auth(request: Request) -> str | None:
                 detail=(
                     "Authentication required. Send 'Authorization: Bearer "
                     "<KAOS_AGENTS_API_API_TOKEN>' header (note the double "
-                    "API_ prefix — see docs/PATTERNS.md P-001)."
+                    "API_ prefix is intentional — kaos-agents reads it that way)."
                 ),
             )
         return settings.tenant_id()

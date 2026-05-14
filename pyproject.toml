@@ -8,13 +8,28 @@ dynamic = ["version"]
 description = "Project scaffolding for KAOS user-facing applications — TUI, desktop, web, dashboard"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "LicenseRef-Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
   { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+maintainers = [
+  { name = "Michael Bommarito", email = "mike@273ventures.com" },
+]
+keywords = [
+  "kaos",
+  "scaffolding",
+  "mcp",
+  "model-context-protocol",
+  "fastapi",
+  "streamlit",
+  "textual",
+  "react",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -24,7 +39,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "kaos-core>=0.1.0",
+  "kaos-core>=0.1.0a6",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.8.1",
 ]
@@ -50,8 +65,10 @@ kaos-ui = "kaos_ui.cli:main"
 
 [project.urls]
 Homepage = "https://273ventures.com"
-Documentation = "https://docs.273ventures.com"
-Repository = "https://github.com/273v/kaos-modules"
+Documentation = "https://github.com/273v/kaos-ui#readme"
+Repository = "https://github.com/273v/kaos-ui"
+Issues = "https://github.com/273v/kaos-ui/issues"
+Changelog = "https://github.com/273v/kaos-ui/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "kaos_ui/_version.py"
@@ -60,8 +77,12 @@ path = "kaos_ui/_version.py"
 include = [
   "/kaos_ui",
   "/README.md",
-  "/CLAUDE.md",
-  "/docs",
+  "/LICENSE",
+  "/NOTICE",
+  "/CHANGELOG.md",
+  "/SECURITY.md",
+  "/CONTRIBUTING.md",
+  "/CODE_OF_CONDUCT.md",
   "/tests",
 ]
 

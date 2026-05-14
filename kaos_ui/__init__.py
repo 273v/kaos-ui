@@ -19,7 +19,7 @@ from kaos_ui.manifest import (
     resolve_kind,
 )
 from kaos_ui.runtime import register_kaos_ui_tools
-from kaos_ui.scaffolder import scaffold
+from kaos_ui.scaffolder import ScaffoldResult, scaffold
 from kaos_ui.settings import KaosUISettings
 
 __all__ = [
@@ -28,6 +28,7 @@ __all__ = [
     "KaosUISettings",
     "PostInstallError",
     "ScaffoldError",
+    "ScaffoldResult",
     "TargetExistsError",
     "TemplateManifest",
     "UnknownTemplateError",

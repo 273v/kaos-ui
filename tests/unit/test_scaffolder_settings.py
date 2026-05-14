@@ -1,4 +1,4 @@
-"""PROJECT #2 — scaffolder must honor KaosUISettings.
+"""Scaffolder must honor KaosUISettings.
 
 Pre-fix `_build_variables` returned hardcoded "3.14" / "24" regardless
 of `KAOS_UI_PYTHON_VERSION` / `KAOS_UI_NODE_VERSION` env vars, and

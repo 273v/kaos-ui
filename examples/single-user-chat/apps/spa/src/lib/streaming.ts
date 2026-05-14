@@ -93,9 +93,9 @@ export async function* readSseStream(
   let readerError: Error | null = null;
 
   // Drive the reader on a separate microtask chain so the consumer
-  // can pull events as they arrive. MEDIUM #4 — pre-fix, errors were
-  // swallowed, leaving the consumer waiting forever and the UI stuck
-  // on "Thinking…". We now capture and re-throw on the next pull.
+  // can pull events as they arrive. Reader errors (server disconnect,
+  // network drop) are captured here and re-thrown from the next pull
+  // — otherwise the consumer would hang on the UI's "Thinking…" state.
   (async () => {
     try {
       while (true) {

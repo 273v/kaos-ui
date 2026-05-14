@@ -1,9 +1,8 @@
-"""PROJECT #3 — post_install.run() must execute `cd X && y` chains.
+"""post_install.run() must execute `cd X && y` chains.
 
-Pre-fix it called `shlex.split("cd X && y")` and ran the result as a
-single argv list, treating `&&` as a positional arg to `cd`. Manifest
-commands like `cd backend && uv sync && uv run pre-commit install`
-never worked.
+`shlex.split` alone treats `&&` as a positional arg to `cd`. The chain
+parser splits on `&&` and tracks cwd per sub-step so manifest commands
+like `cd backend && uv sync && uv run pre-commit install` work.
 """
 
 from __future__ import annotations
