@@ -110,6 +110,20 @@ class ArchiveResponse(BaseModel):
     archived_at: datetime
 
 
+class HistoryToolCall(BaseModel):
+    """One tool call within a historic assistant turn.
+
+    Sourced from the per-turn `.toolcalls.jsonl` sidecar we tee off the
+    SSE stream at chat time. Mirrors the SPA's ToolCallSummary shape.
+    """
+
+    id: str
+    name: str
+    status: Literal["running", "done", "error"]
+    args_preview: str | None = None
+    result_preview: str | None = None
+
+
 class HistoryMessage(BaseModel):
     """Single transcript turn rendered for the SPA.
 
@@ -122,6 +136,11 @@ class HistoryMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     added_at: float
+    # Populated only for assistant messages that had tool calls during
+    # the turn. kaos-agents 0.1.0a1 doesn't persist trajectory data in
+    # a shape we can hydrate, so we tee tool_call SSE events at chat
+    # time into a per-turn sidecar; see app.services.tool_call_recorder.
+    tool_calls: list[HistoryToolCall] = []
 
 
 class HistoryResponse(BaseModel):

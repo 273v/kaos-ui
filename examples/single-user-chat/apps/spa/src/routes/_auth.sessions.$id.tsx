@@ -12,6 +12,7 @@ import {
 } from "@273v/kaos-ui-react/chat";
 import { RunInspector } from "@273v/kaos-ui-react/debug";
 import {
+  useBackfillFiles,
   useCitations,
   useDeleteFile,
   useSendMessage,
@@ -50,6 +51,7 @@ function ChatDetail() {
   const upload = useUploadFile(id);
   const files = useSessionFiles(id);
   const removeFile = useDeleteFile(id);
+  const backfill = useBackfillFiles(id);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const onAttach = (file: File) => {
     setUploadError(null);
@@ -64,7 +66,10 @@ function ChatDetail() {
     });
   };
 
-  // Map the wire shape `{role, content, added_at}` to our ChatMessage.
+  // Map the wire shape `{role, content, added_at, tool_calls}` to our
+  // ChatMessage. tool_calls only populate for assistant turns that ran
+  // tools; the backend hydrates them from the per-turn .toolcalls.jsonl
+  // sidecars we tee off the live SSE stream.
   const initialMessages = useMemo<ChatMessage[]>(() => {
     if (!history.data) return [];
     return history.data.messages.map((m) => ({
@@ -73,6 +78,16 @@ function ChatDetail() {
       content: m.content,
       created_at: m.added_at * 1000,
       streaming: false,
+      tool_calls:
+        m.tool_calls && m.tool_calls.length > 0
+          ? m.tool_calls.map((tc) => ({
+              id: tc.id,
+              name: tc.name,
+              status: tc.status,
+              args_preview: tc.args_preview ?? undefined,
+              result_preview: tc.result_preview ?? undefined,
+            }))
+          : undefined,
     }));
   }, [history.data]);
 
@@ -354,6 +369,8 @@ function ChatDetail() {
         onClose={() => setDocsOpen(false)}
         files={files.data?.files ?? []}
         loading={files.isLoading}
+        onBackfill={() => backfill.mutate({})}
+        backfilling={backfill.isPending}
       />
 
       <CitationsPanel

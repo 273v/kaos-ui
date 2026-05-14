@@ -51,6 +51,21 @@ export interface CreateSessionBody {
   tools_enabled?: boolean;
 }
 
+export interface HistoryToolCall {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  args_preview?: string | null;
+  result_preview?: string | null;
+}
+
+export interface HistoryMessageEntry {
+  role: "user" | "assistant" | "system";
+  content: string;
+  added_at: number;
+  tool_calls?: HistoryToolCall[];
+}
+
 export interface PatchMetaBody {
   title?: string;
   model?: string;

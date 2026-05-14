@@ -7,7 +7,12 @@ export type {
 } from "./use-send-message.js";
 export { useSendMessage } from "./use-send-message.js";
 
-export { useSessionFiles, useUploadFile, useDeleteFile } from "./use-files.js";
+export {
+  useBackfillFiles,
+  useDeleteFile,
+  useSessionFiles,
+  useUploadFile,
+} from "./use-files.js";
 
 export type { UseCitationsResult } from "./use-citations.js";
 export { useCitations } from "./use-citations.js";

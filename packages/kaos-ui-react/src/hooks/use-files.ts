@@ -14,8 +14,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  type BackfillResponse,
   type FileListResponse,
   type UploadResponse,
+  backfillFiles,
   deleteFile,
   listFiles,
   uploadFile,
@@ -58,6 +60,23 @@ export function useDeleteFile(sessionId: string | null) {
         return Promise.reject(new Error("session id is required for delete"));
       }
       return deleteFile(transport, sessionId, filename);
+    },
+    onSuccess: () => {
+      if (!sessionId) return;
+      qc.invalidateQueries({ queryKey: kaosQueryKeys.files(sessionId) });
+    },
+  });
+}
+
+export function useBackfillFiles(sessionId: string | null) {
+  const transport = useTransport();
+  const qc = useQueryClient();
+  return useMutation<BackfillResponse, unknown, { overwrite?: boolean } | undefined>({
+    mutationFn: (vars) => {
+      if (!sessionId) {
+        return Promise.reject(new Error("session id is required for backfill"));
+      }
+      return backfillFiles(transport, sessionId, vars ?? {});
     },
     onSuccess: () => {
       if (!sessionId) return;

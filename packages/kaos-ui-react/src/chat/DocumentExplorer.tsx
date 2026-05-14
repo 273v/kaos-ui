@@ -7,7 +7,7 @@
  * fetching and passes `files` here so this stays presentational.
  */
 
-import { ChevronDown, ChevronRight, FileText, Loader2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Loader2, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 
 import type { FileMeta } from "../lib/files.js";
@@ -18,6 +18,14 @@ interface Props {
   files: FileMeta[];
   /** Pending state from the list query — shows a header spinner. */
   loading?: boolean;
+  /**
+   * Called when the user clicks the "Backfill" header action. The
+   * button only renders when any ready-parsed file has a null
+   * token_count or summary; pass undefined to hide it entirely.
+   */
+  onBackfill?: () => void;
+  /** True while a backfill request is in flight. */
+  backfilling?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -95,28 +103,57 @@ function FileCard({ file }: { file: FileMeta }) {
   );
 }
 
-export function DocumentExplorer({ open, onClose, files, loading = false }: Props) {
+export function DocumentExplorer({
+  open,
+  onClose,
+  files,
+  loading = false,
+  onBackfill,
+  backfilling = false,
+}: Props) {
   if (!open) return null;
+  const needsBackfill = files.some(
+    (f) => f.parse.status === "ready" && (f.summary == null || f.token_count == null),
+  );
   return (
     <aside
       className="w-80 flex-shrink-0 border-l border-border bg-card flex flex-col h-full"
       aria-label="Uploaded documents"
     >
       <header className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <FileText className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">Documents</span>
           <span className="text-xs text-muted-foreground tabular-nums">{files.length}</span>
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground"
-          aria-label="Close documents panel"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onBackfill && needsBackfill && (
+            <button
+              type="button"
+              onClick={onBackfill}
+              disabled={backfilling}
+              title="Recompute token counts + summaries for files that don't have them yet"
+              aria-label="Backfill missing summaries"
+              className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-2 py-1 rounded-md border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {backfilling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              Backfill
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground ml-1"
+            aria-label="Close documents panel"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">

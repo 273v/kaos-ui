@@ -78,6 +78,29 @@ export function listFiles(transport: Transport, sessionId: string): Promise<File
   );
 }
 
+export interface BackfillResponse {
+  /** Number of files whose token_count + summary were recomputed. */
+  updated: number;
+}
+
+/**
+ * Recompute token_count + summary for ready-parsed files that don't
+ * have them yet (or pass `overwrite=true` to refresh everything).
+ * Backed by the kaos-llm-core summarize Program + the kaos-nlp-core
+ * tokenizer on the server. Best-effort: a summarizer outage leaves
+ * the field null but never errors the request.
+ */
+export function backfillFiles(
+  transport: Transport,
+  sessionId: string,
+  options: { overwrite?: boolean } = {},
+): Promise<BackfillResponse> {
+  const path = `/sessions/${encodeURIComponent(sessionId)}/files:backfill${
+    options.overwrite ? "?overwrite=true" : ""
+  }`;
+  return transportJson<BackfillResponse>(transport, path, { method: "POST" });
+}
+
 export async function deleteFile(
   transport: Transport,
   sessionId: string,

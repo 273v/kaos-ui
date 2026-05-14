@@ -12,6 +12,7 @@ Routes:
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 import httpx
@@ -252,6 +253,20 @@ async def send_message(
     # sidebar isn't a sea of "Untitled".
     is_first_turn = meta.message_count == 0 and meta.title == "Untitled"
 
+    # Tee tool_call SSE events into a per-turn sidecar so /messages can
+    # hydrate `tool_calls` on past assistant messages. Turn index is
+    # derived from the pre-stream message_count (each turn = 2
+    # messages: user + assistant), which is what touch(increment=2)
+    # writes into the next session state.
+    from app.services.tool_call_recorder import (
+        TurnToolCallRecorder,
+        serialize_records,
+        turn_sidecar_path,
+    )
+
+    recorder = TurnToolCallRecorder()
+    turn_index = meta.message_count // 2
+
     async def event_generator():
         try:
             async for evt in stream_chat(
@@ -263,8 +278,29 @@ async def send_message(
                 available_tool_names=available_tool_names,
                 corpus_markdown=corpus_markdown,
             ):
+                # Best-effort tap: parsing failures must not corrupt the
+                # stream. The recorder ignores events it doesn't know.
+                try:
+                    payload = json.loads(evt["data"]) if "data" in evt else None
+                    recorder.observe(evt.get("event", ""), payload)
+                except Exception:
+                    pass
                 yield evt
         finally:
+            # Persist the sidecar BEFORE the title/touch work so a failure
+            # in the LLM-titler doesn't lose tool-call history.
+            if not recorder.is_empty() and runtime is not None:
+                try:
+                    blob = serialize_records(recorder.records())
+                    await runtime.vfs.write(
+                        turn_sidecar_path(session_id, turn_index), blob
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed to persist tool-call sidecar session=%s turn=%d",
+                        session_id,
+                        turn_index,
+                    )
             # Increment by 1: a turn is (user message + assistant reply),
             # not two messages. Set title on first turn from the user
             # input as an IMMEDIATE heuristic so the sidebar updates
@@ -402,6 +438,41 @@ async def get_history(
         )
     # kaos-agents returns newest-first; flip to chronological for the SPA.
     parsed.sort(key=lambda m: m.added_at)
+
+    # Hydrate per-turn tool_calls from the sidecars we wrote during chat.
+    # The N-th assistant message in chronological order corresponds to
+    # toolcalls/turn-{N:04d}.jsonl. Pre-existing sessions (created before
+    # this feature shipped) have no sidecars — assistant messages without
+    # a matching file just get an empty tool_calls list.
+    runtime = getattr(request.app.state, "kaos_runtime", None)
+    if runtime is not None:
+        from app.models import HistoryToolCall
+        from app.services.tool_call_recorder import parse_records_jsonl, turn_sidecar_path
+
+        assistant_index = 0
+        for msg in parsed:
+            if msg.role != "assistant":
+                continue
+            path = turn_sidecar_path(session_id, assistant_index)
+            assistant_index += 1
+            try:
+                blob = await runtime.vfs.read(path)
+            except Exception:
+                # Missing sidecar (pre-existing turn or VFS miss) is the
+                # common case — no logging.
+                continue
+            records = parse_records_jsonl(blob)
+            msg.tool_calls = [
+                HistoryToolCall(
+                    id=r.id,
+                    name=r.name,
+                    status=r.status,  # type: ignore[arg-type]
+                    args_preview=r.args_preview,
+                    result_preview=r.result_preview,
+                )
+                for r in records
+            ]
+
     return HistoryResponse(
         session_id=session_id,
         turn_count=int(raw.get("turn_count", 0)),
