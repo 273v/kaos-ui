@@ -1,13 +1,19 @@
-// Chat detail route. Wires the streaming hook + composer + transcript.
+// Chat detail route. Wires the streaming hook + composer + transcript +
+// settings sheet + per-session model override.
 
 import { createFileRoute } from "@tanstack/react-router";
+import { Download, Settings } from "lucide-react";
 import { useState } from "react";
 
 import { Composer } from "@/components/chat/Composer";
 import { Message } from "@/components/chat/Message";
 import { TurnStatus } from "@/components/chat/TurnStatus";
+import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
+import { SettingsSheet } from "@/components/settings/SettingsSheet";
+import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useSession } from "@/hooks/use-session";
+import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
 export const Route = createFileRoute("/_auth/sessions/$id")({
   component: ChatDetail,
@@ -16,8 +22,12 @@ export const Route = createFileRoute("/_auth/sessions/$id")({
 function ChatDetail() {
   const { id } = Route.useParams();
   const session = useSession(id);
-  const [input, setInput] = useState("");
+  const patch = usePatchMeta(id);
   const stream = useSendMessage({ sessionId: id });
+
+  const [input, setInput] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -26,17 +36,78 @@ function ChatDetail() {
     void stream.send(text);
   };
 
+  const onModelChange = (modelId: string) => {
+    if (!session.data || session.data.model === modelId) return;
+    patch.mutate({ model: modelId });
+  };
+
+  const meta = session.data;
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border px-6 py-3">
-        <h1 className="text-sm font-medium truncate" title={session.data?.title}>
-          {session.data?.title ?? "Loading…"}
-        </h1>
-        {session.data && (
-          <p className="text-xs text-muted-foreground tabular-nums">
-            {session.data.model} · {session.data.message_count} messages
-          </p>
-        )}
+      <header className="border-b border-border px-6 py-3 flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-sm font-medium truncate" title={meta?.title}>
+            {meta?.title ?? "Loading…"}
+          </h1>
+          {meta && (
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {meta.model} · {meta.message_count} messages
+              {meta.tools_enabled && " · tools on"}
+            </p>
+          )}
+        </div>
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setExportOpen((v) => !v)}
+            disabled={!meta || stream.state.messages.length === 0}
+            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+            title="Export transcript"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </button>
+          {exportOpen && meta && (
+            <div
+              role="menu"
+              className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm"
+              onMouseLeave={() => setExportOpen(false)}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  downloadMarkdown({ meta, messages: stream.state.messages });
+                  setExportOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-muted"
+              >
+                Download Markdown
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  downloadJSON({ meta, messages: stream.state.messages });
+                  setExportOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-muted"
+              >
+                Download JSON
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          disabled={!meta}
+          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+          title="Session settings"
+          aria-label="Session settings"
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto">
@@ -62,7 +133,7 @@ function ChatDetail() {
           {stream.state.messages.length === 0 && (
             <div className="text-center pt-16">
               <h2 className="text-3xl font-serif font-light mb-1">
-                {session.data?.title || "New conversation"}
+                {meta?.title || "New conversation"}
               </h2>
               <p className="text-sm text-muted-foreground">Send a message below to get started.</p>
             </div>
@@ -83,8 +154,21 @@ function ChatDetail() {
         onChange={setInput}
         onSubmit={onSubmit}
         pending={stream.state.pending}
-        placeholder={`Message ${session.data?.title ?? "this conversation"}…`}
+        placeholder={`Message ${meta?.title ?? "this conversation"}…`}
+        leftChips={
+          meta && (
+            <ModelPickerChip
+              value={meta.model}
+              onChange={onModelChange}
+              disabled={stream.state.pending}
+            />
+          )
+        }
       />
+
+      {meta && (
+        <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
+      )}
     </div>
   );
 }
