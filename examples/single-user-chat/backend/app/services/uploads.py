@@ -280,6 +280,72 @@ async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[F
     return out
 
 
+_PER_FILE_PROMPT_BUDGET = 4000
+
+
+async def render_session_corpus_markdown(
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    per_file_budget_chars: int = _PER_FILE_PROMPT_BUDGET,
+) -> str:
+    """Build a single markdown block summarizing every ready-parsed file
+    in the session, suitable for inlining into the agent's system prompt.
+
+    Each file contributes up to ``per_file_budget_chars`` characters of
+    its serialized-markdown rendering. Files with a failed parse are
+    listed by name + size only. Returns an empty string when no files
+    exist.
+
+    This is the P2-2 'RAG-by-default' wire: kaos-agents 0.1.0a1's
+    MessageRequest doesn't accept a per-turn ``corpus`` parameter, and
+    the bridged kaos-pdf/office tools take filesystem paths (not VFS
+    paths), so the cleanest way to make uploads visible to the agent
+    is to inline a markdown rendering. A future kaos-agents version
+    that accepts corpus= in MessageRequest will let us pass the
+    parsed ASTs directly and replace this prompt-side path.
+    """
+    metas = await list_session_files(runtime=runtime, session_id=session_id)
+    if not metas:
+        return ""
+
+    try:
+        from kaos_content import ContentDocument, serialize_markdown
+    except ImportError:
+        logger.warning("kaos_content not importable — skipping corpus rendering")
+        return ""
+
+    chunks: list[str] = []
+    for meta in metas:
+        header = f"### {meta.filename} ({meta.size_bytes} bytes"
+        if meta.parse.status != "ready":
+            header += f", parse FAILED: {meta.parse.error or 'unknown'})"
+            chunks.append(header)
+            continue
+        header += ", parsed)"
+
+        ast_path = f"{_vfs_path(session_id, meta.filename)}.kaos.json"
+        try:
+            ast_bytes = await runtime.vfs.read(ast_path)
+            doc = ContentDocument.model_validate_json(ast_bytes)
+            body = serialize_markdown(doc)
+        except Exception as exc:
+            logger.warning(
+                "could not render AST for %s: %s",
+                meta.filename,
+                exc,
+                extra={"session_id": session_id, "upload_filename": meta.filename},
+            )
+            chunks.append(f"{header}\n_(AST sidecar unreadable)_")
+            continue
+
+        if len(body) > per_file_budget_chars:
+            body = body[:per_file_budget_chars] + "\n\n…[truncated]"
+        chunks.append(f"{header}\n\n{body}")
+
+    return "\n\n---\n\n".join(chunks)
+
+
 class FileNotFoundError(UploadError):
     """No such file in the session's VFS prefix."""
 

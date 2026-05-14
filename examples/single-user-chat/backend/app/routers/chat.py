@@ -212,6 +212,23 @@ async def send_message(
 
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)
+
+    # P2-2: when there are uploaded files in this session, inline a
+    # markdown rendering of each ready-parsed file into the system
+    # prompt so the agent can ground its answer in the content.
+    # kaos-agents 0.1.0a1's MessageRequest doesn't accept a per-turn
+    # corpus= so this prompt-side approach is the available wire.
+    corpus_markdown: str = ""
+    if runtime is not None:
+        from app.services.uploads import render_session_corpus_markdown
+
+        try:
+            corpus_markdown = await render_session_corpus_markdown(
+                runtime=runtime, session_id=session_id
+            )
+        except Exception:
+            logger.exception("failed to render corpus for session=%s", session_id)
+
     available_tool_names: tuple[str, ...]
     if meta.tools_enabled and runtime is not None:
         # Filter the runtime's tool surface by the read-only allowlist
@@ -244,6 +261,7 @@ async def send_message(
                 message=body.message,
                 max_cost_usd=settings.turn_budget_usd,
                 available_tool_names=available_tool_names,
+                corpus_markdown=corpus_markdown,
             ):
                 yield evt
         finally:
