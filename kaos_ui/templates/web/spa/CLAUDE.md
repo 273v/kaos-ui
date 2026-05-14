@@ -109,8 +109,20 @@ the copied source directly — there is no library to upgrade out of band.
 - **Auth flows**: only ever go through `apiFetch` / `apiJson` in
   `apps/spa/src/lib/api-fetch.ts`. They set `credentials: "include"`
   so the cookie attaches. Biome bans raw `fetch`.
-- **Streaming**: use `readSseStream` from `apps/spa/src/lib/streaming.ts`.
-  EventSource doesn't support cookies / custom headers the way we need.
+- **Streaming**: use the `useSendMessage` hook from
+  `@273v/kaos-ui-react/hooks` (or `readSseStream` from
+  `@273v/kaos-ui-react/lib` if you need lower-level access). The
+  package owns the SSE wire surface (15 KaosAgentEvent variants +
+  the `span` subject×phase cartesian). Don't roll your own SSE
+  parser — EventSource doesn't support cookies / custom headers, and
+  the package's parser handles CRLF, multi-byte UTF-8 chunk splits,
+  and `[DONE]` sentinels.
+- **Chat components**: `Composer`, `Message`, `TurnStatus`,
+  `DropZone`, `FileChips`, `CitationsPanel`, `DocumentExplorer`,
+  `ModelPicker` from `@273v/kaos-ui-react/chat`. Debug surface
+  (`RunInspector`, `JsonTree`, `CostStrip`) lives in
+  `@273v/kaos-ui-react/debug`. Wrap your app in
+  `<KaosUIProvider transport={...}>` once at root (see `main.tsx`).
 - **Settings**: backend never reads `os.environ` directly — pull from
   `app.state.settings` via the `get_settings` Depends.
 - **Logging (backend)**: use `kaos_core.logging.get_logger(...)` via

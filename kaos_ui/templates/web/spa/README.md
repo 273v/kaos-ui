@@ -55,6 +55,24 @@ The chat route is wired and demonstrates the SSE streaming pattern.
 Add additional protected pages as `src/routes/_auth.<name>.tsx` —
 see `CLAUDE.md` § How to add a frontend route.
 
+## Scope: what this template ships and what it doesn't
+
+The chat surface here is **single-thread, in-memory**: one session id
+(`spa-default`), no history hydration on reload, no sidebar / archive /
+rename / star. The point is to be a *minimum viable streaming chat*
+that boots in 30 seconds and demonstrates how the
+[`@273v/kaos-ui-react`](https://www.npmjs.com/package/@273v/kaos-ui-react)
+components wire up to the `kaos-agents` SSE wire.
+
+For the **durable, multi-session shape** (per-session VFS metadata
+sidecar, sortable sidebar with star / rename / archive, document
+explorer with per-file summaries, citations panel, run inspector,
+auto-titler, file upload with parsing pipeline), copy
+[`examples/single-user-chat`](https://github.com/273v/kaos-ui/tree/main/examples/single-user-chat)
+from the kaos-ui repo. That example is the canonical reference for
+a production-shaped consumer of the package and is kept in sync with
+every package release.
+
 ## What ships safe by default
 
 - **Refuse-to-start** in production with weak settings (token < 32

@@ -8,9 +8,9 @@
  * picks one of three time-of-day variants from `Date.now()` so it
  * feels alive even without server-side personalization.
  */
+import { Composer } from "@273v/kaos-ui-react/chat";
 import { FileText, Gavel, type LucideIcon, Scale, Search } from "lucide-react";
 
-import { Composer } from "@/components/chat/Composer";
 import { StarterCard } from "@/components/chat/StarterCard";
 
 interface EmptyStateProps {

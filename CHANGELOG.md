@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `@273v/kaos-ui-react` 0.1.0-alpha.0 (npm)
+
+The React companion package now lives at
+[`packages/kaos-ui-react/`](./packages/kaos-ui-react/) and is published
+on npm as
+[`@273v/kaos-ui-react`](https://www.npmjs.com/package/@273v/kaos-ui-react).
+Templates depend on it via `^0.1.0-alpha.0`. The package owns the
+chat surface, debug surface, hooks (`useSendMessage`, `useCitations`,
+`useCostAggregation`, `useUploadFile`, `useBackfillFiles`, ...),
+transport provider (`<KaosUIProvider>`), and the canonical
+`KaosAgentEvent` discriminated union — so consuming SPAs never
+hand-roll SSE event handling. See the package CHANGELOG for the full
+feature list.
+
+### Changed — `web:spa` template now consumes `@273v/kaos-ui-react`
+
+- `kaos_ui/templates/web/spa/apps/spa/package.json` adds
+  `@273v/kaos-ui-react` as a runtime dep.
+- `main.tsx` wraps the app in `<KaosUIProvider transport={...}>` and
+  imports the package's `styles.css`.
+- `_auth.chat.tsx` is rewritten to consume `useSendMessage` plus
+  `<Composer>` / `<Message>` / `<TurnStatus>` from
+  `@273v/kaos-ui-react/chat`. The previous hand-rolled SSE handler
+  used **obsolete kaos-agents event names** (`turn_start`,
+  `tool_call_start`, `tool_call_result`, `step_start`,
+  `turn_complete`); newly scaffolded SPAs ship with the current
+  15-event union now.
+- `apps/spa/tests/streaming.test.ts` re-targets
+  `@273v/kaos-ui-react/lib` and asserts the current wire shape.
+- Deletes the inline `apps/spa/src/lib/streaming.ts` plus
+  `components/chat/{Composer,Message,TurnStatus,UsageChip}.tsx` —
+  all now provided by the package.
+- Deletes the stale `packages/ui/src/{lib/api.ts,hooks/use-documents.ts,types/document.ts}`
+  stubs (wrong URLs, wrong response shapes; the example's
+  `scripts/sync-ui.sh` was literally deleting them). The shadcn
+  primitives in `packages/ui/src/components/ui/` stay.
+- `packages/ui/package.json` drops `@tanstack/react-table` + `zod` —
+  unused after the stub deletion.
+- `CLAUDE.md` (template) updated to point contributors at the
+  package's components/hooks instead of inlining their own.
+
 ### Fixed
 - `register_kaos_ui_tools()` previously returned the `KaosRuntime`
   instance and was named with the long form `register_kaos_<name>_tools`.
@@ -17,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kaos_ui.register_ui_tools` (returns `int`); the long form remains
   as a backwards-compatible alias.
 
-### Added
+### Added (other)
 - Apache-2.0 license metadata in `pyproject.toml`, plus `LICENSE` and
   `NOTICE` files at the project root.
 - `SECURITY.md` (90-day disclosure window, PVR primary), `CONTRIBUTING.md`,

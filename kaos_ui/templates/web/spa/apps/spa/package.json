@@ -14,12 +14,12 @@
     "codegen": "openapi-ts"
   },
   "dependencies": {
+    "@273v/kaos-ui-react": "^0.1.0-alpha.0",
     "@{{KAOS_NPM_SLUG}}/ui": "workspace:*",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-router": "^1.120.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "eventsource-parser": "^3.0.8",
     "lucide-react": "^0.510.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
