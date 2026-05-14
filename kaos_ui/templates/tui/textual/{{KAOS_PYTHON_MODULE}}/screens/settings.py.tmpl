@@ -1,0 +1,30 @@
+"""Settings screen — read-only resolved configuration."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.containers import Vertical
+from textual.screen import Screen
+from textual.widgets import DataTable, Footer, Header, Static
+
+
+class SettingsScreen(Screen):
+    """Read-only display of the resolved AppSettings (secrets redacted)."""
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical():
+            yield Static("Settings", classes="title")
+            yield DataTable(id="settings-table")
+            yield Static(
+                "[dim]Secrets are redacted. Edit `.env` to change values, then "
+                "restart the app.[/]",
+                classes="muted",
+            )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns("setting", "value")
+        for key, value in sorted(self.app.settings.model_dump_redacted().items()):
+            table.add_row(key, str(value))

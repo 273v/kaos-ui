@@ -1,0 +1,30 @@
+"""Search page — query stored documents."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.services import search as search_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+settings: AppSettings = st.session_state["settings"]
+auth.require(settings)
+
+st.title("Search")
+q = st.text_input("Query", key="search_query")
+limit = st.slider("Max results", min_value=1, max_value=50, value=20)
+
+if q:
+    hits = search_service.query(settings, q, limit=limit)
+    if not hits:
+        st.info("No matches.")
+    else:
+        st.caption(f"{len(hits)} result(s)")
+        for hit in hits:
+            with st.container(border=True):
+                cols = st.columns([4, 1])
+                cols[0].markdown(f"**{hit.filename}**")
+                cols[1].metric("score", f"{hit.score:g}")
+                st.markdown(f"`{hit.document_id}`")
+                st.write(hit.snippet)

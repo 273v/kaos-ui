@@ -1,0 +1,21 @@
+[project]
+name = "{{KAOS_PROJECT_SLUG}}"
+version = "0.1.0"
+description = "{{KAOS_PROJECT_NAME}} — KAOS workflow script"
+requires-python = ">=3.14"
+dependencies = [
+    "kaos-core>=0.1",
+    "kaos-content>=0.1",
+    "kaos-pdf>=0.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]

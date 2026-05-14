@@ -1,0 +1,51 @@
+"""Search service.
+
+Phase 0 ships a substring fallback so the route is functional from
+day one. Phase 2 wires kaos-content's BM25 once upload parsing
+produces ContentDocuments alongside the raw bytes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from app.services.documents import list_documents
+
+if TYPE_CHECKING:
+    from app.settings import AppSettings
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    document_id: str
+    filename: str
+    snippet: str
+    score: float
+
+
+def query(settings: AppSettings, q: str, *, limit: int = 20) -> list[SearchHit]:
+    if not q.strip():
+        return []
+    needle = q.lower()
+    hits: list[SearchHit] = []
+    for doc in list_documents(settings):
+        try:
+            text = doc.path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            continue
+        score = text.lower().count(needle)
+        if score == 0:
+            continue
+        idx = text.lower().find(needle)
+        snippet = text[max(0, idx - 60) : idx + 140].replace("\n", " ")
+        hits.append(
+            SearchHit(
+                document_id=doc.document_id,
+                filename=doc.filename,
+                snippet=snippet,
+                score=float(score),
+            )
+        )
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits[:limit]

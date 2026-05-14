@@ -1,0 +1,13 @@
+/*
+ * SPA-app entry stylesheet. The canonical KAOS-UI tokens (colors,
+ * fonts, radii) live in the shared `@{{KAOS_NPM_SLUG}}/ui` package so
+ * every template app (and any sibling SPAs in this monorepo) shares
+ * one source of truth for the visual language.
+ *
+ * Add app-only overrides BELOW the import. Theme-level changes go in
+ * the shared package's globals.css.
+ */
+
+@import "@{{KAOS_NPM_SLUG}}/ui/styles/globals";
+
+/* SPA-app-only overrides go here. Empty by default. */

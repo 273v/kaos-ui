@@ -1,0 +1,49 @@
+"""Browse page — list stored documents and inspect them."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.services import documents as doc_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+settings: AppSettings = st.session_state["settings"]
+auth.require(settings)
+
+st.title("Browse")
+
+docs = doc_service.list_documents(settings)
+if not docs:
+    st.info("No documents yet. Use the Upload page to add one.")
+    st.stop()
+
+selected_id = st.selectbox(
+    "Document",
+    options=[d.document_id for d in docs],
+    format_func=lambda did: next(
+        f"{d.filename} ({d.document_id})" for d in docs if d.document_id == did
+    ),
+)
+
+doc = doc_service.get_document(settings, selected_id)
+if doc is None:
+    st.error("Document not found.")
+    st.stop()
+
+st.metric("Size", f"{doc.size_bytes:,} bytes")
+st.caption(f"Path: `{doc.path}`")
+
+if doc.extension in {"txt", "md", "csv"}:
+    try:
+        text = doc.path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        st.error(f"Could not read file: {exc}")
+    else:
+        st.code(text[:50_000])  # cap for very large files
+else:
+    st.info(
+        f"Preview is not available for `.{doc.extension}` in the basic browse "
+        "view. Once kaos-pdf / kaos-office parsing is wired, the document "
+        "will render as markdown via kaos-content."
+    )

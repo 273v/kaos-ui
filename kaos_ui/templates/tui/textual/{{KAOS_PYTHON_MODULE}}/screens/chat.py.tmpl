@@ -1,0 +1,117 @@
+"""Chat screen — kaos-agents Runner with persistent SessionMemory.
+
+Renders the transcript as Markdown. Each turn does:
+
+1. Append the user's message + an "agent" prompt block to the transcript.
+2. Run the agent in an exclusive ``@work`` worker so the UI stays
+   responsive (typing, scroll, Ctrl+Q all keep working).
+3. Re-render the transcript on every streamed token. Markdown handles
+   re-render at LLM token rates without flicker.
+
+A simple "rebuild the markdown buffer per token" approach is used
+instead of ``Markdown.get_stream()`` because it's robust against chunk
+boundaries that split markdown syntax (``**bold**`` arriving as two
+events) and avoids reaching into private widget state.
+
+Heavy KAOS imports happen inside ``services.chat`` so the screen
+module imports cheaply — the smoke test runs without kaos-agents.
+"""
+
+from __future__ import annotations
+
+from textual import work
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, Markdown
+
+
+class ChatScreen(Screen):
+    """Conversational interface to the LLM agent."""
+
+    BINDINGS = [
+        Binding(
+            "ctrl+l", "clear", "Clear",
+            id="chat.clear", tooltip="Clear the visible transcript",
+        ),
+        Binding(
+            "ctrl+n", "new_session", "New session",
+            id="chat.new_session", tooltip="Start fresh; persisted memory cleared",
+        ),
+    ]
+
+    DEFAULT_PROMPT = "*Type a message and press Enter.*"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._transcript: str = self.DEFAULT_PROMPT
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical():
+            with VerticalScroll(id="chat-log"):
+                yield Markdown(self._transcript, id="chat-transcript")
+            yield Input(id="chat-input", placeholder="Ask anything…")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#chat-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        message = event.value.strip()
+        if not message:
+            return
+        event.input.value = ""
+        if self._transcript == self.DEFAULT_PROMPT:
+            self._transcript = ""
+        self._transcript += f"\n\n**you** {message}\n\n**agent** "
+        self._refresh_transcript()
+        self._submit(message)
+
+    def _refresh_transcript(self) -> None:
+        """Push the current ``self._transcript`` buffer into the Markdown widget.
+
+        Named ``_refresh_transcript`` rather than ``_render`` because
+        ``_render`` collides with ``textual.widget.Widget._render``;
+        overriding it breaks Textual's render pipeline silently.
+        """
+        self.query_one("#chat-transcript", Markdown).update(self._transcript)
+
+    @work(exclusive=True, group="chat")
+    async def _submit(self, message: str) -> None:
+        """Run one chat turn off the main event loop."""
+        from {{KAOS_PYTHON_MODULE}}.services import chat as chat_service
+
+        try:
+            runner = chat_service.build_runner(self.app.settings, self.app.runtime)
+            session_id = chat_service.session_id_for(self.app.settings)
+            buffer: list[str] = []
+            base = self._transcript
+            async for event in chat_service.stream(runner, message, session_id):
+                text = chat_service.extract_text(event)
+                if not text:
+                    continue
+                buffer.append(text)
+                self._transcript = base + "".join(buffer)
+                self._refresh_transcript()
+            if not buffer:
+                self._transcript = base + "*(no response)*"
+                self._refresh_transcript()
+        except Exception as exc:
+            # Broad except: surface any worker error in the transcript
+            # rather than silently dying. Full traceback is in the
+            # file logs.
+            self._transcript += f"\n\n*[error: {exc}]*"
+            self._refresh_transcript()
+
+    def action_clear(self) -> None:
+        self._transcript = self.DEFAULT_PROMPT
+        self._refresh_transcript()
+
+    def action_new_session(self) -> None:
+        from {{KAOS_PYTHON_MODULE}}.services import chat as chat_service
+
+        chat_service.reset_session(self.app.settings)
+        self._transcript = "*New session started.*"
+        self._refresh_transcript()

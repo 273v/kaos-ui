@@ -1,0 +1,44 @@
+/* {{KAOS_PROJECT_NAME}} — Textual stylesheet.
+ *
+ * Keep this conservative. Textual ships sensible defaults; this file
+ * only adjusts what's needed for the project's visual identity.
+ */
+
+Screen {
+  background: $surface;
+}
+
+.title {
+  text-align: center;
+  color: $accent;
+  text-style: bold;
+  padding: 1 0;
+}
+
+.muted {
+  color: $text-muted;
+}
+
+#chat-log {
+  border: round $primary;
+  height: 1fr;
+  padding: 0 1;
+}
+
+#chat-input {
+  border: round $accent;
+  height: 3;
+}
+
+#documents-tree {
+  width: 30%;
+  border-right: tall $primary;
+}
+
+#documents-viewer {
+  padding: 1 2;
+}
+
+#settings-table {
+  margin: 1 2;
+}

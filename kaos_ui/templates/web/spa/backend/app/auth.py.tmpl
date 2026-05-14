@@ -1,0 +1,118 @@
+"""Bearer-token-in-httpOnly-cookie auth.
+
+The frontend POSTs `/v1/auth/login` with `{token}`; we verify it
+against ``settings.auth_token`` (constant-time compare) and set a
+``HttpOnly`` cookie. All ``/v1/*`` requests except the public set
+require the cookie.
+
+CSRF: bearer-from-cookie with ``SameSite=Lax`` is immune to
+cross-origin POST initiated by an attacker site (Lax does not send
+the cookie). For state-changing requests from JS on the same origin,
+we additionally validate the ``Origin`` header in production. This
+catches CSRF if the cookie is ever loosened to ``SameSite=None``.
+
+To swap to OIDC see this template's ``CLAUDE.md`` § Production auth
+swap path.
+"""
+
+from __future__ import annotations
+
+import hmac
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
+
+from app.logging_setup import app_logger
+from app.settings import AppSettings
+
+logger = app_logger("auth")
+
+PUBLIC_PATHS: frozenset[str] = frozenset(
+    {
+        "/v1/health",
+        "/v1/ready",
+        "/v1/auth/login",
+        "/v1/openapi.json",
+        "/v1/docs",
+        "/v1/docs/oauth2-redirect",
+        "/v1/redoc",
+    }
+)
+
+
+def _matches(token: str, expected: str) -> bool:
+    """Constant-time compare; defeats timing oracles."""
+    return hmac.compare_digest(token, expected)
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Cookie-based auth gate. Public paths bypass; others require the cookie."""
+
+    def __init__(self, app: ASGIApp, settings: AppSettings) -> None:
+        super().__init__(app)
+        self._settings = settings
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith("/v1/docs/"):
+            return await call_next(request)
+
+        # Belt-and-suspenders CSRF defense: reject state-changing
+        # requests whose Origin header isn't in our CORS allowlist.
+        # SameSite=Lax already blocks cross-origin POST/PUT/DELETE
+        # cookie attachment in modern browsers; this is the secondary
+        # check for older browsers and edge cases.
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            if origin and origin not in self._settings.cors_origins:
+                return JSONResponse(
+                    {
+                        "what": f"Origin {origin!r} is not allowed.",
+                        "how_to_fix": (
+                            "Add the origin to APP_CORS_ORIGINS in .env "
+                            "or call from an allowed origin."
+                        ),
+                        "alternative_tool": None,
+                    },
+                    status_code=403,
+                )
+
+        cookie = request.cookies.get(self._settings.cookie_name)
+        if cookie is None:
+            return _unauth("missing session cookie")
+
+        if self._settings.auth_token is None:
+            # Test env or misconfigured prod — refuse-to-start should have
+            # caught this. Defensive 500 here just in case.
+            return JSONResponse(
+                {
+                    "what": "Server misconfigured: no auth token configured.",
+                    "how_to_fix": "Set APP_AUTH_TOKEN in .env and restart.",
+                    "alternative_tool": None,
+                },
+                status_code=500,
+            )
+
+        expected = self._settings.auth_token.get_secret_value()
+        if not _matches(cookie, expected):
+            return _unauth("invalid session cookie")
+
+        return await call_next(request)
+
+
+def _unauth(reason: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "what": "Not authenticated.",
+            "how_to_fix": (
+                "POST /v1/auth/login with body {\"token\": \"<APP_AUTH_TOKEN>\"} "
+                "to obtain a session cookie. Subsequent requests must include "
+                "it (`fetch(..., {credentials: 'include'})` in the SPA)."
+            ),
+            "alternative_tool": None,
+            "reason": reason,
+        },
+        status_code=401,
+    )

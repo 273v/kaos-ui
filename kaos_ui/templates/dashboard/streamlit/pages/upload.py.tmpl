@@ -1,0 +1,42 @@
+"""Upload page — accept files, store under VFS."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.exceptions import UploadError
+from {{KAOS_PYTHON_MODULE}}.services import uploads as upload_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+settings: AppSettings = st.session_state["settings"]
+auth.require(settings)
+runtime = st.session_state["runtime"]
+
+st.title("Upload")
+st.caption(
+    f"Allowed types: {', '.join(settings.allowed_upload_types)}. "
+    f"Max size: {settings.max_upload_bytes // (1024 * 1024)} MB."
+)
+
+uploaded = st.file_uploader(
+    "Pick a file",
+    type=list(settings.allowed_upload_types),
+    accept_multiple_files=False,
+)
+
+if uploaded is not None:
+    try:
+        result = upload_service.store(uploaded, runtime=runtime, settings=settings)
+    except UploadError as exc:
+        st.error(str(exc))
+    else:
+        st.success(f"Stored as `{result.document_id}`")
+        st.json(
+            {
+                "document_id": result.document_id,
+                "filename": result.filename,
+                "size_bytes": result.size_bytes,
+                "vfs_path": str(result.vfs_path),
+            }
+        )

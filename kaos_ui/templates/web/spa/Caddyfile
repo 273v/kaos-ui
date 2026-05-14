@@ -1,0 +1,61 @@
+# {{KAOS_PROJECT_NAME}} — Caddy reverse proxy.
+#
+# Caddy terminates TLS, injects security headers (Streamlit can't do
+# this from app code; FastAPI could but the proxy is the safer place),
+# and forwards SSE without buffering.
+#
+# Replace ``localhost`` with your real domain in production. Caddy will
+# auto-acquire a Let's Encrypt cert.
+
+{
+	# Set the email for Let's Encrypt notifications in prod.
+	# email ops@example.com
+	servers {
+		# Strip the Server / X-Powered-By tells.
+		metrics off
+	}
+}
+
+localhost {
+	# ───── Security headers ───────────────────────────────────
+	header {
+		# HSTS — opt-in for production deployments. Comment for local.
+		# Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+		# Defense in depth: tight CSP for the SPA. Adjust if you embed
+		# external scripts (avoid).
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Frame-Options "DENY"
+		# Strip identifying headers
+		-Server
+		-X-Powered-By
+	}
+
+	# Inbound body cap (matches APP_MAX_UPLOAD_BYTES default of 25 MB).
+	request_body {
+		max_size 25MB
+	}
+
+	# ───── /v1 → FastAPI backend ──────────────────────────────
+	handle_path /v1/* {
+		# rewrite /v1/foo → /v1/foo for the backend (no path strip).
+		# flush_interval -1 keeps SSE flowing chunk-by-chunk; Caddy
+		# auto-detects text/event-stream but the explicit setting is
+		# documented belt-and-suspenders (see Caddy issue #4247).
+		reverse_proxy backend:8000 {
+			flush_interval -1
+		}
+	}
+
+	# ───── Everything else → SPA static build ─────────────────
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+		# Pre-compressed Brotli/Gzip variants if the build tool emitted them.
+		encode br gzip
+	}
+}

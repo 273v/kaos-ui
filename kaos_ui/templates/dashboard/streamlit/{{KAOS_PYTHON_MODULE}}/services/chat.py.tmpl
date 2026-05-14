@@ -1,0 +1,50 @@
+"""Chat service — kaos-agents Runner with persistent SessionMemory.
+
+Heavy ``kaos_agents`` imports are kept lazy (inside function bodies)
+so the Streamlit page can boot even when the chat dep is missing
+(e.g. in our minimal-deps integration tests). The actual runtime
+error surfaces only when the user types a message.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+logger = app_logger("chat")
+
+_DEFAULT_INSTRUCTIONS = (
+    "You are a helpful assistant for {{KAOS_PROJECT_NAME}}. "
+    "Answer the user's questions clearly. Use the available tools when "
+    "they would help. When you cite a document, name it explicitly."
+)
+
+
+def build_runner(
+    settings: AppSettings,
+    runtime: KaosRuntime,
+    *,
+    instructions: str | None = None,
+) -> Any:
+    """Build a Runner for one chat turn."""
+    from kaos_agents import Agent, AgentPattern, Runner
+
+    agent = Agent(
+        instructions=instructions or _DEFAULT_INSTRUCTIONS,
+        pattern=AgentPattern.CHAT,
+        model=f"{settings.llm_provider}:{settings.llm_model}",
+    )
+    return Runner(agent, runtime=runtime)
+
+
+async def stream(runner: Any, message: str, session_id: str) -> AsyncIterator[Any]:
+    """Yield AgentEvents from a single turn. Page code renders them."""
+    async for event in runner.run(message, session_id):
+        yield event

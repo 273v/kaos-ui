@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{KAOS_PROJECT_SLUG}}"
+version = "0.1.0"
+description = "{{KAOS_PROJECT_NAME}} — KAOS-native Streamlit dashboard"
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+license = { text = "MIT" }
+
+dependencies = [
+  # KAOS core
+  "kaos-core>=0.1.0",
+  "kaos-content[markdown,nlp]>=0.1.0",
+  "kaos-agents>=0.1.0",
+  "kaos-llm-client>=0.1.0",
+  "kaos-pdf>=0.1.0",
+  "kaos-office>=0.1.0",
+  # Streamlit — pin >= 1.54 for CVE patches (CVE-2025-1684 client-only
+  # MIME enforcement, CVE-2024-42474 path traversal, Windows SSRF/NTLM)
+  "streamlit>=1.54,<2.0",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.8,<3",
+  # python-magic for magic-byte upload verification — extension-only
+  # checks are insufficient (CWE-434).
+  "python-magic>=0.4.27,<1",
+]
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.0,<5",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.26,<2",
+  "pytest-cov>=6.0,<8",
+  "ruff>=0.11,<2",
+  "ty>=0.0.1a17",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["{{KAOS_PYTHON_MODULE}}"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/{{KAOS_PYTHON_MODULE}}",
+  "/pages",
+  "/app.py",
+  "/README.md",
+  "/CLAUDE.md",
+  "/tests",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov={{KAOS_PYTHON_MODULE}}",
+  "--cov-branch",
+  "--cov-report=term-missing",
+]
+markers = [
+  "smoke: quick end-to-end checks",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+
+[tool.coverage.run]
+source = ["{{KAOS_PYTHON_MODULE}}"]
+branch = true

@@ -1,0 +1,85 @@
+"""Chat service — kaos-agents Runner with persistent SessionMemory.
+
+Heavy imports (``kaos_agents``) live inside function bodies so the
+screen module can import this without pulling in kaos-agents at module
+load time. This makes smoke tests cheap and the app bootable without
+the chat extra installed.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
+
+from {{KAOS_PYTHON_MODULE}}.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+logger = app_logger("chat")
+
+_DEFAULT_INSTRUCTIONS = (
+    "You are a helpful assistant for {{KAOS_PROJECT_NAME}}. "
+    "Answer the user's questions clearly. Use the available tools when "
+    "they would help. When you cite a document, name it explicitly."
+)
+
+
+def session_id_for(settings: AppSettings) -> str:
+    """Derive a stable session id from the user's local environment.
+
+    A TUI is single-user so the id is simple and stable across runs.
+    Persistent memory hangs off this id in VFS.
+    """
+    import getpass
+
+    return f"tui-{getpass.getuser()}"
+
+
+def build_runner(settings: AppSettings, runtime: KaosRuntime) -> Any:
+    """Build a kaos-agents Runner for one chat turn."""
+    from kaos_agents import Agent, AgentPattern, Runner
+
+    agent = Agent(
+        instructions=_DEFAULT_INSTRUCTIONS,
+        pattern=AgentPattern.CHAT,
+        model=f"{settings.llm_provider}:{settings.llm_model}",
+    )
+    return Runner(agent, runtime=runtime)
+
+
+async def stream(runner: Any, message: str, session_id: str) -> AsyncIterator[Any]:
+    """Yield ``AgentEvent``s from a single turn. Caller renders them."""
+    async for event in runner.run(message, session_id):
+        yield event
+
+
+def extract_text(event: Any) -> str:
+    """Return user-visible token text from a streamed AgentEvent.
+
+    Filters to ``TextDelta`` only — ``ThinkingDelta`` is internal
+    reasoning and shouldn't render directly. The kaos-agents canonical
+    field for the streamed token chunk is ``content`` (not ``text``);
+    a wrong field name silently produces empty assistant messages.
+    """
+    from kaos_agents import TextDelta
+
+    if isinstance(event, TextDelta):
+        return event.content or ""
+    return ""
+
+
+def reset_session(settings: AppSettings) -> None:
+    """Clear persistent SessionMemory for this user.
+
+    Implemented by removing the per-session VFS dir. Idempotent.
+    """
+    import shutil
+
+    sid = session_id_for(settings)
+    session_dir = settings.vfs_path / "kaos-agents" / "sessions" / sid
+    if session_dir.exists():
+        shutil.rmtree(session_dir, ignore_errors=True)
+        logger.info("reset session", extra={"session_id": sid})

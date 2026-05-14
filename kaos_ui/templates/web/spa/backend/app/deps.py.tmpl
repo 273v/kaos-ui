@@ -1,0 +1,22 @@
+"""FastAPI dependency providers."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from fastapi import Request
+
+if TYPE_CHECKING:
+    from kaos_core import KaosRuntime
+
+    from app.settings import AppSettings
+
+
+def get_settings(request: Request) -> AppSettings:
+    """Per-request access to the app's resolved settings."""
+    return request.app.state.settings
+
+
+def get_runtime(request: Request) -> KaosRuntime:
+    """Per-request access to the shared KaosRuntime."""
+    return request.app.state.runtime

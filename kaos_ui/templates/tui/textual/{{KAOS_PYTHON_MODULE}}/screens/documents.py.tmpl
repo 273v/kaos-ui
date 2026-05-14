@@ -1,0 +1,58 @@
+"""Documents screen — browse files in VFS."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.screen import Screen
+from textual.widgets import DataTable, Footer, Header, Static
+
+from {{KAOS_PYTHON_MODULE}}.services import documents as doc_service
+
+if TYPE_CHECKING:
+    from {{KAOS_PYTHON_MODULE}}.services.documents import DocumentSummary
+
+
+class DocumentsScreen(Screen):
+    """List documents stored in the app VFS."""
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Horizontal():
+            yield DataTable(id="documents-tree")
+            yield Static("Select a document to view metadata.", id="documents-viewer")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.cursor_type = "row"
+        table.add_columns("id", "filename", "ext", "size")
+        for doc in doc_service.list_documents(self.app.settings):
+            table.add_row(
+                doc.document_id,
+                doc.filename,
+                doc.extension,
+                f"{doc.size_bytes:,}",
+                key=doc.document_id,
+            )
+        if not table.row_count:
+            self.query_one("#documents-viewer", Static).update(
+                "[dim]No documents in VFS yet.[/]"
+            )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        doc_id = str(event.row_key.value) if event.row_key.value else ""
+        doc: DocumentSummary | None = doc_service.get_document_by_id(self.app.settings, doc_id)
+        viewer = self.query_one("#documents-viewer", Static)
+        if doc is None:
+            viewer.update(f"[red]Document {doc_id!r} not found.[/]")
+            return
+        viewer.update(
+            f"[b]{doc.filename}[/]\n\n"
+            f"id:    [yellow]{doc.document_id}[/]\n"
+            f"type:  {doc.extension}\n"
+            f"size:  {doc.size_bytes:,} bytes\n"
+            f"path:  [dim]{doc.path}[/]"
+        )

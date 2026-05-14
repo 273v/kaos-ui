@@ -1,0 +1,257 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ────────────── lint ──────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Ruff format check
+        run: uv run ruff format --check kaos_ui tests
+
+      - name: Ruff lint
+        run: uv run ruff check kaos_ui tests
+
+      - name: Type check (ty)
+        run: uv run ty check kaos_ui tests
+
+  # ────────────── pre-commit ──────────────
+  pre-commit:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Run pre-commit
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  # ────────────── test ──────────────
+  test:
+    name: Test (${{ matrix.display-os }} / Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.13"
+            os: ubuntu-latest
+            display-os: linux-x64
+            experimental: false
+          - python-version: "3.14"
+            os: ubuntu-latest
+            display-os: linux-x64
+            experimental: false
+          - python-version: "3.14t"
+            os: ubuntu-latest
+            display-os: linux-x64
+            experimental: true
+          - python-version: "3.15"
+            os: ubuntu-latest
+            display-os: linux-x64
+            experimental: true
+          - python-version: "3.13"
+            os: macos-14
+            display-os: macos-arm64
+            experimental: true
+          - python-version: "3.13"
+            os: windows-latest
+            display-os: windows-x64
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: test-${{ matrix.display-os }}-py${{ matrix.python-version }}
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install --preview ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --group dev --python ${{ matrix.python-version }}
+
+      - name: Run tests with coverage
+        shell: bash
+        run: |
+          uv run pytest \
+            -m "not slow" \
+            --cov=kaos_ui \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        if: always() && !matrix.experimental
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-${{ matrix.display-os }}-py${{ matrix.python-version }}
+          path: coverage.xml
+          retention-days: 14
+
+  # ────────────── min-deps ──────────────
+  min-deps:
+    name: Test against minimum dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install with lowest-direct resolution
+        run: uv sync --group dev --resolution=lowest-direct --python 3.13
+
+      - name: Run tests
+        run: |
+          uv run pytest \
+            -m "not slow" \
+            --no-cov \
+            -q
+
+  # ────────────── templates-smoke ──────────────
+  # The per-template scaffold-and-boot matrix. Slow (pnpm install,
+  # uv sync × 6 templates) so it's split into its own job and only
+  # runs on main + scheduled nightly.
+  templates-smoke:
+    name: Per-template smoke
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'templates')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Run per-template smoke matrix
+        run: uv run pytest tests/integration/ -v -m "" --no-cov
+
+  # ────────────── build + wheel smoke test ──────────────
+  build:
+    name: Build distribution + smoke test
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Verify metadata (twine check)
+        run: uvx --from twine twine check --strict dist/*
+
+      - name: Smoke-test the built wheel in a clean venv
+        run: |
+          uv venv --python 3.13 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/kaos_ui-*-py3-none-any.whl
+          /tmp/smoke/bin/python -c "
+          import kaos_ui
+          assert kaos_ui.__version__, 'version missing from wheel'
+          from kaos_ui import (
+              KaosUISettings,
+              ScaffoldResult,
+              TEMPLATES,
+              register_ui_tools,
+              scaffold,
+          )
+          from kaos_core import KaosRuntime
+          rt = KaosRuntime()
+          # kaos-mcp loader contract: register_ui_tools returns int count.
+          count = register_ui_tools(rt)
+          assert isinstance(count, int) and count == 4, f'bad return: {count!r}'
+          tools = sorted(rt.tools.list_tools())
+          assert len(tools) == 4, f'expected 4 tools, got {len(tools)}: {tools}'
+          assert len(TEMPLATES) >= 6, f'expected >=6 templates, got {len(TEMPLATES)}'
+          print(f'kaos-ui {kaos_ui.__version__}: {len(TEMPLATES)} templates, {count} MCP tools')
+          "
+          /tmp/smoke/bin/kaos-ui --help
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7

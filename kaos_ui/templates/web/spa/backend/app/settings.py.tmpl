@@ -1,0 +1,143 @@
+"""Application settings for {{KAOS_PROJECT_NAME}} backend.
+
+Resolution order matches the KAOS hierarchy described in
+``kaos-ui/docs/INTEGRATION.md``. Refuse-to-start cases are encoded in
+``_validate_security_invariants``.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated, Literal
+
+from kaos_core.config import ModuleSettings
+from pydantic import SecretStr, field_validator, model_validator
+from pydantic_settings import NoDecode, SettingsConfigDict
+
+from app.exceptions import SettingsError
+
+_WEAK_TOKEN_LITERALS: frozenset[str] = frozenset(
+    {"changeme", "password", "secret", "admin", "dev", "test", "default", ""}
+)
+_MIN_TOKEN_LENGTH_PROD = 32
+
+
+class AppSettings(ModuleSettings):
+    """Configuration for {{KAOS_PROJECT_NAME}} backend."""
+
+    auth_token: SecretStr | None = None
+    env: Literal["development", "production", "test"] = "development"
+    debug: bool = False
+    log_level: str = "INFO"
+
+    # Server
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+    # CORS — explicit allowlist, never `*` with credentials.
+    # ``NoDecode`` skips pydantic-settings' default JSON parser for env
+    # vars; the ``_split_csv`` validator below accepts comma-separated
+    # input from .env (vibe-coder ergonomics).
+    cors_origins: Annotated[tuple[str, ...], NoDecode] = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
+    cookie_name: str = "{{KAOS_PROJECT_SLUG}}_session"
+
+    # Public origin used by the frontend; used to set Secure cookie scope
+    # and to validate Origin headers on state-changing requests.
+    public_origin: str = "http://localhost:8443"
+
+    # VFS / state
+    vfs_path: Path = Path(".kaos-vfs")
+
+    # Database — SQLite default, Postgres via overlay.
+    database_url: str = "sqlite+aiosqlite:///./.kaos-vfs/app.db"
+
+    # Uploads
+    max_upload_bytes: int = 25 * 1024 * 1024
+    allowed_upload_types: Annotated[tuple[str, ...], NoDecode] = (
+        "pdf", "docx", "pptx", "xlsx", "csv", "txt", "md",
+    )
+
+    # LLM
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-haiku-4-5"
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        # Try project-root .env first, then backend-local — supports
+        # both ``cd backend && uvicorn`` and root-level invocations.
+        env_file=("../.env", ".env"),
+        extra="ignore",
+        validate_default=True,
+    )
+
+    @field_validator("cors_origins", "allowed_upload_types", mode="before")
+    @classmethod
+    def _split_csv(cls, value: object) -> object:
+        """Allow comma-separated env-var input for tuple-typed fields.
+
+        Pydantic-settings' default tuple parser expects JSON; vibe coders
+        type ``APP_CORS_ORIGINS=https://a,https://b`` and reasonably
+        expect it to work. We accept either form.
+        """
+        if isinstance(value, str):
+            return tuple(s.strip() for s in value.split(",") if s.strip())
+        return value
+
+    @model_validator(mode="after")
+    def _validate_security_invariants(self) -> AppSettings:
+        if self.env == "test":
+            return self
+
+        if self.auth_token is None:
+            raise SettingsError(
+                "APP_AUTH_TOKEN is not set.\n"
+                "How to fix: cp .env.example .env, then edit .env and set "
+                "APP_AUTH_TOKEN to a long random string "
+                "(head -c 32 /dev/urandom | base64).\n"
+                "Alternative: set APP_ENV=test for unit tests."
+            )
+
+        if self.env == "production":
+            if self.debug:
+                raise SettingsError(
+                    "APP_DEBUG=True is not allowed when APP_ENV=production.\n"
+                    "How to fix: set APP_DEBUG=false in .env.\n"
+                    "Alternative: set APP_ENV=development if you want debug behavior."
+                )
+            if "*" in self.cors_origins:
+                raise SettingsError(
+                    "APP_CORS_ORIGINS must not contain '*' in production "
+                    "(browsers reject wildcard with credentials).\n"
+                    "How to fix: list explicit origins, e.g. "
+                    "APP_CORS_ORIGINS=https://app.example.com\n"
+                    "Alternative: set APP_ENV=development for local dev."
+                )
+            secret = self.auth_token.get_secret_value()
+            if secret.lower() in _WEAK_TOKEN_LITERALS:
+                raise SettingsError(
+                    "APP_AUTH_TOKEN is set to a well-known weak literal.\n"
+                    "How to fix: replace it with a long random string "
+                    "(head -c 32 /dev/urandom | base64)."
+                )
+            if len(secret) < _MIN_TOKEN_LENGTH_PROD:
+                raise SettingsError(
+                    f"APP_AUTH_TOKEN is too short for production "
+                    f"(< {_MIN_TOKEN_LENGTH_PROD} chars).\n"
+                    f"How to fix: regenerate it: head -c 32 /dev/urandom | base64."
+                )
+        return self
+
+    def model_dump_redacted(self) -> dict[str, object]:
+        """Dump settings with every ``SecretStr`` redacted."""
+        data = self.model_dump()
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                secret = value.get_secret_value()
+                data[name] = (
+                    "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
+                )
+        return data

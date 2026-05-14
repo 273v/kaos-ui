@@ -1,0 +1,47 @@
+"""Chat session routes — POST /v1/sessions/{id}/messages with SSE.
+
+Uses ``sse-starlette`` for proper SSE plumbing: client-disconnect
+detection, periodic pings (the connection idles during long LLM
+thinking), graceful shutdown coordination.
+
+The frontend uses ``fetch(...).body.getReader()`` (or TanStack
+Query's ``experimental_streamedQuery``) — ``EventSource`` doesn't
+support custom headers / cookies the way we'd want.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+
+from app.deps import get_runtime, get_settings
+from app.services import chat as chat_service
+from app.settings import AppSettings
+
+router = APIRouter(tags=["sessions"])
+
+
+class MessageRequest(BaseModel):
+    message: str
+
+
+@router.post("/{session_id}/messages")
+async def post_message(
+    session_id: str,
+    body: MessageRequest,
+    settings: Annotated[AppSettings, Depends(get_settings)],
+    runtime: Annotated[object, Depends(get_runtime)],
+) -> EventSourceResponse:
+    """Stream agent events as SSE."""
+    runner = chat_service.build_runner(settings, runtime)  # type: ignore[arg-type]
+    return EventSourceResponse(
+        chat_service.stream_events(runner, body.message, session_id),
+        # Disable any buffering by Caddy / nginx / Cloudflare in front.
+        headers={"X-Accel-Buffering": "no"},
+        # Ping every 15s so the proxy doesn't kill the connection during
+        # long-running LLM thinking. sse-starlette emits a ``: ping`` comment.
+        ping=15,
+    )

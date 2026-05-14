@@ -1,0 +1,85 @@
+"""Application settings for {{KAOS_PROJECT_NAME}}.
+
+TUI-specific notes:
+
+- No ``auth_token`` (single-user terminal app — no remote auth surface).
+- VFS lives under ``~/.kaos/{{KAOS_PROJECT_SLUG}}/vfs/`` by default.
+- Logs go to ``~/.kaos/{{KAOS_PROJECT_SLUG}}/log.jsonl`` regardless of
+  ``ENV`` because Textual owns stdout/stderr while the app runs.
+
+The refuse-to-start validator still applies: production deploys with
+``APP_DEBUG=true`` are rejected. See ``../docs/SECURITY.md`` for the
+full contract.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+from kaos_core.config import ModuleSettings
+from pydantic import SecretStr, model_validator
+from pydantic_settings import SettingsConfigDict
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+
+
+def _default_vfs_path() -> Path:
+    """``~/.kaos/{{KAOS_PROJECT_SLUG}}/vfs`` — XDG-friendly per-app dir."""
+    return Path.home() / ".kaos" / "{{KAOS_PROJECT_SLUG}}" / "vfs"
+
+
+def _default_log_path() -> Path:
+    """``~/.kaos/{{KAOS_PROJECT_SLUG}}/log.jsonl``."""
+    return Path.home() / ".kaos" / "{{KAOS_PROJECT_SLUG}}" / "log.jsonl"
+
+
+class AppSettings(ModuleSettings):
+    """Configuration for {{KAOS_PROJECT_NAME}}."""
+
+    env: Literal["development", "production", "test"] = "development"
+    debug: bool = False
+    log_level: str = "INFO"
+
+    vfs_path: Path = _default_vfs_path()
+    log_path: Path = _default_log_path()
+
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-haiku-4-5"
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=".env",
+        extra="ignore",
+        validate_default=True,
+    )
+
+    @model_validator(mode="after")
+    def _validate_security_invariants(self) -> AppSettings:
+        """Refuse to start in production with debug on.
+
+        The TUI does not require an auth token — terminal apps are
+        single-user — so the only production guard is debug mode.
+        """
+        if self.env == "production" and self.debug:
+            raise SettingsError(
+                "APP_DEBUG=true is not allowed when APP_ENV=production.\n"
+                "How to fix: set APP_DEBUG=false in .env.\n"
+                "Alternative: set APP_ENV=development if you want debug behavior."
+            )
+        return self
+
+    def model_dump_redacted(self) -> dict[str, object]:
+        """Dump settings with ``SecretStr`` values redacted.
+
+        Walks every field — adding new SecretStr fields stays safe.
+        """
+        data = self.model_dump()
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                secret = value.get_secret_value()
+                data[name] = (
+                    "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
+                )
+        return data

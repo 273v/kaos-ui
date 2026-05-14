@@ -1,0 +1,76 @@
+"""Settings tests — refusal cases + redaction.
+
+Every AppSettings construction passes ``_env_file=None`` so the
+project's ``.env`` cannot leak into the test (see kaos-ui PATTERNS.md
+§"pydantic-settings + .env in tests").
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+_GOOD_TOKEN = "a-long-random-secret-token-of-at-least-32-chars"
+
+
+def test_refuses_to_start_without_token_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("APP_AUTH_TOKEN", raising=False)
+    with pytest.raises(SettingsError, match="APP_AUTH_TOKEN"):
+        AppSettings(_env_file=None)
+
+
+def test_test_env_allows_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.delenv("APP_AUTH_TOKEN", raising=False)
+    AppSettings(_env_file=None)  # must not raise
+
+
+def test_production_refuses_debug_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", _GOOD_TOKEN)
+    monkeypatch.setenv("APP_DEBUG", "true")
+    with pytest.raises(SettingsError, match="APP_DEBUG"):
+        AppSettings(_env_file=None)
+
+
+@pytest.mark.parametrize("weak", ["changeme", "password", "admin", "dev", "test"])
+def test_production_refuses_weak_token_literal(
+    monkeypatch: pytest.MonkeyPatch, weak: str
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", weak)
+    with pytest.raises(SettingsError, match="weak literal"):
+        AppSettings(_env_file=None)
+
+
+def test_production_refuses_short_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "x" * 16)  # < 32 chars
+    with pytest.raises(SettingsError, match="too short"):
+        AppSettings(_env_file=None)
+
+
+def test_production_accepts_strong_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_AUTH_TOKEN", _GOOD_TOKEN)
+    monkeypatch.setenv("APP_DEBUG", "false")
+    AppSettings(_env_file=None)  # must not raise
+
+
+def test_redaction_redacts_long_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "abcdefghijklmnopqrstuvwxyz")
+    settings = AppSettings(_env_file=None)
+    payload = settings.model_dump_redacted()
+    assert "abcdefghijklmnopqrstuvwxyz" not in str(payload)
+    assert payload["auth_token"] == "abcd...wxyz"
+
+
+def test_redaction_uses_stars_for_short_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "short")
+    settings = AppSettings(_env_file=None)
+    assert settings.model_dump_redacted()["auth_token"] == "***"

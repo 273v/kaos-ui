@@ -1,0 +1,130 @@
+[build-system]
+requires = ["hatchling>=1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaos-ui"
+dynamic = ["version"]
+description = "Project scaffolding for KAOS user-facing applications — TUI, desktop, web, dashboard"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+  { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+maintainers = [
+  { name = "Michael Bommarito", email = "mike@273ventures.com" },
+]
+keywords = [
+  "kaos",
+  "scaffolding",
+  "mcp",
+  "model-context-protocol",
+  "fastapi",
+  "streamlit",
+  "textual",
+  "react",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Code Generators",
+  "Typing :: Typed",
+]
+dependencies = [
+  "kaos-core>=0.1.0a6",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.8.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5",
+  "pytest-asyncio>=0.26.0",
+  "pytest-cov>=6.0.0",
+  "ruff>=0.11.0",
+  "ty>=0.0.1a17",
+]
+# The `kaos_ui.agents` helpers wrap kaos-agents 0.1.0a1 behaviour but
+# kaos-ui itself doesn't depend on kaos-agents at runtime — consuming
+# apps install kaos-agents directly. Tests for `kaos_ui.agents` skip
+# when kaos-agents isn't on the path (`pytest.importorskip`); the
+# `single-user-chat` example exercises the helper end-to-end through
+# its own pinned kaos-agents.
+
+[project.scripts]
+kaos-ui = "kaos_ui.cli:main"
+
+[project.urls]
+Homepage = "https://273ventures.com"
+Documentation = "https://github.com/273v/kaos-ui#readme"
+Repository = "https://github.com/273v/kaos-ui"
+Issues = "https://github.com/273v/kaos-ui/issues"
+Changelog = "https://github.com/273v/kaos-ui/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "kaos_ui/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/kaos_ui",
+  "/README.md",
+  "/LICENSE",
+  "/NOTICE",
+  "/CHANGELOG.md",
+  "/SECURITY.md",
+  "/CONTRIBUTING.md",
+  "/CODE_OF_CONDUCT.md",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_ui"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov=kaos_ui",
+  "--cov-branch",
+  "--cov-report=term-missing",
+]
+markers = [
+  "integration: end-to-end behavior checks",
+  "unit: focused unit checks",
+  "slow: requires extra toolchains (cargo, docker)",
+  "desktop_native: requires a native desktop toolchain (cargo for tauri)",
+]
+
+[tool.coverage.run]
+source = ["kaos_ui"]
+branch = true
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+ignore = []
+
+[tool.ty.src]
+exclude = [
+  # template files are not part of the runtime module
+  "kaos_ui/templates/**",
+]

@@ -1,0 +1,22 @@
+"""Exception hierarchy for {{KAOS_PROJECT_NAME}}.
+
+Per the KAOS error contract every exception carries an agent-friendly
+message: what went wrong, how to fix it, and (where applicable) an
+alternative tool to try.
+"""
+
+from __future__ import annotations
+
+from kaos_core.exceptions import KaosCoreError
+
+
+class AppError(KaosCoreError):
+    """Base for all errors raised by this app."""
+
+
+class SettingsError(AppError):
+    """A required setting is missing or invalid."""
+
+
+class ChatError(AppError):
+    """Chat agent failed to produce a response."""

@@ -1,0 +1,65 @@
+"""CLI for {{KAOS_PROJECT_NAME}}.
+
+Usage:
+    kaos-{{KAOS_PROJECT_SLUG}} list-tools [--json]
+    kaos-{{KAOS_PROJECT_SLUG}} serve [--host HOST] [--port PORT]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+
+def cmd_list_tools(args: argparse.Namespace) -> None:
+    """List available tools."""
+    from {{KAOS_PYTHON_MODULE}}.tools import get_tools
+
+    tools = get_tools()
+    if args.json:
+        data = {
+            "command": "list-tools",
+            "tools": [{"name": t.name, "description": t.description} for t in tools],
+        }
+        print(json.dumps(data, indent=2))
+    else:
+        for t in tools:
+            print(f"  {t.name}: {t.description}")
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Start the MCP server."""
+    from {{KAOS_PYTHON_MODULE}}.serve import run_server
+
+    run_server(host=args.host, port=args.port)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        prog="kaos-{{KAOS_PROJECT_SLUG}}",
+        description="{{KAOS_PROJECT_NAME}} CLI",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # list-tools
+    lt = sub.add_parser("list-tools", help="List available tools")
+    lt.add_argument("--json", action="store_true", help="JSON output")
+    lt.set_defaults(func=cmd_list_tools)
+
+    # serve
+    sv = sub.add_parser("serve", help="Start MCP server")
+    sv.add_argument("--host", default="localhost")
+    sv.add_argument("--port", type=int, default=8080)
+    sv.set_defaults(func=cmd_serve)
+
+    args = parser.parse_args(argv)
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

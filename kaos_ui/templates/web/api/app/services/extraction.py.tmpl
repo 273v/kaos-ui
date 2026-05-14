@@ -1,0 +1,39 @@
+"""Document extraction service wrapping KAOS packages."""
+
+import tempfile
+from pathlib import Path
+
+
+def extract_document(content: bytes, filename: str) -> dict:
+    """Extract a document using the appropriate KAOS extractor.
+
+    Args:
+        content: Raw file bytes.
+        filename: Original filename (used to detect format).
+
+    Returns:
+        Dict with extraction results.
+    """
+    suffix = Path(filename).suffix.lower()
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        if suffix == ".pdf":
+            from kaos_pdf.extract import extract_pdf
+
+            doc = extract_pdf(tmp_path)
+        else:
+            return {"error": f"Unsupported file type: {suffix}", "supported": [".pdf"]}
+
+        return {
+            "filename": filename,
+            "format": suffix,
+            "page_count": len(doc.pages) if hasattr(doc, "pages") else None,
+            "block_count": len(doc.blocks),
+            "markdown": doc.to_markdown()[:4000],
+        }
+    finally:
+        tmp_path.unlink(missing_ok=True)

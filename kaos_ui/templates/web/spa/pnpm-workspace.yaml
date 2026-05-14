@@ -1,0 +1,19 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# KAOS Node supply-chain baseline:
+# - delay newly published dependency versions for 72 hours
+# - block transitive git/tarball/file specifiers
+# - refuse unreviewed lifecycle build scripts
+# - pin newly added dependencies exactly instead of adding semver ranges
+minimumReleaseAge: 4320
+minimumReleaseAgeStrict: false
+minimumReleaseAgeIgnoreMissingTime: true
+resolutionMode: highest
+blockExoticSubdeps: true
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+savePrefix: ""
+allowBuilds:
+  esbuild: true

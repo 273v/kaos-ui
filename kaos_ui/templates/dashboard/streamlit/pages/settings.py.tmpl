@@ -1,0 +1,25 @@
+"""Settings page — read-only resolved configuration with secrets redacted."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+settings: AppSettings = st.session_state["settings"]
+auth.require(settings)
+
+st.title("Settings")
+st.caption("Resolved configuration. Secrets are redacted.")
+
+st.json(settings.model_dump_redacted())
+
+st.divider()
+st.subheader("Health")
+
+cols = st.columns(2)
+with cols[0]:
+    st.metric("VFS", "writable" if settings.vfs_path.exists() else "missing")
+with cols[1]:
+    st.metric("Environment", settings.env)

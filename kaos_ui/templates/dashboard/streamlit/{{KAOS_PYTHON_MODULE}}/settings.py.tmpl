@@ -1,0 +1,133 @@
+"""Application settings for {{KAOS_PROJECT_NAME}}.
+
+Resolution order matches the KAOS hierarchy described in
+``kaos-ui/docs/INTEGRATION.md``:
+
+1. Explicit overrides
+2. Prefixed env vars (``APP_*``)
+3. ``.env`` file
+4. Field defaults
+
+Required fields raise on missing values when ``env != "test"`` so the
+app refuses to boot in misconfigured environments rather than silently
+running insecurely.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+from kaos_core.config import ModuleSettings
+from pydantic import SecretStr, model_validator
+from pydantic_settings import SettingsConfigDict
+
+from {{KAOS_PYTHON_MODULE}}.exceptions import SettingsError
+
+
+_WEAK_TOKEN_LITERALS: frozenset[str] = frozenset(
+    {"changeme", "password", "secret", "admin", "dev", "test", "default", ""}
+)
+_MIN_TOKEN_LENGTH_PROD = 32
+
+
+class AppSettings(ModuleSettings):
+    """Configuration for {{KAOS_PROJECT_NAME}}."""
+
+    auth_token: SecretStr | None = None
+    env: Literal["development", "production", "test"] = "development"
+    debug: bool = False
+    log_level: str = "INFO"
+
+    vfs_path: Path = Path(".kaos-vfs")
+
+    max_upload_bytes: int = 25 * 1024 * 1024
+    allowed_upload_types: tuple[str, ...] = (
+        "pdf",
+        "docx",
+        "pptx",
+        "xlsx",
+        "csv",
+        "txt",
+        "md",
+    )
+
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-haiku-4-5"
+
+    streamlit_port: int = 8501
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=".env",
+        extra="ignore",
+        validate_default=True,
+    )
+
+    @model_validator(mode="after")
+    def _validate_security_invariants(self) -> AppSettings:
+        """Refuse to start with insecure configuration.
+
+        Rules:
+        - In any non-test env, APP_AUTH_TOKEN must be set.
+        - In production, APP_DEBUG must be False.
+        - In production, the token must be at least 32 chars and must not
+          be one of a small set of well-known weak literals.
+
+        Failures are explicit (with how-to-fix) so a vibe coder reading
+        the error message can act on it.
+        """
+        if self.env == "test":
+            return self
+
+        if self.auth_token is None:
+            raise SettingsError(
+                "APP_AUTH_TOKEN is not set.\n"
+                "How to fix: cp .env.example .env, then edit .env and set "
+                "APP_AUTH_TOKEN to a long random string "
+                "(head -c 32 /dev/urandom | base64).\n"
+                "Alternative: set APP_ENV=test for unit tests."
+            )
+
+        if self.env == "production":
+            if self.debug:
+                raise SettingsError(
+                    "APP_DEBUG=True is not allowed when APP_ENV=production.\n"
+                    "How to fix: set APP_DEBUG=false in .env.\n"
+                    "Alternative: set APP_ENV=development if you want debug behavior."
+                )
+            secret = self.auth_token.get_secret_value()
+            if secret.lower() in _WEAK_TOKEN_LITERALS:
+                raise SettingsError(
+                    "APP_AUTH_TOKEN is set to a well-known weak literal.\n"
+                    "How to fix: replace it with a long random string "
+                    "(head -c 32 /dev/urandom | base64).\n"
+                    "Alternative: this check is only enforced when "
+                    "APP_ENV=production."
+                )
+            if len(secret) < _MIN_TOKEN_LENGTH_PROD:
+                raise SettingsError(
+                    f"APP_AUTH_TOKEN is too short for production "
+                    f"(< {_MIN_TOKEN_LENGTH_PROD} chars).\n"
+                    f"How to fix: regenerate it: head -c 32 /dev/urandom | base64.\n"
+                    f"Alternative: this check is only enforced when "
+                    f"APP_ENV=production."
+                )
+        return self
+
+    def model_dump_redacted(self) -> dict[str, object]:
+        """Dump settings with secrets redacted — for the Settings page.
+
+        Walks every field and redacts any ``SecretStr`` value. The fixed
+        ``auth_token``-only behavior was a bug waiting to happen — adding a
+        new SecretStr field would silently leak it.
+        """
+        data = self.model_dump()
+        for name, _ in type(self).model_fields.items():
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                secret = value.get_secret_value()
+                data[name] = (
+                    "***" if len(secret) <= 8 else f"{secret[:4]}...{secret[-4:]}"
+                )
+        return data

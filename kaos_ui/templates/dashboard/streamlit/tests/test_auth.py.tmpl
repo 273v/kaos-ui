@@ -1,0 +1,26 @@
+"""Auth gate tests — token comparison + session state behavior."""
+
+from __future__ import annotations
+
+import hmac
+
+import pytest
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+def test_test_env_bypasses_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    settings = AppSettings(_env_file=None)
+    assert auth.is_authenticated(settings) is True
+
+
+def test_compare_digest_matches_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direct unit check on the comparison primitive used in auth."""
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("APP_AUTH_TOKEN", "secret-token")
+    settings = AppSettings(_env_file=None)
+    expected = settings.auth_token.get_secret_value()
+    assert hmac.compare_digest("secret-token", expected) is True
+    assert hmac.compare_digest("not-the-token", expected) is False

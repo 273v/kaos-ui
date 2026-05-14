@@ -1,0 +1,66 @@
+"""Chat page — streaming agent loop via kaos-agents."""
+
+from __future__ import annotations
+
+import asyncio
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.services import chat as chat_service
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+settings: AppSettings = st.session_state["settings"]
+auth.require(settings)
+runtime = st.session_state["runtime"]
+
+st.title("Chat")
+st.caption(f"Model: `{settings.llm_provider}:{settings.llm_model}`")
+
+if "chat_messages" not in st.session_state:
+    st.session_state["chat_messages"] = []
+if "chat_session_id" not in st.session_state:
+    token_hash = auth.session_token_hash() or "anonymous"
+    st.session_state["chat_session_id"] = f"streamlit-{token_hash}"
+
+for entry in st.session_state["chat_messages"]:
+    with st.chat_message(entry["role"]):
+        st.markdown(entry["content"])
+
+if prompt := st.chat_input("Ask anything…"):
+    st.session_state["chat_messages"].append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        accumulated: list[str] = []
+
+        async def _run() -> None:
+            runner = chat_service.build_runner(settings, runtime)
+            async for event in chat_service.stream(
+                runner, prompt, st.session_state["chat_session_id"]
+            ):
+                # ``TextDelta`` from kaos-agents carries the streamed
+                # token chunk in ``.content`` — NOT ``.text`` (which is
+                # the assembled final on ``TurnComplete``). Reading the
+                # wrong field silently produces empty assistant
+                # messages.
+                from kaos_agents import TextDelta
+
+                if isinstance(event, TextDelta) and event.content:
+                    accumulated.append(event.content)
+                    placeholder.markdown("".join(accumulated))
+
+        try:
+            asyncio.run(_run())
+        except Exception as exc:
+            # Broad except: any agent error is surfaced to the user
+            # without leaking the stack trace. Full traceback is in the
+            # file logs via streamlit's own error capture.
+            placeholder.error(f"Error from agent: {exc}")
+            st.stop()  # NOT `return` — pages are top-level scripts
+
+        final = "".join(accumulated) or "_(no response)_"
+        placeholder.markdown(final)
+        st.session_state["chat_messages"].append({"role": "assistant", "content": final})

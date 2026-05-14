@@ -1,0 +1,140 @@
+"""Upload service — file → ContentDocument → VFS.
+
+Server-side validation (size, extension allowlist, magic-byte
+verification) before any parser sees the bytes. Mirrors the Streamlit
+template's uploads service; the SPA backend uses it via
+``routers/uploads.py``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from app.exceptions import UploadError
+from app.logging_setup import app_logger
+
+if TYPE_CHECKING:
+    from app.settings import AppSettings
+
+logger = app_logger("uploads")
+
+try:
+    import magic as _magic
+except ImportError:  # pragma: no cover — documented graceful-degradation path
+    _magic = None  # type: ignore[assignment]
+
+_EXTENSION_TO_MIME: dict[str, tuple[str, ...]] = {
+    "pdf": ("application/pdf",),
+    "docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/zip",
+    ),
+    "pptx": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/zip",
+    ),
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+    ),
+    "csv": ("text/csv", "text/plain", "application/csv"),
+    "txt": ("text/plain",),
+    "md": ("text/plain", "text/markdown"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class StoredDocument:
+    document_id: str
+    filename: str
+    extension: str
+    size_bytes: int
+    vfs_path: Path
+
+
+def validate(
+    filename: str, payload: bytes, settings: AppSettings
+) -> tuple[str, bytes]:
+    """Three-step validation. Returns ``(extension, payload)`` on success."""
+    if len(payload) > settings.max_upload_bytes:
+        raise UploadError(
+            f"Upload too large: {len(payload)} bytes > limit "
+            f"{settings.max_upload_bytes} bytes.\n"
+            f"How to fix: shrink the file or raise APP_MAX_UPLOAD_BYTES.\n"
+            f"Alternative: split the document and upload the parts separately."
+        )
+    suffix = Path(filename).suffix.lstrip(".").lower()
+    if suffix not in settings.allowed_upload_types:
+        allowed = ", ".join(settings.allowed_upload_types)
+        raise UploadError(
+            f"File type {suffix!r} is not allowed.\n"
+            f"How to fix: upload one of: {allowed}.\n"
+            f"Alternative: convert the file to a supported type before upload."
+        )
+    _verify_magic_bytes(suffix, payload)
+    return suffix, payload
+
+
+def _verify_magic_bytes(extension: str, payload: bytes) -> None:
+    """Refuse files whose content doesn't match their declared extension."""
+    if _magic is None:
+        logger.warning(
+            "python-magic unavailable; skipping content-type verification. "
+            "Install libmagic1 (Linux) / libmagic (macOS) for stronger "
+            "upload validation."
+        )
+        return
+    expected = _EXTENSION_TO_MIME.get(extension)
+    if expected is None:
+        logger.info("no MIME profile for extension %r; accepting", extension)
+        return
+    detected = _magic.from_buffer(payload[:2048], mime=True)
+    if detected not in expected:
+        raise UploadError(
+            f"File content does not match declared extension {extension!r}.\n"
+            f"Detected MIME: {detected!r}; expected one of {expected!r}.\n"
+            f"How to fix: upload a real .{extension} file. Renaming a "
+            f"file's extension does not change its content.\n"
+            f"Alternative: convert the file with a real tool before upload."
+        )
+
+
+def store(
+    filename: str, payload: bytes, settings: AppSettings
+) -> StoredDocument:
+    """Validate, then stash under VFS at ``documents/<id>/original.<ext>``."""
+    extension, _ = validate(filename, payload, settings)
+    document_id = _make_document_id(filename)
+    vfs_dir = settings.vfs_path / "documents" / document_id
+    vfs_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = vfs_dir / f"original.{extension}"
+    raw_path.write_bytes(payload)
+
+    logger.info(
+        "stored upload",
+        extra={
+            "document_id": document_id,
+            "original_filename": filename,
+            "extension": extension,
+            "size_bytes": len(payload),
+        },
+    )
+    return StoredDocument(
+        document_id=document_id,
+        filename=filename,
+        extension=extension,
+        size_bytes=len(payload),
+        vfs_path=raw_path,
+    )
+
+
+def _make_document_id(filename: str) -> str:
+    """Collision-resistant id from filename + nanosecond time. Path-safe."""
+    import hashlib
+    import time
+
+    return hashlib.sha256(
+        f"{filename}:{time.time_ns()}".encode()
+    ).hexdigest()[:12]

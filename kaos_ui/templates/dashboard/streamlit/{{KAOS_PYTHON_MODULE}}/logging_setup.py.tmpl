@@ -1,0 +1,101 @@
+"""Logging setup — structured JSON in production, human-readable in dev.
+
+Always use ``kaos_core.logging.get_logger`` so logger names are
+auto-prefixed under the ``kaos.app.{{KAOS_PROJECT_SLUG}}.*`` hierarchy
+and ``session_id`` / ``trace_id`` propagate when a ``KaosContext`` is in
+scope.
+
+Log injection (CWE-117) defense: every formatter strips embedded CR/LF
+from message text before emission. Otherwise an attacker who controls a
+logged value (e.g. an upload's filename) could forge fake log lines.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+
+from kaos_core.logging import get_logger
+
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+_CONFIGURED = False
+
+# Standard LogRecord fields we never want to emit as a "user" key.
+# See: https://docs.python.org/3/library/logging.html#logrecord-attributes
+_RESERVED_LOGRECORD_KEYS = frozenset(
+    {
+        "args", "asctime", "created", "exc_info", "exc_text",
+        "filename", "funcName", "levelname", "levelno", "lineno",
+        "message", "module", "msecs", "msg", "name", "pathname",
+        "process", "processName", "relativeCreated", "stack_info",
+        "thread", "threadName", "taskName",
+    }
+)
+
+
+def _strip_crlf(value: object) -> object:
+    """Defeat CWE-117 log injection by stripping CR/LF from string values."""
+    if isinstance(value, str):
+        return value.replace("\r", "\\r").replace("\n", "\\n")
+    return value
+
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "name": record.name,
+            "msg": _strip_crlf(record.getMessage()),
+        }
+        # Surface logger.info(..., extra={...}) keys as top-level fields.
+        for key, value in record.__dict__.items():
+            if key in _RESERVED_LOGRECORD_KEYS or key.startswith("_"):
+                continue
+            payload[key] = _strip_crlf(value)
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str, ensure_ascii=False)
+
+
+class _HumanFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        # Substitute %-args via getMessage, strip CRLF, then clear
+        # ``record.args`` so super().format() doesn't try to substitute
+        # the already-formatted string again (which would raise
+        # ``TypeError: not all arguments converted...``). See
+        # kaos-ui/docs/PATTERNS.md §Logging.
+        record.msg = _strip_crlf(record.getMessage())
+        record.args = ()
+        return super().format(record)
+
+
+def configure(settings: AppSettings) -> None:
+    """Idempotent logging configuration. Call once at app start."""
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+
+    # Clear default handlers so Streamlit's reload doesn't multiply them.
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    handler = logging.StreamHandler(stream=sys.stderr)
+    if settings.env == "production":
+        handler.setFormatter(_JsonFormatter())
+    else:
+        handler.setFormatter(
+            _HumanFormatter("%(asctime)s %(levelname)-7s %(name)s — %(message)s")
+        )
+    root.addHandler(handler)
+    _CONFIGURED = True
+
+
+def app_logger(suffix: str) -> logging.Logger:
+    """``app_logger("chat")`` → ``kaos.app.{{KAOS_PROJECT_SLUG}}.chat``."""
+    return get_logger(f"kaos.app.{{KAOS_PROJECT_SLUG}}.{suffix}")

@@ -1,0 +1,18 @@
+"""Health + readiness."""
+
+from __future__ import annotations
+
+
+def test_health_is_public(client) -> None:
+    """``/v1/health`` returns 200 without authentication."""
+    response = client.get("/v1/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_ready_is_public(client) -> None:
+    response = client.get("/v1/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] in ("ready", "degraded")
+    assert "checks" in body

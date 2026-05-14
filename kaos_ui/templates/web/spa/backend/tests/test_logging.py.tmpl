@@ -1,0 +1,50 @@
+"""Logging configuration regression tests.
+
+Caught a real bug: _HumanFormatter was re-running ``% args`` on an
+already-substituted message → ``TypeError: not all arguments
+converted``. Any ``logger.info("X %d", n)`` would crash. This pins
+the fix in ``logging_setup._HumanFormatter``.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from app.logging_setup import _HumanFormatter, _JsonFormatter
+
+
+def _make_record(msg: str, *args: object) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="kaos.app.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg=msg,
+        args=args or None,
+        exc_info=None,
+    )
+
+
+def test_human_formatter_handles_percent_args() -> None:
+    record = _make_record("registered %d core tools", 7)
+    output = _HumanFormatter("%(message)s").format(record)
+    assert "registered 7 core tools" in output
+
+
+def test_json_formatter_handles_percent_args() -> None:
+    record = _make_record("user %s logged in", "alice")
+    output = _JsonFormatter().format(record)
+    assert '"user alice logged in"' in output
+
+
+def test_human_formatter_strips_crlf() -> None:
+    """CRLF in user-controlled content must not forge log lines (CWE-117)."""
+    record = _make_record("note: hello\r\nINJECTED")
+    output = _HumanFormatter("%(message)s").format(record)
+    assert "\r\n" not in output
+
+
+def test_json_formatter_strips_crlf() -> None:
+    record = _make_record("note: hello\r\nINJECTED")
+    output = _JsonFormatter().format(record)
+    assert "\r\n" not in output

@@ -1,0 +1,19 @@
+"""Document extraction endpoints."""
+
+from fastapi import APIRouter, UploadFile
+
+from app.services.extraction import extract_document
+
+router = APIRouter(tags=["documents"])
+
+
+@router.post("/documents/extract")
+async def extract(file: UploadFile) -> dict:
+    """Upload a file and extract its content using KAOS.
+
+    Supports PDF files. Returns document metadata and content summary.
+    """
+    content = await file.read()
+    filename = file.filename or "upload.pdf"
+    result = extract_document(content, filename)
+    return result

@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty type check
+        language: system
+        entry: uv run ty check
+        types: [python]
+        pass_filenames: false
+        require_serial: true

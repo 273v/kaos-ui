@@ -1,0 +1,15 @@
+{
+  "name": "single-user-chat",
+  "private": true,
+  "packageManager": "pnpm@11.1.0",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "install:ci": "pnpm install --frozen-lockfile",
+    "verify:deps": "pnpm audit signatures",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "test": "pnpm -r test"
+  }
+}

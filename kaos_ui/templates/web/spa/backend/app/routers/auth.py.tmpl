@@ -1,0 +1,75 @@
+"""Auth endpoints — bearer-from-cookie login/logout/me."""
+
+from __future__ import annotations
+
+import hmac
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel
+
+from app.deps import get_settings
+from app.settings import AppSettings
+
+router = APIRouter(tags=["auth"])
+
+
+class LoginRequest(BaseModel):
+    token: str
+
+
+class LoginResponse(BaseModel):
+    ok: bool
+
+
+@router.post("/login", response_model=LoginResponse)
+def login(
+    body: LoginRequest,
+    response: Response,
+    settings: Annotated[AppSettings, Depends(get_settings)],
+) -> LoginResponse:
+    if settings.auth_token is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "what": "Server is not configured for auth.",
+                "how_to_fix": "Set APP_AUTH_TOKEN in .env and restart.",
+                "alternative_tool": None,
+            },
+        )
+    expected = settings.auth_token.get_secret_value()
+    if not hmac.compare_digest(body.token, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "what": "Invalid token.",
+                "how_to_fix": "Check APP_AUTH_TOKEN in your .env.",
+                "alternative_tool": None,
+            },
+        )
+    response.set_cookie(
+        key=settings.cookie_name,
+        value=expected,
+        httponly=True,
+        samesite="lax",
+        # Only mark Secure in production — TestClient + dev both speak
+        # http:// and would otherwise drop the cookie.
+        secure=settings.env == "production",
+        path="/",
+    )
+    return LoginResponse(ok=True)
+
+
+@router.post("/logout")
+def logout(
+    response: Response,
+    settings: Annotated[AppSettings, Depends(get_settings)],
+) -> dict[str, bool]:
+    response.delete_cookie(key=settings.cookie_name, path="/")
+    return {"ok": True}
+
+
+@router.get("/me")
+def me() -> dict[str, str]:
+    """Validate the cookie (middleware already did this) and return a placeholder identity."""
+    return {"identity": "single-team", "scope": "all"}

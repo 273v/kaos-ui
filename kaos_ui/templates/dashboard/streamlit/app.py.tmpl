@@ -1,0 +1,66 @@
+"""{{KAOS_PROJECT_NAME}} entrypoint.
+
+Runs the auth gate, configures logging, builds the runtime singleton,
+and delegates to ``st.navigation`` for page routing.
+"""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from {{KAOS_PYTHON_MODULE}} import auth
+from {{KAOS_PYTHON_MODULE}}.logging_setup import configure
+from {{KAOS_PYTHON_MODULE}}.runtime import build_runtime
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+
+@st.cache_resource(ttl=3600, max_entries=1)
+def _runtime():
+    """The KaosRuntime singleton.
+
+    ``ttl`` and ``max_entries`` are explicit per Streamlit's cache
+    guidance — unbounded ``@st.cache_resource`` is the most common cause
+    of OOM in Streamlit deployments.
+    """
+    return build_runtime()
+
+
+def _settings() -> AppSettings:
+    if "settings" not in st.session_state:
+        st.session_state["settings"] = AppSettings()
+    return st.session_state["settings"]
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="{{KAOS_PROJECT_NAME}}",
+        page_icon="✨",
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
+    settings = _settings()
+    configure(settings)
+    # Make runtime available to pages.
+    st.session_state["runtime"] = _runtime()
+
+    auth.require(settings)
+
+    pages = [
+        st.Page("pages/chat.py", title="Chat", icon=":material/chat:", default=True),
+        st.Page("pages/upload.py", title="Upload", icon=":material/upload_file:"),
+        st.Page("pages/search.py", title="Search", icon=":material/search:"),
+        st.Page("pages/browse.py", title="Browse", icon=":material/folder:"),
+        st.Page("pages/settings.py", title="Settings", icon=":material/settings:"),
+    ]
+    nav = st.navigation(pages)
+
+    with st.sidebar:
+        st.caption("{{KAOS_PROJECT_NAME}}")
+        if st.button("Sign out", use_container_width=True):
+            auth.logout()
+            st.rerun()
+
+    nav.run()
+
+
+main()

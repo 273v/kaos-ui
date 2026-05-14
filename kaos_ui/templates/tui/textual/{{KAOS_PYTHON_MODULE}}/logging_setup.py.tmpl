@@ -1,0 +1,99 @@
+"""Logging setup for the TUI.
+
+Textual owns stdout/stderr while the app is running, so console-based
+logging would corrupt the rendered UI. We write structured JSON to a
+file (``settings.log_path``) instead.
+
+CWE-117 defense: every formatter strips embedded CR/LF from message
+text before emission. Otherwise an attacker who controls a logged
+value (e.g. a chat message) could forge fake log lines.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from logging.handlers import RotatingFileHandler
+
+from kaos_core.logging import get_logger
+
+from {{KAOS_PYTHON_MODULE}}.settings import AppSettings
+
+_CONFIGURED = False
+
+# LogRecord built-ins we never emit as user-extra keys. See kaos-ui
+# PATTERNS.md §Logging for the rationale.
+_RESERVED_LOGRECORD_KEYS = frozenset(
+    {
+        "args", "asctime", "created", "exc_info", "exc_text",
+        "filename", "funcName", "levelname", "levelno", "lineno",
+        "message", "module", "msecs", "msg", "name", "pathname",
+        "process", "processName", "relativeCreated", "stack_info",
+        "thread", "threadName", "taskName",
+    }
+)
+
+
+def _strip_crlf(value: object) -> object:
+    """Defeat CWE-117 log injection by stripping CR/LF from string values."""
+    if isinstance(value, str):
+        return value.replace("\r", "\\r").replace("\n", "\\n")
+    return value
+
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "name": record.name,
+            "msg": _strip_crlf(record.getMessage()),
+        }
+        for key, value in record.__dict__.items():
+            if key in _RESERVED_LOGRECORD_KEYS or key.startswith("_"):
+                continue
+            payload[key] = _strip_crlf(value)
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str, ensure_ascii=False)
+
+
+def configure(settings: AppSettings) -> None:
+    """Idempotent logging configuration. Call once at app start."""
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
+
+    settings.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    # Rotating file handler — TUI sessions can run for hours and chatty
+    # KAOS modules will fill a single file fast.
+    handler = RotatingFileHandler(
+        settings.log_path,
+        maxBytes=2_000_000,  # ~2 MB per file
+        backupCount=5,
+        encoding="utf-8",
+    )
+    handler.setFormatter(_JsonFormatter())
+    root.addHandler(handler)
+
+    # propagate=False on a kaos.* child to keep KAOS module logs from
+    # leaking into Textual's TextualHandler if it's wired (which would
+    # double-write everything to the dev console). The file handler
+    # above is the single source of truth for production log output.
+    kaos_root = logging.getLogger("kaos")
+    kaos_root.propagate = False
+    if not kaos_root.handlers:
+        kaos_root.addHandler(handler)
+
+    _CONFIGURED = True
+
+
+def app_logger(suffix: str) -> logging.Logger:
+    """``app_logger("chat")`` → ``kaos.app.{{KAOS_PROJECT_SLUG}}.chat``."""
+    return get_logger(f"kaos.app.{{KAOS_PROJECT_SLUG}}.{suffix}")

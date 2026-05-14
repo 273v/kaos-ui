@@ -1,0 +1,14 @@
+# CODEOWNERS — required reviewers for kaos-ui.
+* @mjbommar
+
+# Critical paths: high-blast-radius files that gate on owner review.
+/.github/   @mjbommar
+/pyproject.toml   @mjbommar
+*_version.py   @mjbommar
+/CHANGELOG.md   @mjbommar
+/LICENSE   @mjbommar
+/NOTICE   @mjbommar
+/SECURITY.md   @mjbommar
+
+# Templates are public-API surface: every change rides on the maintainer review.
+/kaos_ui/templates/   @mjbommar

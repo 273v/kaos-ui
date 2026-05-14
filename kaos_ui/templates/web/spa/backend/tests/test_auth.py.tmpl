@@ -1,0 +1,57 @@
+"""Auth flow + middleware tests."""
+
+from __future__ import annotations
+
+
+def test_login_with_correct_token(client) -> None:
+    response = client.post(
+        "/v1/auth/login",
+        json={"token": "test-token-do-not-use-in-prod"},
+    )
+    assert response.status_code == 200
+    # Cookie should be set on the response.
+    assert any("Set-Cookie" in k for k in response.headers) or response.cookies
+
+
+def test_login_with_wrong_token(client) -> None:
+    response = client.post("/v1/auth/login", json={"token": "wrong"})
+    assert response.status_code == 401
+
+
+def test_protected_route_requires_cookie(client) -> None:
+    response = client.get("/v1/documents")
+    assert response.status_code == 401
+
+
+def test_protected_route_with_valid_cookie(client) -> None:
+    login = client.post(
+        "/v1/auth/login",
+        json={"token": "test-token-do-not-use-in-prod"},
+    )
+    assert login.status_code == 200
+    # TestClient persists cookies across requests.
+    response = client.get("/v1/documents")
+    assert response.status_code == 200
+
+
+def test_logout_clears_cookie(client) -> None:
+    client.post("/v1/auth/login", json={"token": "test-token-do-not-use-in-prod"})
+    response = client.post("/v1/auth/logout")
+    assert response.status_code == 200
+    # After logout, follow-up protected requests must fail.
+    follow = client.get("/v1/documents")
+    assert follow.status_code == 401
+
+
+def test_origin_header_validation_rejects_non_allowlisted(client) -> None:
+    """State-changing requests from a non-allowlisted Origin are 403."""
+    client.post("/v1/auth/login", json={"token": "test-token-do-not-use-in-prod"})
+    response = client.post(
+        "/v1/uploads",
+        headers={"origin": "https://evil.example.com"},
+        files={"file": ("hi.txt", b"contents", "text/plain")},
+    )
+    assert response.status_code == 403
+    # Middleware returns raw JSONResponse (no FastAPI HTTPException wrapper).
+    body = response.json()
+    assert "Origin" in body.get("what", "")
