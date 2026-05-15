@@ -212,9 +212,124 @@ def augment_instructions(
     )
 
 
+# ── tool-group registration ────────────────────────────────────────
+
+
+# Prefix → group-name map. Evaluated in order; longer prefixes first so
+# ``kaos-core-vfs-`` matches before ``kaos-core-``. Tools that don't
+# match any prefix simply aren't grouped — they pass through any
+# ``SessionToolSet`` that has no ``allowed_groups`` set, but are
+# blocked when an allow-list is set. That's the desired UX: groups
+# are an opt-in narrowing layer over the unrestricted default.
+KAOS_TOOL_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("kaos-source-", "web"),
+    ("kaos-pdf-", "documents"),
+    ("kaos-office-parse-", "documents"),
+    ("kaos-content-", "documents"),
+    ("kaos-citations-", "citations"),
+    ("kaos-core-vfs-", "vfs"),
+    ("kaos-core-artifacts-", "vfs"),
+)
+
+# Per-group descriptions — surfaced into ``GET /v1/chat/categories``
+# and to the agent via the system prompt. Keep them short + LLM-
+# parseable so a planner Program (TR-5) can route on them.
+KAOS_TOOL_GROUP_DESCRIPTIONS: dict[str, str] = {
+    "web": (
+        "Live web access (Federal Register / eCFR / EDGAR / GovInfo / "
+        "GLEIF / generic URL fetch). Enable for research questions "
+        "about regulations, filings, or public records."
+    ),
+    "documents": (
+        "Parse uploaded PDF / DOCX / PPTX / XLSX files and search "
+        "their content. Enable when the user has uploaded files and "
+        "may ask about them."
+    ),
+    "citations": (
+        "Extract typed Bluebook / financial / accounting citations "
+        "from text. Enable for legal or financial analysis work."
+    ),
+    "vfs": (
+        "Browse and read files from the session's virtual filesystem. "
+        "Enable when the agent needs to confirm what's been uploaded "
+        "or read raw bytes alongside the parsed AST."
+    ),
+}
+
+
+def register_kaos_tool_groups(runtime: KaosRuntime) -> dict[str, int]:
+    """Partition runtime-registered tools into kaos-agents tool groups.
+
+    Discovers every tool currently registered on ``runtime`` (via
+    :func:`runtime.tools.list_tools`) and groups them by the prefix
+    map in :data:`KAOS_TOOL_GROUP_PREFIXES`. Each non-empty group is
+    registered (idempotent — uses ``force=True``) into
+    :data:`kaos_agents.registry.default_tool_group_registry` so that
+    :class:`SessionToolSet` + :func:`filter_tools` can narrow the
+    catalog per-session.
+
+    Call AFTER every tool-registration call has run (i.e. after
+    :func:`build_chat_runtime` AND after any caller-specific
+    ``register_<x>_tools`` invocations). Re-runs are safe — the
+    registry replaces existing entries with the same name.
+
+    Args:
+        runtime: The :class:`KaosRuntime` whose tool catalog should be
+            partitioned.
+
+    Returns:
+        ``{group_name: tool_count}`` for the groups that ended up with
+        at least one tool. Empty groups are omitted. Useful for log /
+        telemetry purposes when the caller wants to confirm the
+        partition matched what they expected.
+    """
+    try:
+        from kaos_agents.registry import (  # ty: ignore[unresolved-import]
+            default_tool_group_registry,
+        )
+        from kaos_agents.types import ToolGroup  # ty: ignore[unresolved-import]
+    except ImportError:
+        # kaos-agents not installed — caller is using kaos_ui.agents for
+        # other helpers (eg. build_chat_runtime) but doesn't want the
+        # ChatAgent surface. No-op.
+        logger.debug("kaos_agents not importable; skipping tool-group registration")
+        return {}
+
+    tool_names = list(runtime.tools.list_tools())
+    by_group: dict[str, list[str]] = {g: [] for g in KAOS_TOOL_GROUP_DESCRIPTIONS}
+    for name in tool_names:
+        for prefix, group in KAOS_TOOL_GROUP_PREFIXES:
+            if name.startswith(prefix):
+                by_group[group].append(name)
+                break
+
+    counts: dict[str, int] = {}
+    for group_name, group_tools in by_group.items():
+        if not group_tools:
+            continue
+        default_tool_group_registry.register(
+            ToolGroup(
+                name=group_name,
+                description=KAOS_TOOL_GROUP_DESCRIPTIONS[group_name],
+                tool_names=tuple(sorted(group_tools)),
+            ),
+            force=True,
+        )
+        counts[group_name] = len(group_tools)
+    logger.info(
+        "registered %d kaos tool groups: %s",
+        len(counts),
+        ", ".join(f"{g}={n}" for g, n in counts.items()),
+    )
+    return counts
+
+
 __all__ = [
+    "KAOS_TOOL_GROUP_DESCRIPTIONS",
+    "KAOS_TOOL_GROUP_PREFIXES",
     "NO_TOOLS_PATTERN",
     "augment_instructions",
     "build_chat_runtime",
     "install_tool_bridge_runtime_patch",
+    "register_kaos_tool_groups",
 ]

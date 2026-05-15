@@ -24,8 +24,11 @@ _kaos_agents = pytest.importorskip(
 )
 
 from kaos_ui.agents import (  # noqa: E402 — depends on the skip above
+    KAOS_TOOL_GROUP_DESCRIPTIONS,
+    KAOS_TOOL_GROUP_PREFIXES,
     build_chat_runtime,
     install_tool_bridge_runtime_patch,
+    register_kaos_tool_groups,
 )
 
 
@@ -99,3 +102,102 @@ def test_build_chat_runtime_without_extras(tmp_path: Path) -> None:
     assert all(not name.startswith("kaos-pdf-") for name in names)
     assert all(not name.startswith("kaos-office-") for name in names)
     assert all(not name.startswith("kaos-content-") for name in names)
+
+
+# ── tool-group registration (TR-1) ───────────────────────────────────
+
+
+def test_tool_group_prefix_table_is_well_formed() -> None:
+    """Each prefix maps to a known group, and longer prefixes precede
+    shorter ones so ``kaos-core-vfs-`` wins over a hypothetical
+    ``kaos-core-`` catchall."""
+    for prefix, group in KAOS_TOOL_GROUP_PREFIXES:
+        assert prefix.startswith("kaos-")
+        assert prefix.endswith("-")
+        assert group in KAOS_TOOL_GROUP_DESCRIPTIONS, (
+            f"prefix {prefix} -> {group} but group has no description"
+        )
+
+    # Order check: any longer prefix that shares a stem with a shorter
+    # one must appear FIRST so ``startswith`` matches the more specific
+    # group. The current table has kaos-core-vfs- before kaos-core- (if
+    # the catchall ever returns); guard so the discipline is preserved.
+    seen: list[str] = []
+    for prefix, _ in KAOS_TOOL_GROUP_PREFIXES:
+        for earlier in seen:
+            assert not earlier.startswith(prefix), (
+                f"prefix {prefix} is a stem of earlier {earlier}; reorder"
+            )
+        seen.append(prefix)
+
+
+def test_register_kaos_tool_groups_partitions_kaos_core_tools(tmp_path: Path) -> None:
+    """A runtime with only kaos-core registered should land its vfs +
+    artifact tools in the ``vfs`` group and no others."""
+    from kaos_agents.registry import default_tool_group_registry  # ty: ignore[unresolved-import]
+
+    default_tool_group_registry.clear()  # isolate from prior state
+    runtime, _ = build_chat_runtime(
+        vfs_path=tmp_path / "vfs",
+        register_extras=False,
+        install_bridge_patch=False,
+    )
+    counts = register_kaos_tool_groups(runtime)
+
+    # kaos-core registers kaos-core-vfs-* + kaos-core-artifacts-* —
+    # those should all land in `vfs`. `web`, `documents`, `citations`
+    # remain empty and must be omitted from counts (not zero-entries).
+    assert "vfs" in counts
+    assert counts["vfs"] >= 1
+    assert "web" not in counts
+    assert "documents" not in counts
+    assert "citations" not in counts
+
+    vfs_group = default_tool_group_registry.get("vfs")
+    assert vfs_group is not None
+    assert all(
+        name.startswith("kaos-core-vfs-") or name.startswith("kaos-core-artifacts-")
+        for name in vfs_group.tool_names
+    )
+
+
+def test_register_kaos_tool_groups_is_idempotent(tmp_path: Path) -> None:
+    """Re-running picks up newly-registered tools and never raises on
+    name collision (force=True path)."""
+    from kaos_agents.registry import default_tool_group_registry  # ty: ignore[unresolved-import]
+
+    default_tool_group_registry.clear()
+    runtime, _ = build_chat_runtime(
+        vfs_path=tmp_path / "vfs",
+        register_extras=True,  # pdf/office/content -> documents
+        install_bridge_patch=False,
+    )
+    first = register_kaos_tool_groups(runtime)
+    # Re-run must not raise even though groups are already registered.
+    second = register_kaos_tool_groups(runtime)
+    assert first == second
+
+
+def test_register_kaos_tool_groups_groups_documents(tmp_path: Path) -> None:
+    """kaos-pdf / kaos-office-parse / kaos-content all land in the
+    same `documents` group, so user-facing `enable documents` is a
+    single decision."""
+    from kaos_agents.registry import default_tool_group_registry  # ty: ignore[unresolved-import]
+
+    default_tool_group_registry.clear()
+    runtime, names = build_chat_runtime(
+        vfs_path=tmp_path / "vfs",
+        register_extras=True,
+        install_bridge_patch=False,
+    )
+    register_kaos_tool_groups(runtime)
+    docs = default_tool_group_registry.get("documents")
+    assert docs is not None
+    # Documents group should contain at least one tool from each of
+    # the three document-handling modules when they're installed.
+    # We don't hard-pin counts because the upstream catalogs evolve;
+    # we just verify the membership invariant.
+    if any(n.startswith("kaos-pdf-") for n in names):
+        assert any(t.startswith("kaos-pdf-") for t in docs.tool_names)
+    if any(n.startswith("kaos-content-") for n in names):
+        assert any(t.startswith("kaos-content-") for t in docs.tool_names)
