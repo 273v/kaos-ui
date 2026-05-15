@@ -59,6 +59,13 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
+# Dev-local KAOS source overrides. Use these when iterating on a tool
+# schema fix or kaos-agents change before the package ships to PyPI.
+# Remove (or comment out) the override once the upstream release lands.
+[tool.uv.sources]
+kaos-core = { path = "../../../../kaos-core", editable = true }
+kaos-pdf = { path = "../../../../kaos-pdf", editable = true }
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]

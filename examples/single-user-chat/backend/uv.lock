@@ -330,16 +330,46 @@ markdown = [
 
 [[package]]
 name = "kaos-core"
-version = "0.1.0a6"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../../../../kaos-core" }
 dependencies = [
     { name = "click" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/c4/8ccd8268d82261a0060a78cde7b0410ec35314819835b332ff0fa4d609ee/kaos_core-0.1.0a6.tar.gz", hash = "sha256:57969c31dd2cf5529da762d0c7e83de4f07778186732e3d24686dc446be60df6", size = 166130, upload-time = "2026-05-11T21:23:33.041Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/5e/d1b4c8c11c1205aea7c7e011c37d665a65b3e0133677e3c7acc0a84c8732/kaos_core-0.1.0a6-py3-none-any.whl", hash = "sha256:4bc5b1aa4138ef46163a1af2a48daabea8772eec234b5381b0a7cc310c01befb", size = 132756, upload-time = "2026-05-11T21:23:31.729Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.8" },
+    { name = "cryptography", marker = "extra == 'encrypted-store'", specifier = ">=44" },
+    { name = "cryptography", marker = "extra == 'hardened'", specifier = ">=44" },
+    { name = "httpx", marker = "extra == 'hardened'", specifier = ">=0.28" },
+    { name = "httpx", marker = "extra == 'oauth'", specifier = ">=0.28" },
+    { name = "jeepney", marker = "sys_platform == 'linux' and extra == 'hardened'", specifier = ">=0.9" },
+    { name = "jeepney", marker = "sys_platform == 'linux' and extra == 'keyring'", specifier = ">=0.9" },
+    { name = "keyring", marker = "extra == 'hardened'", specifier = ">=25.7" },
+    { name = "keyring", marker = "extra == 'keyring'", specifier = ">=25.7" },
+    { name = "pydantic", specifier = ">=2.11.0" },
+    { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'windows-secure'", specifier = ">=308" },
+    { name = "secretstorage", marker = "sys_platform == 'linux' and extra == 'hardened'", specifier = ">=3.4" },
+    { name = "secretstorage", marker = "sys_platform == 'linux' and extra == 'keyring'", specifier = ">=3.4" },
+]
+provides-extras = ["encrypted-store", "hardened", "keyring", "oauth", "windows-secure"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "cryptography", specifier = ">=44" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "jeepney", marker = "sys_platform == 'linux'", specifier = ">=0.9" },
+    { name = "keyring", specifier = ">=25.7" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-benchmark", specifier = ">=5.1.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=308" },
+    { name = "ruff", specifier = ">=0.15.12" },
+    { name = "secretstorage", marker = "sys_platform == 'linux'", specifier = ">=3.4" },
+    { name = "ty", specifier = ">=0.0.34,<0.1" },
 ]
 
 [[package]]
@@ -418,16 +448,34 @@ wheels = [
 
 [[package]]
 name = "kaos-pdf"
-version = "0.1.0a2"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../../../../kaos-pdf" }
 dependencies = [
     { name = "kaos-content", extra = ["images", "layout", "markdown"] },
     { name = "kaos-core" },
     { name = "pypdfium2" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/85/f2/dee3b93e4b407a5f4c2de14ab7ec0aa47c42ef1c3a0114f9a3c1b2584958/kaos_pdf-0.1.0a2.tar.gz", hash = "sha256:5f7ef5da746d93358e7438495de400609f1b82165c64e7383b417d1ee4d9e801", size = 61301, upload-time = "2026-05-08T12:43:10.191Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/19/993ebcf2aef590bb6388315a98f5d309dd861e12c714875453ac8d88e899/kaos_pdf-0.1.0a2-py3-none-any.whl", hash = "sha256:e880e1886291331acf68f4b562e7a42c7eae93d06f320735d4baabc8cccb68d6", size = 65441, upload-time = "2026-05-08T12:43:08.689Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "kaos-content", extras = ["images", "layout", "markdown"], specifier = ">=0.1.0a1,<0.2" },
+    { name = "kaos-core", specifier = ">=0.1.0a3,<0.2" },
+    { name = "kaos-nlp-core", marker = "extra == 'nlp'", specifier = ">=0.1.0a2,<0.2" },
+    { name = "pdfplumber", marker = "extra == 'tables'", specifier = ">=0.11.0" },
+    { name = "pypdfium2", specifier = ">=4.30.0" },
+    { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
+]
+provides-extras = ["nlp", "ocr", "tables"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "kaos-nlp-core", specifier = ">=0.1.0a2,<0.2" },
+    { name = "pdfplumber", specifier = ">=0.11.0" },
+    { name = "pytesseract", specifier = ">=0.3.10" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "ruff", specifier = ">=0.15.12" },
+    { name = "ty", specifier = ">=0.0.34,<0.1" },
 ]
 
 [[package]]
@@ -969,11 +1017,11 @@ requires-dist = [
     { name = "kaos-agents", specifier = ">=0.1.0a1,<0.2" },
     { name = "kaos-citations", specifier = ">=0.1.0a2,<0.2" },
     { name = "kaos-content", extras = ["markdown"], specifier = ">=0.1.0a6,<0.2" },
-    { name = "kaos-core", specifier = ">=0.1.0a6,<0.2" },
+    { name = "kaos-core", editable = "../../../../kaos-core" },
     { name = "kaos-llm-client", specifier = ">=0.1.0a3,<0.2" },
     { name = "kaos-llm-core", specifier = ">=0.1.0a7,<0.2" },
     { name = "kaos-office", specifier = ">=0.1.0a2,<0.2" },
-    { name = "kaos-pdf", specifier = ">=0.1.0a2,<0.2" },
+    { name = "kaos-pdf", editable = "../../../../kaos-pdf" },
     { name = "kaos-source", specifier = ">=0.1.0a3,<0.2" },
     { name = "kaos-ui", specifier = ">=0.1.0a1,<0.2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
