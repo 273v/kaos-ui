@@ -13,3 +13,4 @@ export { CitationsPanel } from "./CitationsPanel.js";
 export { DocumentExplorer } from "./DocumentExplorer.js";
 export { ModelPicker } from "./ModelPicker.js";
 export type { ModelEntry } from "./ModelPicker.js";
+export { ToolPolicyBadge } from "./ToolPolicyBadge.js";

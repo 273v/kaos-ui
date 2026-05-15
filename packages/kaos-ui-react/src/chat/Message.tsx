@@ -16,6 +16,7 @@ import { useMemo } from "react";
 import type { ChatMessage } from "../lib/chat-state.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
+import { ToolPolicyBadge } from "./ToolPolicyBadge.js";
 import { UsageChip } from "./UsageChip.js";
 
 interface Props {
@@ -55,6 +56,10 @@ export function Message({ message, verboseTools = false }: Props) {
           {roleLabel}
         </span>
       </header>
+
+      {isAssistant && message.tool_policy && (
+        <ToolPolicyBadge policy={message.tool_policy} />
+      )}
 
       <div
         className={`kaos-md max-w-none leading-relaxed ${isAssistant ? "" : "whitespace-pre-wrap "}${isError ? "text-destructive" : "text-foreground"}`}
