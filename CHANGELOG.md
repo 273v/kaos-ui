@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Tool registry + dynamic per-turn policy (TR-1..TR-13)
+
+A complete tool-policy stack covering registry, ceiling enforcement,
+per-turn narrowing, and transparency. The single `tools_enabled: bool`
+toggle (now derived) is superseded by a per-category ceiling + a
+Haiku-class planner Program that picks the smallest set for each turn.
+
+- **`kaos_ui.agents.register_kaos_tool_groups(runtime)`** partitions
+  every registered KAOS tool into `kaos_agents` ToolGroups by name
+  prefix: `web` (kaos-source-*), `documents` (kaos-pdf-*,
+  kaos-office-parse-*, kaos-content-*), `citations` (kaos-citations-*),
+  `vfs` (kaos-core-vfs-*, kaos-core-artifacts-*). The single-user-chat
+  example calls this after every `register_*_tools` so the proxy
+  filter resolves SessionToolSet against a populated registry.
+- **`SessionMeta.tool_set: SessionToolSetWire`** in
+  `examples/single-user-chat`. Pydantic shape:
+  `{allowed_groups: list[str], denied_tools: list[str], auto_narrow:
+  bool}`. Legacy meta sidecars with only `tools_enabled: bool`
+  migrate at load time. Default ceiling = documents+citations+vfs;
+  web is opt-in. `tools_enabled` becomes a `@computed_field` derived
+  view for back-compat.
+- **`GET /v1/chat/categories`** + **`PATCH /v1/chat/sessions/:id/tool-set`**
+  routes in `examples/single-user-chat`. Unknown groups 422 with
+  the offending names so the SPA can surface inline.
+- **`TurnToolPolicy` Program** (single-user-chat,
+  `app/services/turn_tool_policy.py`) runs before each tool-able turn,
+  narrows the ceiling to just this message's needed groups via a
+  Haiku kaos-llm-core Call. Cost ≤ $0.0002/turn, latency p95 ≤ 300ms.
+  Confidence < 0.6 → falls back to ceiling. Promotes to
+  `kaos_agents.planning.policy` after two release windows.
+- **`tool_policy_decided` SSE event** in `@273v/kaos-ui-react`'s
+  taxonomy (kaos-ui extension — not yet stock kaos-agents).
+- **`<ToolPolicyBadge>`** in `@273v/kaos-ui-react/chat` renders a
+  per-turn transparency chip above the assistant message with the
+  planner's reasoning, confidence, cost, and latency on click.
+- **`<SettingsSheet>` Tool policy section** in the single-user-chat
+  SPA: per-category checkboxes + preset picker + auto-narrow toggle.
+  Replaces the legacy "Enable read-only tools" single checkbox.
+- **`<CostStrip>` Planner row** in `@273v/kaos-ui-react/debug`
+  attributes planner cost separately when `tool_policy_decided`
+  fires with non-zero cost.
+
+Tests:
+- 7 unit tests for SessionMeta migration (single-user-chat).
+- 7 unit tests for the TurnToolPolicy Program (single-user-chat).
+- 8 integration tests for the new HTTP routes (single-user-chat).
+- 4 live integration tests for ceiling + planner end-to-end behavior
+  (Anthropic-key gated, `pytest.mark.live`).
+- 12 unit tests for `kaos-agents` ReAct schema-recovery (FIX-16).
+- 4 vitest tests for the new SSE event in the package.
+- 6 vitest tests for `<ToolPolicyBadge>`.
+- 4 vitest tests for the `<CostStrip>` planner row.
+- 7 vitest tests for the SettingsSheet Tool policy section.
+
 ### Added — `@273v/kaos-ui-react` 0.1.0-alpha.0 (npm)
 
 The React companion package now lives at

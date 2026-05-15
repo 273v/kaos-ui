@@ -338,7 +338,57 @@ Note env literal: `"development"` not `"dev"`, matching the template (verified a
 
 We do **not** redeclare `KAOS_AGENTS_API_TOKEN`, CORS origins, etc. — they live in kaos-agents' own settings (`KaosAgentsAPISettings`). `.env.example` documents both blocks side by side.
 
-### 4.3 The chat proxy router
+### 4.3 Tool policy — registry + per-session ceiling + per-turn planner
+
+The example demonstrates **two layers** of tool gating on top of
+kaos-agents:
+
+```
+SettingsSheet (TR-8)
+  ├─ PATCH /v1/chat/sessions/:id/tool-set        (TR-4)
+  │     ↓
+  │  SessionMeta.tool_set  (TR-3, persisted)
+  │  { allowed_groups, denied_tools, auto_narrow }
+  │     ↓
+  │  (read at every turn)
+  │     ↓
+TurnToolPolicy Program  (TR-5, optional per-turn narrowing)
+  ↓
+  effective_tool_set = ceiling ∩ planner_groups
+  ↓
+filter_tools(runtime.tools, SessionToolSet)       (TR-2)
+  ↓
+kaos-agents Runner sees ONLY the narrowed catalog
+  ↓
+tool_policy_decided SSE event           (TR-7, transparency)
+  ↓
+<ToolPolicyBadge> above the assistant message  (TR-9)
++ <CostStrip> "Planner" row             (TR-10)
+```
+
+Tool groups are partitioned by kaos-ui's
+`register_kaos_tool_groups(runtime)` (TR-1) which runs at app
+startup after every `register_*_tools` call. The four shipped
+groups (`web`, `documents`, `citations`, `vfs`) live in
+`kaos_agents.registry.default_tool_group_registry` so that
+`kaos_agents.context.filter_tools` can resolve a SessionToolSet
+against them.
+
+The `auto_narrow` planner (TR-5) is a single kaos-llm-core
+`Call` (Haiku by default, configurable via `APP_TURN_POLICY_MODEL`).
+Cost target ≤ $0.0002/turn, latency p95 ≤ 300ms; the planner
+abdicates to the full ceiling when its confidence is below 0.6
+(`APP_TURN_POLICY_CONFIDENCE_THRESHOLD`). Refusing to narrow is
+always safe — false narrowing wastes a turn, false broadening
+costs at most a few cents of prompt tokens.
+
+The `denied_tools` floor in SessionToolSetWire is the security
+boundary — write tools (`kaos-office-write-*`) are never bridged,
+even when the user enables every group. Promotion of this Program
+into `kaos_agents.planning.policy` is the followup; until then
+the example carries the lone implementation.
+
+### 4.4 The chat proxy router
 
 ```python
 # backend/app/routers/chat.py
@@ -393,7 +443,7 @@ async def transcript(sid: str, format: Literal["markdown", "json"] = "markdown",
     ...
 ```
 
-### 4.4 Stream service
+### 4.5 Stream service
 
 ```python
 # backend/app/services/stream_proxy.py
