@@ -66,6 +66,7 @@ packages = ["app"]
 kaos-core = { path = "../../../../kaos-core", editable = true }
 kaos-pdf = { path = "../../../../kaos-pdf", editable = true }
 kaos-agents = { path = "../../../../kaos-agents", editable = true }
+kaos-ui = { path = "../../..", editable = true }
 
 [tool.pytest.ini_options]
 minversion = "8.0"

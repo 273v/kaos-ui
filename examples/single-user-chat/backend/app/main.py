@@ -69,7 +69,18 @@ def create_app(settings: AppSettings | None = None):
         register_source_tools(runtime)
     tool_names = tuple(sorted(runtime.tools.list_tools()))
 
-    logger.info("registered %d kaos tools on runtime", len(tool_names))
+    # TR-1 + TR-2: partition the now-complete catalog into kaos-agents
+    # ToolGroups (web / documents / citations / vfs). SessionMeta.tool_set
+    # uses these group names; the stream_proxy resolves the per-session
+    # ceiling against the same registry.
+    from kaos_ui.agents import register_kaos_tool_groups
+
+    group_counts = register_kaos_tool_groups(runtime)
+    logger.info(
+        "registered %d kaos tools on runtime; groups=%s",
+        len(tool_names),
+        ", ".join(f"{g}={n}" for g, n in group_counts.items()) if group_counts else "(none)",
+    )
 
     app = create_agent_app(runtime=runtime)
 

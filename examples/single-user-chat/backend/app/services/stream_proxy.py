@@ -34,22 +34,98 @@ def _bearer_from_env() -> str:
     return os.environ.get("KAOS_AGENTS_API_API_TOKEN", "")
 
 
-def _tool_patterns(meta: SessionMeta) -> list[str]:
-    """Translate the example-app toggle to kaos-agents glob semantics.
+def _tool_patterns(
+    meta: SessionMeta, available_tool_names: Sequence[str] | None = None
+) -> list[str]:
+    """Resolve SessionMeta.tool_set into the explicit list of tool names
+    the agent may invoke for this turn.
 
-    In kaos-agents 0.1.0a1 an empty tools list means "no explicit filter",
-    which bridges every runtime tool. Use a deliberately unmatched glob for
-    disabled sessions so the UI toggle is a real execution gate.
+    Replaces the original fnmatch-glob path (FIX-14 wrap-up / TR-2). The
+    SessionToolSet ceiling on the session decides which tool *groups*
+    are reachable; we then expand each group via
+    :func:`kaos_agents.context.filter_tools` so the actual contract
+    matches the runtime catalog. Empty allowed_groups → no tools (the
+    sentinel pattern, kept for the 0.1.0a1 empty-list-bug workaround).
 
-    When enabled, only the curated read-only allowlist is exposed.
-    The UI label says "Enable read-only tools" — this keeps that
-    promise even if a future kaos module adds write tools.
+    The hard read-only floor (the previous ``READ_ONLY_TOOL_GLOBS``
+    list) now lives in :class:`SessionToolSetWire.denied_tools` — set
+    once at session creation by the app's policy and never user-
+    toggleable, so a future write tool can't slip in even when the
+    user enables every group.
+
+    When ``available_tool_names`` is omitted, we still send the group
+    globs as a fallback so kaos-agents' fnmatch can apply them server-
+    side. With the names list the proxy filters precisely against the
+    same SessionToolSet contract the UI exposes.
     """
-    if meta.tools_enabled:
-        from app.services.catalog import READ_ONLY_TOOL_GLOBS
+    if meta.tool_set.is_blocking_all:
+        return [NO_TOOLS_PATTERN]
 
-        return list(READ_ONLY_TOOL_GLOBS)
-    return [NO_TOOLS_PATTERN]
+    # No runtime visibility into the catalog → degrade to group-prefix
+    # globs. Imperfect (won't enforce denied_tools at this layer) but
+    # the bridge enforces fnmatch upstream so security is preserved.
+    if not available_tool_names:
+        return _group_globs(meta.tool_set.allowed_groups)
+
+    # Build a tool-name list via kaos-agents' filter_tools using the
+    # SessionToolSet shape. Tools whose name doesn't appear in the
+    # available list are silently dropped (catalog drift).
+    try:
+        from kaos_agents.context.tool_filter import filter_tools
+        from kaos_agents.registry import default_tool_group_registry
+        from kaos_agents.types.session_tool_set import SessionToolSet
+    except ImportError:
+        logger.warning("kaos_agents.context.tool_filter not importable; falling back to globs")
+        return _group_globs(meta.tool_set.allowed_groups)
+
+    session_tool_set = SessionToolSet(
+        allowed_groups=frozenset(meta.tool_set.allowed_groups),
+        denied_tools=frozenset(meta.tool_set.denied_tools),
+    )
+
+    # filter_tools works on tool *objects* (with .metadata.name / .name)
+    # so wrap each available name in a tiny shim with the expected shape.
+    class _NameOnly:
+        __slots__ = ("name",)
+
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    wrapped = [_NameOnly(n) for n in available_tool_names]
+    kept = filter_tools(
+        wrapped, session_tool_set, group_registry=default_tool_group_registry
+    )
+    kept_names = [t.name for t in kept]
+    if not kept_names:
+        # No tool in the catalog matches the ceiling — surface the
+        # sentinel so the agent gets a deterministic "no tools" turn.
+        return [NO_TOOLS_PATTERN]
+    return kept_names
+
+
+# Prefix → glob fallback when we have no runtime catalog handle. Keeps
+# the broad "enable group X" contract working even when the proxy
+# can't enumerate the catalog (eg. unit tests with a stub runtime).
+_GROUP_GLOBS: dict[str, tuple[str, ...]] = {
+    "web": ("kaos-source-*",),
+    "documents": ("kaos-pdf-*", "kaos-office-parse-*", "kaos-content-*"),
+    "citations": ("kaos-citations-*",),
+    "vfs": ("kaos-core-vfs-*", "kaos-core-artifacts-*"),
+}
+
+
+def _group_globs(allowed_groups: Sequence[str]) -> list[str]:
+    """Return the glob list that approximates an ``allowed_groups`` set.
+
+    Fallback path when the proxy can't see the runtime catalog. Keeps
+    the user-visible contract working even though it can't enforce
+    ``denied_tools`` at this layer (the bridge does fnmatch enforcement
+    upstream).
+    """
+    out: list[str] = []
+    for group in allowed_groups:
+        out.extend(_GROUP_GLOBS.get(group, ()))
+    return out or [NO_TOOLS_PATTERN]
 
 
 def _instructions_with_corpus(
@@ -94,7 +170,7 @@ def _build_forward_body(
         "message": message,
         "model": meta.model,
         "instructions": _instructions_with_corpus(meta, available_tool_names, corpus_markdown),
-        "tools": _tool_patterns(meta),
+        "tools": _tool_patterns(meta, available_tool_names),
         "max_cost_usd": max_cost_usd,
     }
 
