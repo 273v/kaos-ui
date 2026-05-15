@@ -34,8 +34,22 @@ def _bearer_from_env() -> str:
     return os.environ.get("KAOS_AGENTS_API_API_TOKEN", "")
 
 
+def _effective_tool_set(meta: SessionMeta, override: object | None) -> object:
+    """Return the tool-set the proxy should enforce for this turn.
+
+    When ``override`` is non-None (set by the TR-6 planner after a
+    successful TurnToolPolicy call), use it. Otherwise fall back to
+    ``meta.tool_set`` (the ceiling). Returns the underlying
+    ``SessionToolSetWire`` shape — the per-turn override and the
+    persistent ceiling share that type.
+    """
+    return override if override is not None else meta.tool_set
+
+
 def _tool_patterns(
-    meta: SessionMeta, available_tool_names: Sequence[str] | None = None
+    meta: SessionMeta,
+    available_tool_names: Sequence[str] | None = None,
+    tool_set_override: object | None = None,
 ) -> list[str]:
     """Resolve SessionMeta.tool_set into the explicit list of tool names
     the agent may invoke for this turn.
@@ -58,14 +72,15 @@ def _tool_patterns(
     side. With the names list the proxy filters precisely against the
     same SessionToolSet contract the UI exposes.
     """
-    if meta.tool_set.is_blocking_all:
+    tool_set = _effective_tool_set(meta, tool_set_override)
+    if tool_set.is_blocking_all:
         return [NO_TOOLS_PATTERN]
 
     # No runtime visibility into the catalog → degrade to group-prefix
     # globs. Imperfect (won't enforce denied_tools at this layer) but
     # the bridge enforces fnmatch upstream so security is preserved.
     if not available_tool_names:
-        return _group_globs(meta.tool_set.allowed_groups)
+        return _group_globs(tool_set.allowed_groups)
 
     # Build a tool-name list via kaos-agents' filter_tools using the
     # SessionToolSet shape. Tools whose name doesn't appear in the
@@ -79,8 +94,8 @@ def _tool_patterns(
         return _group_globs(meta.tool_set.allowed_groups)
 
     session_tool_set = SessionToolSet(
-        allowed_groups=frozenset(meta.tool_set.allowed_groups),
-        denied_tools=frozenset(meta.tool_set.denied_tools),
+        allowed_groups=frozenset(tool_set.allowed_groups),
+        denied_tools=frozenset(tool_set.denied_tools),
     )
 
     # filter_tools works on tool *objects* (with .metadata.name / .name)
@@ -165,12 +180,13 @@ def _build_forward_body(
     *,
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
+    tool_set_override: object | None = None,
 ) -> dict[str, Any]:
     return {
         "message": message,
         "model": meta.model,
         "instructions": _instructions_with_corpus(meta, available_tool_names, corpus_markdown),
-        "tools": _tool_patterns(meta, available_tool_names),
+        "tools": _tool_patterns(meta, available_tool_names, tool_set_override),
         "max_cost_usd": max_cost_usd,
     }
 
@@ -184,6 +200,7 @@ async def stream_chat(
     max_cost_usd: float,
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
+    tool_set_override: object | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Yield `{event, data}` records ready for `sse_starlette`.
 
@@ -197,6 +214,7 @@ async def stream_chat(
         max_cost_usd,
         available_tool_names=available_tool_names,
         corpus_markdown=corpus_markdown,
+        tool_set_override=tool_set_override,
     )
     headers = {
         "Authorization": f"Bearer {bearer_token}",

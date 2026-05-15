@@ -329,22 +329,63 @@ async def send_message(
 
     available_tool_names: tuple[str, ...]
     if meta.tools_enabled and runtime is not None:
-        # Filter the runtime's tool surface by the read-only allowlist
-        # before telling the agent about it. The proxy also passes the
-        # same allowlist as `tools` so kaos-agents enforces the gate —
-        # this catalog is defense-in-depth on the prompt side.
-        import fnmatch
-
-        from app.services.catalog import READ_ONLY_TOOL_GLOBS
-
-        all_names = sorted(runtime.tools.list_tools())
-        available_tool_names = tuple(
-            name
-            for name in all_names
-            if any(fnmatch.fnmatchcase(name, glob) for glob in READ_ONLY_TOOL_GLOBS)
-        )
+        # Names of every tool currently registered. The proxy applies
+        # the SessionToolSet filter (TR-2) to this list; we also pass
+        # it through to `augment_instructions` so the system prompt
+        # tells the agent what's available. The TR-6 planner narrows
+        # this further below.
+        available_tool_names = tuple(sorted(runtime.tools.list_tools()))
     else:
         available_tool_names = ()
+
+    # TR-6: when auto_narrow is on, run the TurnToolPolicy planner to
+    # narrow this turn's tool set within the ceiling. Result is a
+    # per-turn `tool_set_override` handed to stream_chat. Emitting the
+    # decision as an SSE event happens below (in event_generator) so
+    # the SPA can render a transparency badge.
+    from app.models import SessionToolSetWire
+    from app.services.turn_tool_policy import TurnToolPolicy, plan_turn_tool_policy
+
+    tool_policy_event: TurnToolPolicy | None = None
+    effective_tool_set: SessionToolSetWire | None = None
+    if meta.tools_enabled and meta.tool_set.auto_narrow:
+        # Build the planner inputs — corpus headlines + recent turns
+        # compressed to one line each so the planner sees enough to
+        # route without ballooning prompt cost.
+        if runtime is not None:
+            try:
+                from app.services.uploads import list_session_files
+
+                metas = await list_session_files(runtime=runtime, session_id=session_id)
+                corpus_headlines = "\n".join(
+                    f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
+                    for m in metas
+                )
+            except Exception:
+                corpus_headlines = ""
+        else:
+            corpus_headlines = ""
+        try:
+            tool_policy_event = await plan_turn_tool_policy(
+                user_message=body.message,
+                recent_turns="",  # TR-6 keeps history empty; TR-13 docs deeper context
+                corpus_headlines=corpus_headlines,
+                ceiling_groups=list(meta.tool_set.allowed_groups),
+                available_groups=list(meta.tool_set.allowed_groups),
+            )
+            # Intersect ceiling with planner choice — already done inside
+            # the planner, but compose a fresh SessionToolSetWire for the
+            # proxy that pins this turn's narrowed groups + keeps the
+            # session's denied_tools floor.
+            effective_tool_set = SessionToolSetWire(
+                allowed_groups=sorted(tool_policy_event.turn_groups),
+                denied_tools=list(meta.tool_set.denied_tools),
+                auto_narrow=False,  # already narrowed for this turn
+            )
+        except Exception:
+            logger.exception("turn-policy planner failed; using ceiling")
+            tool_policy_event = None
+            effective_tool_set = None
 
     # First turn auto-derives a title from the user message so the
     # sidebar isn't a sea of "Untitled".
@@ -365,6 +406,26 @@ async def send_message(
     turn_index = meta.message_count // 2
 
     async def event_generator():
+        # TR-7 wire: emit ToolPolicyDecided before the first kaos-agents
+        # event so the SPA sees the narrowing decision before any tool
+        # call lands. Always emitted when the planner ran, even if it
+        # fell back to the ceiling — that itself is information.
+        if tool_policy_event is not None:
+            yield {
+                "event": "tool_policy_decided",
+                "data": json.dumps(
+                    {
+                        "type": "tool_policy_decided",
+                        "turn_groups": sorted(tool_policy_event.turn_groups),
+                        "ceiling_groups": list(meta.tool_set.allowed_groups),
+                        "reasoning": tool_policy_event.reasoning,
+                        "confidence": tool_policy_event.confidence,
+                        "fell_back_to_ceiling": tool_policy_event.fell_back_to_ceiling,
+                        "cost_usd": tool_policy_event.cost_usd,
+                        "latency_ms": tool_policy_event.latency_ms,
+                    }
+                ),
+            }
         try:
             async for evt in stream_chat(
                 client=upstream,
@@ -374,6 +435,7 @@ async def send_message(
                 max_cost_usd=settings.turn_budget_usd,
                 available_tool_names=available_tool_names,
                 corpus_markdown=corpus_markdown,
+                tool_set_override=effective_tool_set,
             ):
                 # Best-effort tap: parsing failures must not corrupt the
                 # stream. The recorder ignores events it doesn't know.
