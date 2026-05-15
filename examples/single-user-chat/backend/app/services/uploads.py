@@ -466,14 +466,35 @@ async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[F
     return out
 
 
-_PER_FILE_PROMPT_BUDGET = 4000
+# Per-file inline budget for the chat-context corpus. Sized for Haiku
+# 4.5's 200k-token window: we reserve ~30k tokens for the prompt +
+# response headroom, leaving ~170k tokens (~680k chars) for the corpus.
+# With a typical legal upload mix (≤ 20 files), 40k chars/file gives
+# the agent enough of each document to actually answer "what does this
+# say about Georgia?" — the prior 4k cap was barely a single page and
+# was the reason the agent kept apologizing about "truncated previews".
+#
+# Override via `APP_PER_FILE_PROMPT_BUDGET_CHARS`. For Sonnet 4.6 (1M
+# context) you can safely 5× this. Logged-truncation events tell ops
+# when a single file exceeds the budget so they can tune.
+_PER_FILE_PROMPT_BUDGET = 40_000
+
+
+def _resolve_per_file_prompt_budget() -> int:
+    """Read the per-file inline budget from AppSettings at call time so
+    `APP_PER_FILE_PROMPT_BUDGET_CHARS` env overrides take effect without
+    a process restart.
+    """
+    from app.settings import AppSettings
+
+    return AppSettings().per_file_prompt_budget_chars
 
 
 async def render_session_corpus_markdown(
     *,
     runtime: KaosRuntime,
     session_id: str,
-    per_file_budget_chars: int = _PER_FILE_PROMPT_BUDGET,
+    per_file_budget_chars: int | None = None,
 ) -> str:
     """Build a single markdown block summarizing every ready-parsed file
     in the session, suitable for inlining into the agent's system prompt.
@@ -501,16 +522,32 @@ async def render_session_corpus_markdown(
         logger.warning("kaos_content not importable — skipping corpus rendering")
         return ""
 
+    budget = per_file_budget_chars if per_file_budget_chars is not None else _resolve_per_file_prompt_budget()
     chunks: list[str] = []
     for meta in metas:
-        header = f"### {meta.filename} ({meta.size_bytes} bytes"
-        if meta.parse.status != "ready":
-            header += f", parse FAILED: {meta.parse.error or 'unknown'})"
-            chunks.append(header)
-            continue
-        header += ", parsed)"
+        # The agent needs to know (a) what tool can read this file in
+        # full, (b) the exact path argument, and (c) that the inline
+        # content below is a truncated head — not the whole document.
+        vfs_path = _vfs_path(session_id, meta.filename)
+        ast_path = f"{vfs_path}.kaos.json"
 
-        ast_path = f"{_vfs_path(session_id, meta.filename)}.kaos.json"
+        header_lines = [
+            f"### {meta.filename}",
+            f"- size: {meta.size_bytes} bytes"
+            + (f" · ~{meta.token_count} tokens" if meta.token_count else ""),
+            f"- content_type: {meta.content_type or 'unknown'}",
+            f"- VFS bytes: `{vfs_path}`",
+            f"- VFS AST (kaos-content): `{ast_path}`",
+        ]
+        if meta.parse.status != "ready":
+            header_lines.append(
+                f"- parse: FAILED ({meta.parse.error or 'unknown'}) — "
+                "raw bytes still readable via `kaos-core-vfs-read` at the VFS bytes path above."
+            )
+            chunks.append("\n".join(header_lines))
+            continue
+        header_lines.append("- parse: READY")
+
         try:
             ast_bytes = await runtime.vfs.read(ast_path)
             doc = ContentDocument.model_validate_json(ast_bytes)
@@ -522,12 +559,28 @@ async def render_session_corpus_markdown(
                 exc,
                 extra={"session_id": session_id, "upload_filename": meta.filename},
             )
-            chunks.append(f"{header}\n_(AST sidecar unreadable)_")
+            chunks.append("\n".join([*header_lines, "_(AST sidecar unreadable)_"]))
             continue
 
-        if len(body) > per_file_budget_chars:
-            body = body[:per_file_budget_chars] + "\n\n…[truncated]"
-        chunks.append(f"{header}\n\n{body}")
+        truncated = len(body) > budget
+        if truncated:
+            body = body[:budget] + "\n\n…[head excerpt — more available via tools]"
+            logger.info(
+                "corpus inline truncated session=%s file=%s len=%d budget=%d",
+                session_id,
+                meta.filename,
+                len(body),
+                budget,
+                extra={"session_id": session_id, "upload_filename": meta.filename},
+            )
+            header_lines.append(
+                "- WARNING: only the first "
+                f"{budget // 1000}k chars are inlined below. For the rest, "
+                "call `kaos-content-search-document` (path = the AST path above) "
+                "or `kaos-pdf-extract-page-text` (path = the bytes path above)."
+            )
+
+        chunks.append("\n".join(header_lines) + "\n\n" + body)
 
     return "\n\n---\n\n".join(chunks)
 
