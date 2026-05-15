@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a2] — 2026-05-15
+
+### Fixed
+
+- **FIX-19 — `<DocumentExplorer>` flexbox layout.** The aside
+  column grew past its declared `w-80` when a file's summary
+  carried a long unbreakable token (URL, hash). Flexbox's default
+  `min-width: auto` lets a child blow out the parent's width
+  unless `min-w-0` overrides; added `min-w-0 overflow-hidden` to
+  the aside + `break-words` to error / summary text containers.
+  (`packages/kaos-ui-react/src/chat/DocumentExplorer.tsx`)
+- **FIX-20 — auto-titler kwarg compat with kaos-llm-core 0.1.0a7+.**
+  The 0.1.0a7 wrapper rejects unknown keyword arguments including
+  the per-call `model=` override that earlier versions accepted.
+  Fix: build a fresh `Call` at runtime when `APP_AUTO_TITLE_MODEL`
+  differs from the decorator baseline; otherwise use the cached
+  call. Restores the auto-title flow for sessions where the operator
+  has overridden the title model.
+  (`examples/single-user-chat/backend/app/services/title.py`)
+
 ### Added — Tool registry + dynamic per-turn policy (TR-1..TR-13)
 
 A complete tool-policy stack covering registry, ceiling enforcement,

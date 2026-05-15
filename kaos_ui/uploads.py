@@ -218,9 +218,7 @@ async def _enrich_parsed_doc(
                     summary_input_cap_chars,
                     extra={"session_id": session_id, "upload_filename": filename},
                 )
-            summary = await summarize(
-                body, model=summarizer_model, max_words=120, style="concise"
-            )
+            summary = await summarize(body, model=summarizer_model, max_words=120, style="concise")
         except Exception as exc:
             logger.warning(
                 "summarize failed for session=%s file=%s: %s",
@@ -391,9 +389,7 @@ async def read_session_file(
     return data, meta
 
 
-async def delete_session_file(
-    *, runtime: KaosRuntime, session_id: str, filename: str
-) -> None:
+async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename: str) -> None:
     """Remove the original bytes + ``.kaos.json`` + ``.meta.json``.
 
     Raises :class:`UploadFileNotFoundError` if the meta sidecar is
@@ -493,10 +489,7 @@ async def render_session_corpus_markdown(
 
         truncated = len(body) > per_file_budget_chars
         if truncated:
-            body = (
-                body[:per_file_budget_chars]
-                + "\n\n...[head excerpt — more available via tools]"
-            )
+            body = body[:per_file_budget_chars] + "\n\n...[head excerpt — more available via tools]"
             logger.info(
                 "corpus inline truncated session=%s file=%s len=%d budget=%d",
                 session_id,

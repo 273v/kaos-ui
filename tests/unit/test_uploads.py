@@ -9,7 +9,6 @@ end-to-end.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 import pytest
@@ -153,9 +152,7 @@ async def test_delete_session_file_removes_all_siblings() -> None:
     rt = _make_runtime()
     await _seed_meta(rt, "s1", "doc.pdf", parse_ok=True)
     # Also seed a .kaos.json sibling.
-    await rt.vfs.write(
-        "sessions/s1/files/doc.pdf.kaos.json", b'{"type":"ContentDocument"}'
-    )
+    await rt.vfs.write("sessions/s1/files/doc.pdf.kaos.json", b'{"type":"ContentDocument"}')
 
     await delete_session_file(runtime=rt, session_id="s1", filename="doc.pdf")
 
@@ -184,7 +181,15 @@ async def test_render_session_corpus_markdown_empty_session() -> None:
 @pytest.mark.asyncio
 async def test_render_session_corpus_markdown_includes_vfs_paths() -> None:
     """The agent needs explicit VFS paths in each file's header so it
-    can call kaos-content-* / kaos-pdf-* tools with the right argument."""
+    can call kaos-content-* / kaos-pdf-* tools with the right argument.
+
+    The render function reaches for `kaos_content` to format the
+    inline body block. kaos-ui's dev group does not pin kaos-content
+    (it's a consumer dep, not a kaos-ui dep), so skip when
+    unavailable — the same condition the production code handles
+    gracefully via a logger warning + empty-string return.
+    """
+    pytest.importorskip("kaos_content")
     rt = _make_runtime()
     await _seed_meta(rt, "s1", "policy.pdf", parse_ok=False)  # failed parse
     md = await render_session_corpus_markdown(runtime=rt, session_id="s1")

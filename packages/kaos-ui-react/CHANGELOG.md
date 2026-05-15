@@ -4,7 +4,16 @@ All notable changes to this package are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 0.1.0-alpha.1 (planned)
+## [Unreleased]
+
+## [0.1.0-alpha.1] — 2026-05-15
+
+### Fixed
+
+- **FIX-19 — `<DocumentExplorer>` flexbox layout.** Added
+  `min-w-0 overflow-hidden` to the aside so the declared `w-80`
+  width is respected when a file summary contains long unbreakable
+  tokens. Added `break-words` to error / summary text containers.
 
 ### Added — Tool policy transparency surface (TR-7..TR-12)
 
