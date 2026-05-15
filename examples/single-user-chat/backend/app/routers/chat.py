@@ -25,6 +25,8 @@ from app.exceptions import SessionNotFoundError
 from app.logging_setup import app_logger
 from app.models import (
     ArchiveResponse,
+    CategoriesResponse,
+    CategoryInfo,
     CreateSessionBody,
     HistoryMessage,
     HistoryResponse,
@@ -32,6 +34,8 @@ from app.models import (
     SendMessageBody,
     SessionListResponse,
     SessionMeta,
+    SessionToolSetWire,
+    ToolSetUpdateBody,
 )
 from app.persistence.sessions import SessionStore
 from app.services.stream_proxy import _bearer_from_env, stream_chat
@@ -169,6 +173,99 @@ async def get_meta(session_id: str, store: StoreDep) -> SessionMeta:
         return await store.get(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+# ── tool policy (TR-4) ────────────────────────────────────────────────
+
+
+@router.get("/categories", response_model=CategoriesResponse)
+async def list_categories() -> CategoriesResponse:
+    """Return the available tool categories for SessionMeta.tool_set.
+
+    Sourced from kaos-agents' ``default_tool_group_registry`` joined
+    with the kaos-ui ``KAOS_TOOL_GROUP_DESCRIPTIONS`` map. Order is
+    stable — sorted by group id — so the SPA can cache.
+
+    The ``default_enabled`` field reflects what a fresh session would
+    include in its ceiling (documents/citations/vfs True; web False).
+    """
+    from kaos_agents.registry import default_tool_group_registry
+    from kaos_ui.agents import KAOS_TOOL_GROUP_DESCRIPTIONS
+
+    default_ceiling = set(SessionToolSetWire().allowed_groups)
+
+    _LABELS = {
+        "web": "Web sources",
+        "documents": "Documents",
+        "citations": "Citations",
+        "vfs": "File browser",
+    }
+
+    rows: list[CategoryInfo] = []
+    for group in sorted(default_tool_group_registry.groups(), key=lambda g: g.name):
+        if group.name not in KAOS_TOOL_GROUP_DESCRIPTIONS:
+            # Defensive: a downstream consumer registered a group kaos-ui
+            # doesn't have a description for. Surface it with a generic
+            # label so the UI doesn't 500.
+            label = group.name.capitalize()
+            desc = group.description
+        else:
+            label = _LABELS.get(group.name, group.name.capitalize())
+            desc = KAOS_TOOL_GROUP_DESCRIPTIONS[group.name]
+        rows.append(
+            CategoryInfo(
+                id=group.name,
+                label=label,
+                description=desc,
+                default_enabled=group.name in default_ceiling,
+                tool_count=len(group.tool_names),
+            )
+        )
+    return CategoriesResponse(categories=rows)
+
+
+@router.patch("/sessions/{session_id}/tool-set", response_model=SessionMeta)
+async def patch_tool_set(
+    session_id: str, body: ToolSetUpdateBody, store: StoreDep
+) -> SessionMeta:
+    """Update a session's tool ceiling. Fields are partial — omit a
+    dimension to keep the existing value.
+
+    Unknown group names return 422 with the offending name(s) so the
+    SPA can surface the problem inline. The server NEVER silently
+    drops an unknown group; defensive because the SPA's local cache
+    of categories may drift from the backend.
+    """
+    from kaos_agents.registry import default_tool_group_registry
+
+    try:
+        current = await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    new_tool_set = current.tool_set.model_copy()
+    if body.allowed_groups is not None:
+        known = set(default_tool_group_registry.list_names())
+        unknown = [g for g in body.allowed_groups if g not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "what": f"unknown tool group(s): {unknown!r}",
+                    "how_to_fix": (
+                        "Call GET /v1/chat/categories for the known set. "
+                        "Group names are case-sensitive."
+                    ),
+                    "alternative": "Pass [] to fully disable tools for this session.",
+                },
+            )
+        new_tool_set = new_tool_set.model_copy(update={"allowed_groups": body.allowed_groups})
+    if body.denied_tools is not None:
+        new_tool_set = new_tool_set.model_copy(update={"denied_tools": body.denied_tools})
+    if body.auto_narrow is not None:
+        new_tool_set = new_tool_set.model_copy(update={"auto_narrow": body.auto_narrow})
+
+    return await store.patch(session_id, tool_set=new_tool_set)
 
 
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)

@@ -203,6 +203,60 @@ class PatchMetaBody(BaseModel):
     starred: bool | None = None
 
 
+# ── tool-policy routes (TR-4) ─────────────────────────────────────────
+
+
+class CategoryInfo(BaseModel):
+    """One row of GET /v1/chat/categories.
+
+    Sourced from kaos-agents' ``default_tool_group_registry`` joined
+    with kaos-ui's :data:`KAOS_TOOL_GROUP_DESCRIPTIONS`. The SPA
+    renders one checkbox per row in the SettingsSheet (TR-8).
+    """
+
+    id: str = Field(description="Group name, eg. 'documents'.")
+    label: str = Field(description="Human-readable label for the checkbox.")
+    description: str = Field(description="Tooltip / hint for the user.")
+    default_enabled: bool = Field(
+        description=(
+            "Whether new sessions include this group in their ceiling. "
+            "Maps to :class:`SessionToolSetWire`'s default_factory."
+        ),
+    )
+    tool_count: int = Field(description="Number of tools currently in this group.")
+
+
+class CategoriesResponse(BaseModel):
+    """GET /v1/chat/categories response."""
+
+    categories: list[CategoryInfo]
+
+
+class ToolSetUpdateBody(BaseModel):
+    """PATCH /v1/chat/sessions/{id}/tool-set body.
+
+    Both fields optional — pass only the dimension you're changing.
+    ``allowed_groups`` empty list means "block all" (the session is
+    fully read-only at the proxy layer).
+    """
+
+    allowed_groups: list[str] | None = Field(
+        default=None,
+        description="New ceiling. Use [] to block everything.",
+    )
+    denied_tools: list[str] | None = Field(
+        default=None,
+        description="New per-session deny list. Override the policy floor.",
+    )
+    auto_narrow: bool | None = Field(
+        default=None,
+        description=(
+            "When true, the TurnToolPolicy planner runs per-turn within "
+            "the ceiling. When false, the full ceiling is used every turn."
+        ),
+    )
+
+
 class SendMessageBody(BaseModel):
     message: str = Field(min_length=1, max_length=_MAX_MESSAGE_LEN)
 
