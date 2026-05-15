@@ -141,13 +141,22 @@ async def maybe_retitle_session(
     if not conversation.strip():
         return
 
+    # kaos-llm-core 0.1.0a7's wrapper rejects unknown kwargs — including
+    # the per-call `model=` override that earlier versions accepted. To
+    # honor `APP_AUTO_TITLE_MODEL`, build a fresh `Call` at runtime
+    # against the same Signature class the decorator generated. When the
+    # configured model matches the baseline pinned on the decorator, we
+    # skip the rebuild and use the cached call.
     try:
-        title = (
-            await summarize_session_title(
-                conversation=conversation,
-                model=_resolve_title_model(),
-            )
-        ).strip()
+        from kaos_llm_core import Call
+
+        model = _resolve_title_model()
+        if model == _BASELINE_TITLE_MODEL:
+            title = (await summarize_session_title(conversation=conversation)).strip()
+        else:
+            sig_cls = summarize_session_title._signature_class  # type: ignore[attr-defined]
+            call = Call(sig_cls, model=model, max_retries=1)
+            title = (await call(conversation=conversation)).strip()
     except Exception as exc:
         logger.warning("title summarize failed for %s: %s", session_id, exc)
         return
