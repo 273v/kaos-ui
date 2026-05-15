@@ -226,9 +226,7 @@ async def list_categories() -> CategoriesResponse:
 
 
 @router.patch("/sessions/{session_id}/tool-set", response_model=SessionMeta)
-async def patch_tool_set(
-    session_id: str, body: ToolSetUpdateBody, store: StoreDep
-) -> SessionMeta:
+async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreDep) -> SessionMeta:
     """Update a session's tool ceiling. Fields are partial — omit a
     dimension to keep the existing value.
 
@@ -460,9 +458,7 @@ async def send_message(
             if not recorder.is_empty() and runtime is not None:
                 try:
                     blob = serialize_records(recorder.records())
-                    await runtime.vfs.write(
-                        turn_sidecar_path(session_id, turn_index), blob
-                    )
+                    await runtime.vfs.write(turn_sidecar_path(session_id, turn_index), blob)
                 except Exception:
                     logger.exception(
                         "failed to persist tool-call sidecar session=%s turn=%d",
@@ -529,7 +525,11 @@ async def send_message(
                     parsed.sort(key=lambda m: m.added_at)
                     return parsed
 
-                asyncio.create_task(
+                # Fire-and-forget the auto-titler. We deliberately don't keep
+                # a reference — the task self-cancels on shutdown via the
+                # default loop policy. RUF006 is suppressed here since
+                # cancellation isn't required for correctness.
+                _ = asyncio.create_task(  # noqa: RUF006
                     maybe_retitle_session(
                         store=store,
                         session_id=session_id,
@@ -781,9 +781,7 @@ async def transcript_export(
     docx_bytes = write_docx_bytes(doc)
     return Response(
         content=docx_bytes,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
+        media_type=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         headers={
             "Content-Disposition": f'attachment; filename="{meta.title}.docx"',
         },

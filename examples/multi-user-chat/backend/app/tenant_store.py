@@ -28,7 +28,6 @@ Promote into kaos-ui's package after the integration shakes out here.
 from __future__ import annotations
 
 from kaos_core.vfs import VirtualFileSystem
-from kaos_core.vfs.models import VFSConfig
 
 
 def tenant_vfs(*, base_vfs: VirtualFileSystem, tenant_id: str) -> VirtualFileSystem:
@@ -51,6 +50,6 @@ def tenant_vfs(*, base_vfs: VirtualFileSystem, tenant_id: str) -> VirtualFileSys
     # SPA integration test pins the contract.
     raise NotImplementedError(
         "Skeleton — see README.md 'Status' section. Real implementation "
-        "plumbs `f\"tenants/{tenant_id}/{path}\"` into every SessionStore "
+        'plumbs `f"tenants/{tenant_id}/{path}"` into every SessionStore '
         "call. The kaos-ui-react package itself doesn't need to change."
     )

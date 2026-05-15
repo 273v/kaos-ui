@@ -135,8 +135,7 @@ class _TurnToolPolicySignature(Signature):
     user_message: str = InputField(description="The user message starting this turn.")
     recent_turns: str = InputField(
         description=(
-            "Last 3-5 conversation turns compressed to one line each. "
-            "Empty string when no history."
+            "Last 3-5 conversation turns compressed to one line each. Empty string when no history."
         )
     )
     corpus_headlines: str = InputField(
@@ -197,7 +196,9 @@ async def plan_turn_tool_policy(
 
     used_model = model or _resolve_planner_model()
     threshold = (
-        confidence_threshold if confidence_threshold is not None else _resolve_confidence_threshold()
+        confidence_threshold
+        if confidence_threshold is not None
+        else _resolve_confidence_threshold()
     )
     call = Call(_TurnToolPolicySignature, model=used_model)
     t_start = time.monotonic()
@@ -211,9 +212,7 @@ async def plan_turn_tool_policy(
         )
     except Exception as exc:
         latency_ms = (time.monotonic() - t_start) * 1000
-        logger.warning(
-            "TurnToolPolicy planner failed; falling back to ceiling. err=%s", exc
-        )
+        logger.warning("TurnToolPolicy planner failed; falling back to ceiling. err=%s", exc)
         return TurnToolPolicy(
             turn_groups=frozenset(ceiling_groups),
             reasoning=f"Planner unavailable: {exc}. Using full ceiling.",
@@ -237,8 +236,7 @@ async def plan_turn_tool_policy(
         return TurnToolPolicy(
             turn_groups=ceiling_set,
             reasoning=(
-                raw.reasoning
-                + f" (planner confidence {raw.confidence:.2f} < {threshold:.2f}; "
+                raw.reasoning + f" (planner confidence {raw.confidence:.2f} < {threshold:.2f}; "
                 "expanded to ceiling)"
             ),
             confidence=raw.confidence,

@@ -107,9 +107,7 @@ def _tool_patterns(
             self.name = name
 
     wrapped = [_NameOnly(n) for n in available_tool_names]
-    kept = filter_tools(
-        wrapped, session_tool_set, group_registry=default_tool_group_registry
-    )
+    kept = filter_tools(wrapped, session_tool_set, group_registry=default_tool_group_registry)
     kept_names = [t.name for t in kept]
     if not kept_names:
         # No tool in the catalog matches the ceiling — surface the

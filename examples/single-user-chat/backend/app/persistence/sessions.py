@@ -103,9 +103,7 @@ class SessionStore:
         if tools_enabled:
             tool_set = SessionToolSetWire()  # default ceiling
         else:
-            tool_set = SessionToolSetWire(
-                allowed_groups=[], denied_tools=[], auto_narrow=True
-            )
+            tool_set = SessionToolSetWire(allowed_groups=[], denied_tools=[], auto_narrow=True)
         meta = SessionMeta(
             id=sid,
             title=title,

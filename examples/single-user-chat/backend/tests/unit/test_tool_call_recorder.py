@@ -105,7 +105,9 @@ def test_multiple_calls_preserved_in_arrival_order() -> None:
     rec = TurnToolCallRecorder()
     rec.observe("span", _start_event("first"))
     rec.observe("span", _start_event("second", tool_name="kaos-citations-extract"))
-    rec.observe("span", _complete_event("second", tool_name="kaos-citations-extract", result="[c0001]"))
+    rec.observe(
+        "span", _complete_event("second", tool_name="kaos-citations-extract", result="[c0001]")
+    )
     rec.observe("span", _complete_event("first"))
     rows = rec.records()
     assert [r.id for r in rows] == ["first", "second"]
@@ -140,7 +142,9 @@ def test_serialize_then_parse_round_trips() -> None:
 
 
 def test_parse_jsonl_skips_malformed_lines() -> None:
-    blob = b'{"id":"a","name":"t","status":"done"}\nnot-json\n{"id":"b","name":"t","status":"done"}\n'
+    blob = (
+        b'{"id":"a","name":"t","status":"done"}\nnot-json\n{"id":"b","name":"t","status":"done"}\n'
+    )
     parsed = parse_records_jsonl(blob)
     assert [r.id for r in parsed] == ["a", "b"]
 

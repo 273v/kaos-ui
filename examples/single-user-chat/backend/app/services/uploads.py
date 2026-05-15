@@ -475,7 +475,7 @@ async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[F
 # was the reason the agent kept apologizing about "truncated previews".
 #
 # Override via `APP_PER_FILE_PROMPT_BUDGET_CHARS`. For Sonnet 4.6 (1M
-# context) you can safely 5× this. Logged-truncation events tell ops
+# context) you can safely 5x this. Logged-truncation events tell ops
 # when a single file exceeds the budget so they can tune.
 _PER_FILE_PROMPT_BUDGET = 40_000
 
@@ -522,7 +522,11 @@ async def render_session_corpus_markdown(
         logger.warning("kaos_content not importable — skipping corpus rendering")
         return ""
 
-    budget = per_file_budget_chars if per_file_budget_chars is not None else _resolve_per_file_prompt_budget()
+    budget = (
+        per_file_budget_chars
+        if per_file_budget_chars is not None
+        else _resolve_per_file_prompt_budget()
+    )
     chunks: list[str] = []
     for meta in metas:
         # The agent needs to know (a) what tool can read this file in

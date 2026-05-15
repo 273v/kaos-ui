@@ -90,9 +90,7 @@ class TurnToolCallRecorder:
         existing = self._by_id.get(call_id)
         if phase == "start":
             if existing is None:
-                self._by_id[call_id] = ToolCallRecord(
-                    id=call_id, name=tool_name, status="running"
-                )
+                self._by_id[call_id] = ToolCallRecord(id=call_id, name=tool_name, status="running")
             else:
                 self._by_id[call_id] = existing.model_copy(
                     update={"name": tool_name, "status": "running"}
@@ -111,7 +109,9 @@ class TurnToolCallRecorder:
             self._by_id[call_id] = (
                 existing.model_copy(update=updates)
                 if existing is not None
-                else ToolCallRecord(id=call_id, name=tool_name, status=status, result_preview=result_preview)
+                else ToolCallRecord(
+                    id=call_id, name=tool_name, status=status, result_preview=result_preview
+                )
             )
         elif phase == "error":
             err_msg = payload.get("error_message") or "tool error"

@@ -233,9 +233,7 @@ def test_transcript_export_unknown_format_422(client):
 
 
 def test_transcript_export_404_for_unknown_session(client):
-    r = client.get(
-        "/v1/chat/sessions/01NOPESUCHSESSIONIDABCDEFG/transcript?format=markdown"
-    )
+    r = client.get("/v1/chat/sessions/01NOPESUCHSESSIONIDABCDEFG/transcript?format=markdown")
     assert r.status_code == 404
 
 

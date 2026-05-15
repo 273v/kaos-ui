@@ -130,7 +130,7 @@ class AppSettings(ModuleSettings):
     # summary). 40k chars ≈ 10k tokens per file — fits ≤20 files in
     # Haiku 4.5's 200k context after headroom for the instruction
     # template + chat history + response. For Sonnet 4.6's 1M context
-    # window, raising this 5× is safe. Files larger than the budget
+    # window, raising this 5x is safe. Files larger than the budget
     # get a truncation note + a hint pointing the agent at the
     # search tools and the file's VFS path so it can dig deeper
     # tool-side rather than guessing about content past the head.

@@ -14,11 +14,9 @@ import jwt as jwt_lib
 import pytest
 from fastapi import HTTPException
 
-os.environ.setdefault(
-    "APP_JWT_SECRET", "test-secret-that-is-32-chars-long-or-more-please-thanks"
-)
+os.environ.setdefault("APP_JWT_SECRET", "test-secret-that-is-32-chars-long-or-more-please-thanks")
 
-from app.auth import (  # noqa: E402  -- env must be set first
+from app.auth import (
     TenantClaims,
     _jwt_secret,
     decode_token,

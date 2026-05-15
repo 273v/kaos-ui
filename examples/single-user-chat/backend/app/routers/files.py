@@ -107,10 +107,7 @@ async def upload_file(
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail={
-                    "what": (
-                        f"upload exceeded {settings.max_upload_bytes} bytes "
-                        f"while streaming"
-                    ),
+                    "what": (f"upload exceeded {settings.max_upload_bytes} bytes while streaming"),
                     "how_to_fix": (
                         "split the file or compress it; "
                         f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"

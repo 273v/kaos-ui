@@ -23,23 +23,21 @@ pytestmark = [pytest.mark.integration, pytest.mark.live]
 
 
 def _skip_without_anthropic() -> None:
-    if not (
-        os.environ.get("SIMULATOR_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-    ):
+    if not (os.environ.get("SIMULATOR_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
         pytest.skip("no Anthropic key available (live test)")
 
 
 def _stream_events(response_text: str) -> list[dict]:
     """Parse the SSE response body into a list of decoded event payloads."""
+    import contextlib
+
     events: list[dict] = []
     for chunk in response_text.split("\n\n"):
         for line in chunk.splitlines():
             if line.startswith("data: "):
                 raw = line[len("data: ") :]
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     events.append(json.loads(raw))
-                except json.JSONDecodeError:
-                    pass
     return events
 
 
@@ -73,9 +71,7 @@ def _successful_tool_names_from_turn(events: list[dict]) -> set[str]:
     """
     for ev in events:
         if ev.get("type") == "turn_summary":
-            return {
-                tc["tool_name"] for tc in ev.get("tool_calls", []) if not tc.get("is_error")
-            }
+            return {tc["tool_name"] for tc in ev.get("tool_calls", []) if not tc.get("is_error")}
     return set()
 
 
@@ -120,8 +116,7 @@ def test_default_ceiling_blocks_web_tools(client: TestClient) -> None:
     successful = _successful_tool_names_from_turn(events)
     web_successes = {name for name in successful if name.startswith("kaos-source-")}
     assert web_successes == set(), (
-        f"Expected no SUCCESSFUL kaos-source-* calls under default ceiling; "
-        f"saw {web_successes!r}"
+        f"Expected no SUCCESSFUL kaos-source-* calls under default ceiling; saw {web_successes!r}"
     )
 
 
