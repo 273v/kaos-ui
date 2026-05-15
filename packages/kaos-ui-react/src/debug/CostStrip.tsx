@@ -7,10 +7,10 @@
  * — internally it runs `useCostAggregation` to derive per-model rows.
  */
 
-import { DollarSign, Hash } from "lucide-react";
+import { DollarSign, Filter, Hash } from "lucide-react";
 
 import { useCostAggregation } from "../hooks/use-cost-aggregation.js";
-import type { KaosAgentEvent } from "../lib/events.js";
+import type { KaosAgentEvent, ToolPolicyDecidedEvent } from "../lib/events.js";
 
 export interface CostStripProps {
   events: ReadonlyArray<KaosAgentEvent | { event: KaosAgentEvent }>;
@@ -31,8 +31,32 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+/**
+ * Aggregate planner (TR-5 / TR-7) cost across `tool_policy_decided`
+ * events in the session. Each turn emits at most one — sum across the
+ * stream. Hidden when zero (no planner runs OR auto_narrow=False).
+ */
+function aggregatePlannerCost(
+  events: ReadonlyArray<KaosAgentEvent | { event: KaosAgentEvent }>,
+): { cost_usd: number; calls: number } {
+  let total = 0;
+  let calls = 0;
+  for (const item of events) {
+    const ev = "event" in item ? item.event : item;
+    if (ev.type === "tool_policy_decided") {
+      const policy = ev as ToolPolicyDecidedEvent;
+      if (typeof policy.cost_usd === "number" && policy.cost_usd > 0) {
+        total += policy.cost_usd;
+        calls += 1;
+      }
+    }
+  }
+  return { cost_usd: total, calls };
+}
+
 export function CostStrip({ events, perModel = true, className }: CostStripProps) {
   const { byModel, total } = useCostAggregation(events);
+  const planner = aggregatePlannerCost(events);
 
   if (total.calls === 0) {
     return (
@@ -71,6 +95,18 @@ export function CostStrip({ events, perModel = true, className }: CostStripProps
             </li>
           ))}
         </ul>
+      )}
+      {planner.calls > 0 && (
+        <div className="px-3 pb-1.5 pt-0.5 border-t border-border/40 text-[11px] text-muted-foreground tabular-nums flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1">
+            <Filter className="h-3 w-3 opacity-60" />
+            Planner
+          </span>
+          <span>
+            {formatCost(planner.cost_usd)} · {planner.calls}{" "}
+            {planner.calls === 1 ? "turn" : "turns"}
+          </span>
+        </div>
       )}
     </div>
   );
