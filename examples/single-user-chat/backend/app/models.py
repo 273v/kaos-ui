@@ -13,9 +13,64 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 Provider = Literal["anthropic", "openai", "google", "xai"]
+
+
+# ── tool policy (TR-3) ────────────────────────────────────────────────
+
+
+class SessionToolSetWire(BaseModel):
+    """Per-session tool allow / deny policy — wire shape for SessionMeta.
+
+    Round-trips through :class:`kaos_agents.types.SessionToolSet` via
+    :meth:`to_session_tool_set`. JSON-friendly: lists instead of
+    frozensets, ``default_factory`` for the "block everything except
+    explicitly allowed groups" default.
+
+    Semantics (resolves at proxy time, applied in
+    :func:`kaos_agents.context.filter_tools`):
+
+    1. ``allowed_groups`` empty → all groups pass the allow check.
+    2. ``allowed_groups`` non-empty → tool's group must be in this set
+       (groups from :data:`default_tool_group_registry`).
+    3. ``denied_tools`` always wins — tools listed here are blocked
+       even when their group is allowed.
+    4. ``auto_narrow`` controls whether the per-turn TurnToolPolicy
+       planner runs (TR-5). When false, the ceiling above is the
+       effective tool set every turn.
+    """
+
+    allowed_groups: list[str] = Field(
+        default_factory=lambda: ["documents", "citations", "vfs"],
+        description=(
+            "Tool group names that are allowed for this session "
+            "(ceiling). Defaults to documents+citations+vfs — web is "
+            "opt-in because of cost and privacy implications."
+        ),
+    )
+    denied_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tool names that are always blocked, even if their group is "
+            "allowed. The hard read-only floor lives here at config "
+            "time so user toggles can never accept a write tool."
+        ),
+    )
+    auto_narrow: bool = Field(
+        default=True,
+        description=(
+            "When True, the TurnToolPolicy planner Program runs before "
+            "each turn and may narrow the effective tool set within "
+            "this ceiling. When False, the full ceiling is used."
+        ),
+    )
+
+    @property
+    def is_blocking_all(self) -> bool:
+        """True when the ceiling allows no tools (allowed_groups=[])."""
+        return not self.allowed_groups
 
 
 class ModelEntry(BaseModel):
@@ -42,7 +97,13 @@ class SessionMeta(BaseModel):
     title: str
     model: str
     system_prompt: str
-    tools_enabled: bool = False
+    # TR-3: tool_set is the source of truth for what the agent can call.
+    # `tools_enabled` (below) is a derived view kept for one release so
+    # the SPA can migrate without a flag day. Older meta sidecars that
+    # only carry tools_enabled hydrate into the default ceiling
+    # (documents+citations+vfs) — see `_migrate_tool_set` in
+    # services/sessions.py.
+    tool_set: SessionToolSetWire = Field(default_factory=SessionToolSetWire)
     created_at: datetime
     last_message_at: datetime | None = None
     message_count: int = 0
@@ -56,6 +117,47 @@ class SessionMeta(BaseModel):
     # Wall-clock of the last auto-title generation. Used to throttle
     # re-summarization (default cadence: every 10 messages OR 24h).
     title_updated_at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tools_enabled(self) -> bool:
+        """Backward-compat derived view: True when ANY group is allowed.
+
+        The SPA's existing "Enable read-only tools" checkbox reads
+        this field. Until the SettingsSheet migrates to per-category
+        toggles (TR-8), `tools_enabled=False` maps to "block all" and
+        `tools_enabled=True` maps to "default ceiling".
+        """
+        return not self.tool_set.is_blocking_all
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_tools_enabled(cls, data: object) -> object:
+        """Hydrate ``tool_set`` from a legacy ``tools_enabled`` bool.
+
+        Old meta sidecars only carried ``tools_enabled: bool``. Without
+        this migration, those files would silently lose the toggle on
+        load (the bool would be discarded; ``tool_set`` would default
+        to the standard ceiling regardless of what the user had
+        chosen). Run only when ``tool_set`` is absent AND
+        ``tools_enabled`` is present so live data isn't double-mapped.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "tool_set" in data:
+            # New shape — drop any stale tools_enabled key so the
+            # computed_field is authoritative.
+            data.pop("tools_enabled", None)
+            return data
+        legacy = data.pop("tools_enabled", None)
+        if legacy is False:
+            data["tool_set"] = {
+                "allowed_groups": [],
+                "denied_tools": [],
+                "auto_narrow": True,
+            }
+        # legacy True or None → default ceiling (the field default).
+        return data
 
 
 class SessionSummary(BaseModel):
