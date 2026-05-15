@@ -4,10 +4,12 @@
 import { Button } from "@kaos-chat-example/ui/components/ui/button";
 import { Textarea } from "@kaos-chat-example/ui/components/ui/textarea";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useCategories } from "@/hooks/use-categories";
 import { useModels } from "@/hooks/use-models";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
+import { usePatchToolSet } from "@/hooks/use-patch-tool-set";
 import type { SessionMeta } from "@/lib/api-types";
 
 interface Props {
@@ -18,20 +20,29 @@ interface Props {
 
 export function SettingsSheet({ open, onClose, meta }: Props) {
   const models = useModels();
+  const categories = useCategories();
   const patch = usePatchMeta(meta.id);
+  const patchToolSet = usePatchToolSet(meta.id);
 
   // Local edit buffer — only commits to the server on Save.
   const [title, setTitle] = useState(meta.title);
   const [model, setModel] = useState(meta.model);
   const [systemPrompt, setSystemPrompt] = useState(meta.system_prompt);
-  const [toolsEnabled, setToolsEnabled] = useState(meta.tools_enabled);
+  // TR-8: tool policy edit buffer. Tracks the ceiling (set of group
+  // ids the user wants enabled) + auto_narrow toggle. The bool
+  // tools_enabled view is derived from `allowedGroups.length > 0`.
+  const [allowedGroups, setAllowedGroups] = useState<string[]>(
+    meta.tool_set?.allowed_groups ?? [],
+  );
+  const [autoNarrow, setAutoNarrow] = useState<boolean>(meta.tool_set?.auto_narrow ?? true);
 
   useEffect(() => {
     if (open) {
       setTitle(meta.title);
       setModel(meta.model);
       setSystemPrompt(meta.system_prompt);
-      setToolsEnabled(meta.tools_enabled);
+      setAllowedGroups(meta.tool_set?.allowed_groups ?? []);
+      setAutoNarrow(meta.tool_set?.auto_narrow ?? true);
     }
   }, [open, meta]);
 
@@ -81,14 +92,49 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
   if (!open) return null;
 
   const onSave = async () => {
+    // Two independent PATCHes. Tool policy lives on a separate route
+    // so an unknown-group validation error doesn't roll back legitimate
+    // edits to title / model / prompt.
     await patch.mutateAsync({
       title,
       model,
       system_prompt: systemPrompt,
-      tools_enabled: toolsEnabled,
+    });
+    await patchToolSet.mutateAsync({
+      allowed_groups: allowedGroups,
+      auto_narrow: autoNarrow,
     });
     onClose();
   };
+
+  // Preset shortcuts. Picking a preset writes to allowedGroups; the
+  // grid reflects. "Custom" emerges automatically when the grid
+  // doesn't match any preset.
+  const PRESETS: { id: string; label: string; groups: string[] }[] = useMemo(
+    () => [
+      { id: "none", label: "None", groups: [] },
+      { id: "docs", label: "Documents only", groups: ["documents", "citations", "vfs"] },
+      {
+        id: "docs+web",
+        label: "Documents + web",
+        groups: ["documents", "citations", "vfs", "web"],
+      },
+      {
+        id: "all",
+        label: "All read-only",
+        groups: (categories.data?.categories ?? []).map((c) => c.id),
+      },
+    ],
+    [categories.data],
+  );
+
+  const activePreset = useMemo(() => {
+    const sorted = [...allowedGroups].sort().join(",");
+    for (const p of PRESETS) {
+      if ([...p.groups].sort().join(",") === sorted) return p.id;
+    }
+    return "custom";
+  }, [allowedGroups, PRESETS]);
 
   return (
     <>
@@ -149,21 +195,113 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
             />
           </Field>
 
-          <Field label="Tools" hint="When on, the agent can call read-only KAOS document tools.">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={toolsEnabled}
-                onChange={(e) => setToolsEnabled(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Enable read-only tools
-            </label>
+          <Field
+            label="Tool policy"
+            hint="Which tool categories the agent may use, and how aggressively to narrow per turn."
+          >
+            <div className="space-y-3">
+              {/* Preset picker — clicking writes to allowedGroups. */}
+              <div>
+                <label
+                  htmlFor="tool-preset"
+                  className="block text-[11px] text-muted-foreground mb-1"
+                >
+                  Preset
+                </label>
+                <select
+                  id="tool-preset"
+                  className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5"
+                  value={activePreset}
+                  onChange={(e) => {
+                    const preset = PRESETS.find((p) => p.id === e.target.value);
+                    if (preset) setAllowedGroups(preset.groups);
+                    // "custom" is a derived state — pick any other
+                    // preset to leave it. Selecting "custom" itself
+                    // is a no-op (the grid below is the authority).
+                  }}
+                >
+                  {PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                  {activePreset === "custom" && <option value="custom">Custom</option>}
+                </select>
+              </div>
+
+              {/* Per-category checkboxes — the source of truth. */}
+              {categories.isPending && (
+                <p className="text-xs text-muted-foreground italic">Loading categories…</p>
+              )}
+              {categories.isError && (
+                <p className="text-xs text-destructive">
+                  Failed to load tool categories. The toggle is unavailable.
+                </p>
+              )}
+              {categories.data && (
+                <ul className="space-y-1.5">
+                  {categories.data.categories.map((cat) => {
+                    const checked = allowedGroups.includes(cat.id);
+                    return (
+                      <li key={cat.id}>
+                        <label className="flex items-start gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setAllowedGroups((groups) =>
+                                e.target.checked
+                                  ? Array.from(new Set([...groups, cat.id]))
+                                  : groups.filter((g) => g !== cat.id),
+                              )
+                            }
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                          />
+                          <span className="flex-1">
+                            <span className="font-medium">{cat.label}</span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {cat.tool_count} tool{cat.tool_count === 1 ? "" : "s"}
+                            </span>
+                            <span className="block text-[11px] text-muted-foreground leading-snug">
+                              {cat.description}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {/* Auto-narrow toggle. */}
+              <label className="flex items-start gap-2 text-sm cursor-pointer border-t border-border pt-3">
+                <input
+                  type="checkbox"
+                  checked={autoNarrow}
+                  onChange={(e) => setAutoNarrow(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="flex-1">
+                  <span className="font-medium">Auto-narrow tools per turn</span>
+                  <span className="block text-[11px] text-muted-foreground leading-snug">
+                    Runs a small Haiku planner before each turn that picks the
+                    smallest set of categories within your ceiling. Falls back to
+                    the full ceiling when uncertain — narrowing is never a
+                    security gate.
+                  </span>
+                </span>
+              </label>
+            </div>
           </Field>
 
-          {patch.isError && (
+          {(patch.isError || patchToolSet.isError) && (
             <div className="text-sm text-destructive border border-destructive/30 rounded-md px-3 py-2">
-              {patch.error instanceof Error ? patch.error.message : "Save failed."}
+              {patch.error instanceof Error
+                ? patch.error.message
+                : patchToolSet.error instanceof Error
+                  ? patchToolSet.error.message
+                  : "Save failed."}
             </div>
           )}
 

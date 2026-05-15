@@ -13,18 +13,45 @@ export interface ModelListResponse {
   models: ModelEntry[];
 }
 
+export interface SessionToolSetWire {
+  allowed_groups: string[];
+  denied_tools: string[];
+  auto_narrow: boolean;
+}
+
 export interface SessionMeta {
   id: string;
   title: string;
   model: string;
   system_prompt: string;
   tools_enabled: boolean;
+  tool_set: SessionToolSetWire;
   created_at: string;
   last_message_at: string | null;
   message_count: number;
   archived: boolean;
   starred: boolean;
   title_source: "manual" | "auto";
+}
+
+// TR-4: GET /v1/chat/categories row + PATCH .../tool-set body.
+
+export interface CategoryInfo {
+  id: string;
+  label: string;
+  description: string;
+  default_enabled: boolean;
+  tool_count: number;
+}
+
+export interface CategoriesResponse {
+  categories: CategoryInfo[];
+}
+
+export interface ToolSetUpdateBody {
+  allowed_groups?: string[];
+  denied_tools?: string[];
+  auto_narrow?: boolean;
 }
 
 export interface SessionSummary {
