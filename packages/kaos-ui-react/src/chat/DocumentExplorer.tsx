@@ -135,7 +135,7 @@ function FileCard({
       {open && (
         <div className="px-3 pb-3 pt-1 text-xs space-y-2">
           {failed && file.parse.error && (
-            <div className="rounded-sm border border-destructive/40 bg-destructive/5 px-2 py-1 text-destructive">
+            <div className="rounded-sm border border-destructive/40 bg-destructive/5 px-2 py-1 text-destructive break-words">
               {file.parse.error}
             </div>
           )}
@@ -144,7 +144,7 @@ function FileCard({
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                 Summary
               </p>
-              <p className="leading-relaxed text-foreground">{file.summary}</p>
+              <p className="leading-relaxed text-foreground break-words">{file.summary}</p>
             </div>
           ) : !failed ? (
             <p className="italic text-muted-foreground">
@@ -174,7 +174,12 @@ export function DocumentExplorer({
   );
   return (
     <aside
-      className="w-80 flex-shrink-0 border-l border-border bg-card flex flex-col h-full"
+      // `min-w-0` overrides the default `min-width: auto` in flexbox so the
+      // aside actually respects its declared `w-80` (20rem) — without this,
+      // a file with a long unbreakable token (URL, hash, etc.) in its summary
+      // grows the column past 320px and collapses the chat column to 0.
+      // `overflow-hidden` is the belt to that suspenders.
+      className="w-80 flex-shrink-0 min-w-0 overflow-hidden border-l border-border bg-card flex flex-col h-full"
       aria-label="Uploaded documents"
     >
       <header className="px-4 py-3 border-b border-border flex items-center justify-between">

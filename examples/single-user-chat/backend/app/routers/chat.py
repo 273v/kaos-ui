@@ -17,6 +17,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sse_starlette import EventSourceResponse
 
 from app.auth import require_auth
@@ -25,6 +26,8 @@ from app.exceptions import SessionNotFoundError
 from app.logging_setup import app_logger
 from app.models import (
     ArchiveResponse,
+    CategoriesResponse,
+    CategoryInfo,
     CreateSessionBody,
     HistoryMessage,
     HistoryResponse,
@@ -32,6 +35,8 @@ from app.models import (
     SendMessageBody,
     SessionListResponse,
     SessionMeta,
+    SessionToolSetWire,
+    ToolSetUpdateBody,
 )
 from app.persistence.sessions import SessionStore
 from app.services.stream_proxy import _bearer_from_env, stream_chat
@@ -171,6 +176,97 @@ async def get_meta(session_id: str, store: StoreDep) -> SessionMeta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+# ── tool policy (TR-4) ────────────────────────────────────────────────
+
+
+@router.get("/categories", response_model=CategoriesResponse)
+async def list_categories() -> CategoriesResponse:
+    """Return the available tool categories for SessionMeta.tool_set.
+
+    Sourced from kaos-agents' ``default_tool_group_registry`` joined
+    with the kaos-ui ``KAOS_TOOL_GROUP_DESCRIPTIONS`` map. Order is
+    stable — sorted by group id — so the SPA can cache.
+
+    The ``default_enabled`` field reflects what a fresh session would
+    include in its ceiling (documents/citations/vfs True; web False).
+    """
+    from kaos_agents.registry import default_tool_group_registry
+    from kaos_ui.agents import KAOS_TOOL_GROUP_DESCRIPTIONS
+
+    default_ceiling = set(SessionToolSetWire().allowed_groups)
+
+    _LABELS = {
+        "web": "Web sources",
+        "documents": "Documents",
+        "citations": "Citations",
+        "vfs": "File browser",
+    }
+
+    rows: list[CategoryInfo] = []
+    for group in sorted(default_tool_group_registry.groups(), key=lambda g: g.name):
+        if group.name not in KAOS_TOOL_GROUP_DESCRIPTIONS:
+            # Defensive: a downstream consumer registered a group kaos-ui
+            # doesn't have a description for. Surface it with a generic
+            # label so the UI doesn't 500.
+            label = group.name.capitalize()
+            desc = group.description
+        else:
+            label = _LABELS.get(group.name, group.name.capitalize())
+            desc = KAOS_TOOL_GROUP_DESCRIPTIONS[group.name]
+        rows.append(
+            CategoryInfo(
+                id=group.name,
+                label=label,
+                description=desc,
+                default_enabled=group.name in default_ceiling,
+                tool_count=len(group.tool_names),
+            )
+        )
+    return CategoriesResponse(categories=rows)
+
+
+@router.patch("/sessions/{session_id}/tool-set", response_model=SessionMeta)
+async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreDep) -> SessionMeta:
+    """Update a session's tool ceiling. Fields are partial — omit a
+    dimension to keep the existing value.
+
+    Unknown group names return 422 with the offending name(s) so the
+    SPA can surface the problem inline. The server NEVER silently
+    drops an unknown group; defensive because the SPA's local cache
+    of categories may drift from the backend.
+    """
+    from kaos_agents.registry import default_tool_group_registry
+
+    try:
+        current = await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    new_tool_set = current.tool_set.model_copy()
+    if body.allowed_groups is not None:
+        known = set(default_tool_group_registry.list_names())
+        unknown = [g for g in body.allowed_groups if g not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "what": f"unknown tool group(s): {unknown!r}",
+                    "how_to_fix": (
+                        "Call GET /v1/chat/categories for the known set. "
+                        "Group names are case-sensitive."
+                    ),
+                    "alternative": "Pass [] to fully disable tools for this session.",
+                },
+            )
+        new_tool_set = new_tool_set.model_copy(update={"allowed_groups": body.allowed_groups})
+    if body.denied_tools is not None:
+        new_tool_set = new_tool_set.model_copy(update={"denied_tools": body.denied_tools})
+    if body.auto_narrow is not None:
+        new_tool_set = new_tool_set.model_copy(update={"auto_narrow": body.auto_narrow})
+
+    return await store.patch(session_id, tool_set=new_tool_set)
+
+
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)
 async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> SessionMeta:
     if body.model is not None:
@@ -211,6 +307,14 @@ async def send_message(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    # P2-4: per-turn model override (the "Re-run with different model"
+    # affordance). Mutates the local meta copy for this turn only; the
+    # persisted SessionMeta.model is untouched so the next un-overridden
+    # turn falls back to the session's chosen default.
+    if body.model is not None and body.model != meta.model:
+        _validate_model_id(body.model)
+        meta = meta.model_copy(update={"model": body.model})
+
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)
 
@@ -232,22 +336,63 @@ async def send_message(
 
     available_tool_names: tuple[str, ...]
     if meta.tools_enabled and runtime is not None:
-        # Filter the runtime's tool surface by the read-only allowlist
-        # before telling the agent about it. The proxy also passes the
-        # same allowlist as `tools` so kaos-agents enforces the gate —
-        # this catalog is defense-in-depth on the prompt side.
-        import fnmatch
-
-        from app.services.catalog import READ_ONLY_TOOL_GLOBS
-
-        all_names = sorted(runtime.tools.list_tools())
-        available_tool_names = tuple(
-            name
-            for name in all_names
-            if any(fnmatch.fnmatchcase(name, glob) for glob in READ_ONLY_TOOL_GLOBS)
-        )
+        # Names of every tool currently registered. The proxy applies
+        # the SessionToolSet filter (TR-2) to this list; we also pass
+        # it through to `augment_instructions` so the system prompt
+        # tells the agent what's available. The TR-6 planner narrows
+        # this further below.
+        available_tool_names = tuple(sorted(runtime.tools.list_tools()))
     else:
         available_tool_names = ()
+
+    # TR-6: when auto_narrow is on, run the TurnToolPolicy planner to
+    # narrow this turn's tool set within the ceiling. Result is a
+    # per-turn `tool_set_override` handed to stream_chat. Emitting the
+    # decision as an SSE event happens below (in event_generator) so
+    # the SPA can render a transparency badge.
+    from app.models import SessionToolSetWire
+    from app.services.turn_tool_policy import TurnToolPolicy, plan_turn_tool_policy
+
+    tool_policy_event: TurnToolPolicy | None = None
+    effective_tool_set: SessionToolSetWire | None = None
+    if meta.tools_enabled and meta.tool_set.auto_narrow:
+        # Build the planner inputs — corpus headlines + recent turns
+        # compressed to one line each so the planner sees enough to
+        # route without ballooning prompt cost.
+        if runtime is not None:
+            try:
+                from app.services.uploads import list_session_files
+
+                metas = await list_session_files(runtime=runtime, session_id=session_id)
+                corpus_headlines = "\n".join(
+                    f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
+                    for m in metas
+                )
+            except Exception:
+                corpus_headlines = ""
+        else:
+            corpus_headlines = ""
+        try:
+            tool_policy_event = await plan_turn_tool_policy(
+                user_message=body.message,
+                recent_turns="",  # TR-6 keeps history empty; TR-13 docs deeper context
+                corpus_headlines=corpus_headlines,
+                ceiling_groups=list(meta.tool_set.allowed_groups),
+                available_groups=list(meta.tool_set.allowed_groups),
+            )
+            # Intersect ceiling with planner choice — already done inside
+            # the planner, but compose a fresh SessionToolSetWire for the
+            # proxy that pins this turn's narrowed groups + keeps the
+            # session's denied_tools floor.
+            effective_tool_set = SessionToolSetWire(
+                allowed_groups=sorted(tool_policy_event.turn_groups),
+                denied_tools=list(meta.tool_set.denied_tools),
+                auto_narrow=False,  # already narrowed for this turn
+            )
+        except Exception:
+            logger.exception("turn-policy planner failed; using ceiling")
+            tool_policy_event = None
+            effective_tool_set = None
 
     # First turn auto-derives a title from the user message so the
     # sidebar isn't a sea of "Untitled".
@@ -268,6 +413,26 @@ async def send_message(
     turn_index = meta.message_count // 2
 
     async def event_generator():
+        # TR-7 wire: emit ToolPolicyDecided before the first kaos-agents
+        # event so the SPA sees the narrowing decision before any tool
+        # call lands. Always emitted when the planner ran, even if it
+        # fell back to the ceiling — that itself is information.
+        if tool_policy_event is not None:
+            yield {
+                "event": "tool_policy_decided",
+                "data": json.dumps(
+                    {
+                        "type": "tool_policy_decided",
+                        "turn_groups": sorted(tool_policy_event.turn_groups),
+                        "ceiling_groups": list(meta.tool_set.allowed_groups),
+                        "reasoning": tool_policy_event.reasoning,
+                        "confidence": tool_policy_event.confidence,
+                        "fell_back_to_ceiling": tool_policy_event.fell_back_to_ceiling,
+                        "cost_usd": tool_policy_event.cost_usd,
+                        "latency_ms": tool_policy_event.latency_ms,
+                    }
+                ),
+            }
         try:
             async for evt in stream_chat(
                 client=upstream,
@@ -277,6 +442,7 @@ async def send_message(
                 max_cost_usd=settings.turn_budget_usd,
                 available_tool_names=available_tool_names,
                 corpus_markdown=corpus_markdown,
+                tool_set_override=effective_tool_set,
             ):
                 # Best-effort tap: parsing failures must not corrupt the
                 # stream. The recorder ignores events it doesn't know.
@@ -292,9 +458,7 @@ async def send_message(
             if not recorder.is_empty() and runtime is not None:
                 try:
                     blob = serialize_records(recorder.records())
-                    await runtime.vfs.write(
-                        turn_sidecar_path(session_id, turn_index), blob
-                    )
+                    await runtime.vfs.write(turn_sidecar_path(session_id, turn_index), blob)
                 except Exception:
                     logger.exception(
                         "failed to persist tool-call sidecar session=%s turn=%d",
@@ -361,7 +525,11 @@ async def send_message(
                     parsed.sort(key=lambda m: m.added_at)
                     return parsed
 
-                asyncio.create_task(
+                # Fire-and-forget the auto-titler. We deliberately don't keep
+                # a reference — the task self-cancels on shutdown via the
+                # default loop policy. RUF006 is suppressed here since
+                # cancellation isn't required for correctness.
+                _ = asyncio.create_task(  # noqa: RUF006
                     maybe_retitle_session(
                         store=store,
                         session_id=session_id,
@@ -481,11 +649,140 @@ async def get_history(
     )
 
 
+def _transcript_markdown(meta: SessionMeta, messages: list[HistoryMessage]) -> str:
+    """Render a transcript as agent-readable markdown.
+
+    Used by both the client-side markdown download (returned as-is)
+    and the DOCX export (parsed back to ContentDocument before
+    serializing). The ``> _attribution_`` blockquote on each
+    assistant turn carries cost / tokens / tool calls — the same
+    shape that FEAT-6 surfaced in the JSON export.
+    """
+    parts: list[str] = [f"# {meta.title}", "", f"_Model: `{meta.model}`_", ""]
+    for m in messages:
+        if m.role == "user":
+            parts.append("## You")
+        elif m.role == "assistant":
+            parts.append("## Assistant")
+        else:
+            parts.append(f"## {m.role.capitalize()}")
+        parts.append("")
+        parts.append(m.content)
+        if m.role == "assistant" and m.tool_calls:
+            attribution = ", ".join(f"`{tc.name}`" for tc in m.tool_calls)
+            parts.append("")
+            parts.append(f"> _Tools: {attribution}_")
+        parts.append("")
+    return "\n".join(parts)
+
+
 @router.get("/sessions/{session_id}/transcript")
-async def transcript_stub(session_id: str) -> dict[str, str]:
-    """Transcript export is implemented client-side (see lib/transcript.ts).
-    Server-side export for shareable-link use cases lives in a later phase."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="server-side transcript export not in v1; use the client-side download.",
+async def transcript_export(
+    session_id: str,
+    request: Request,
+    store: StoreDep,
+    upstream: UpstreamDep,
+    format: str = "markdown",
+) -> Response:
+    """P2-4 — server-side transcript export. Supports ``markdown``,
+    ``json``, and ``docx``. The DOCX path runs the markdown through
+    ``kaos_content.parse_markdown`` → ``kaos_office.docx.write_docx_bytes``
+    so the output preserves headings, lists, bold/italic, and code
+    fences instead of being a plain-text dump."""
+    fmt = format.lower()
+    if fmt not in ("markdown", "json", "docx"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "what": f"unsupported transcript format {format!r}",
+                "how_to_fix": "use one of: markdown, json, docx",
+            },
+        )
+
+    # Reuse the existing history fetch path. We can't call get_history
+    # directly because it's a FastAPI handler; pull the upstream call
+    # inline instead.
+    try:
+        meta = await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    bearer = _bearer_from_request(request)
+    r = await upstream.get(
+        f"/v1/sessions/{session_id}/memory/messages",
+        headers={"Authorization": f"Bearer {bearer}"},
+    )
+    messages: list[HistoryMessage] = []
+    if r.status_code < 400:
+        raw = r.json()
+        for item in raw.get("items", []):
+            content_str = item.get("content", "")
+            role = "assistant"
+            text = content_str
+            for prefix, mapped in (
+                ("user: ", "user"),
+                ("assistant: ", "assistant"),
+                ("system: ", "system"),
+            ):
+                if content_str.startswith(prefix):
+                    role = mapped
+                    text = content_str[len(prefix) :]
+                    break
+            messages.append(
+                HistoryMessage(
+                    role=role,  # type: ignore[arg-type]
+                    content=text,
+                    added_at=float(item.get("added_at", 0.0)),
+                )
+            )
+        messages.sort(key=lambda m: m.added_at)
+
+    if fmt == "markdown":
+        body = _transcript_markdown(meta, messages)
+        return Response(
+            content=body,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{meta.title}.md"',
+            },
+        )
+
+    if fmt == "json":
+        body = HistoryResponse(
+            session_id=session_id,
+            turn_count=len(messages),
+            item_count=len(messages),
+            messages=messages,
+        ).model_dump_json(indent=2)
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{meta.title}.json"',
+            },
+        )
+
+    # fmt == "docx" — round-trip via kaos-content + kaos-office writers.
+    try:
+        from kaos_content.parsers import parse_markdown
+        from kaos_office.docx import write_docx_bytes
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "what": "DOCX export is unavailable",
+                "how_to_fix": "install the kaos-office + kaos-content extras",
+                "alternative": "use format=markdown or format=json",
+            },
+        ) from exc
+
+    md = _transcript_markdown(meta, messages)
+    doc = parse_markdown(md)
+    docx_bytes = write_docx_bytes(doc)
+    return Response(
+        content=docx_bytes,
+        media_type=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        headers={
+            "Content-Disposition": f'attachment; filename="{meta.title}.docx"',
+        },
     )

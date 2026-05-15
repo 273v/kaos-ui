@@ -362,6 +362,27 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
       };
     }
 
+    case "tool_policy_decided": {
+      // TR-7: attach the planner snapshot to the in-flight assistant
+      // message so <Message> can render the ToolPolicyBadge (TR-9)
+      // above the response, AND so CostStrip (TR-10) can attribute
+      // the planner cost separately from the main turn cost.
+      return {
+        ...state,
+        messages: patchAssistant(state.messages, {
+          tool_policy: {
+            turn_groups: event.turn_groups,
+            ceiling_groups: event.ceiling_groups,
+            reasoning: event.reasoning,
+            confidence: event.confidence,
+            fell_back_to_ceiling: event.fell_back_to_ceiling,
+            cost_usd: event.cost_usd,
+            latency_ms: event.latency_ms,
+          },
+        }),
+      };
+    }
+
     default: {
       // Compile-time exhaustiveness: if a new event class lands and
       // we forget to handle it, this never-narrowing assignment fails

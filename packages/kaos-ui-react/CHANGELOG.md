@@ -4,6 +4,35 @@ All notable changes to this package are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.0-alpha.1] — 2026-05-15
+
+### Fixed
+
+- **FIX-19 — `<DocumentExplorer>` flexbox layout.** Added
+  `min-w-0 overflow-hidden` to the aside so the declared `w-80`
+  width is respected when a file summary contains long unbreakable
+  tokens. Added `break-words` to error / summary text containers.
+
+### Added — Tool policy transparency surface (TR-7..TR-12)
+
+- `ToolPolicyDecidedEvent` joins the `KaosAgentEvent` discriminated
+  union. Backend-agnostic: kaos-agents itself does not emit this
+  event yet; consumers tolerating its absence (eg plain kaos-agents
+  0.1.0a1 backends) continue to work unchanged. See the event type's
+  docstring for promotion status.
+- `ChatMessage.tool_policy: ToolPolicySnapshot` carries the per-turn
+  narrowing decision when the backend's planner Program emits it.
+- `<ToolPolicyBadge>` in `./chat` renders an inline transparency
+  chip above the assistant message ("Tools: web · 95%") clickable
+  to expand reasoning + cost + latency.
+- `<CostStrip>` (`./debug`) gains a "Planner" row aggregating
+  per-session planner cost when at least one `tool_policy_decided`
+  event has fired with non-zero cost.
+- `ALL_EVENT_TYPES.length` increases from 15 to 16. Event-handler
+  dispatch is exhaustive over the new union.
+
 ## [0.1.0-alpha.0] — Unreleased
 
 First public alpha. The API surface is documented in

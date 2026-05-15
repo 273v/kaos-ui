@@ -3,6 +3,7 @@
 export type {
   MessageRole,
   ToolCallSummary,
+  ToolPolicySnapshot,
   ChatMessage,
   TurnStatusKind,
 } from "./chat-state.js";
@@ -26,6 +27,7 @@ export type {
   RunErrorEvent,
   BudgetExceededEvent,
   ToolCallApprovalRequiredEvent,
+  ToolPolicyDecidedEvent,
   KaosAgentEvent,
   EventType,
 } from "./events.js";

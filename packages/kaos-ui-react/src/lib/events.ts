@@ -101,6 +101,42 @@ export interface ToolCallApprovalRequiredEvent {
   run_state_ref?: string;
 }
 
+/**
+ * Per-turn tool-policy decision (TR-7).
+ *
+ * Emitted by the kaos-ui single-user-chat backend before each tool-able
+ * turn when `SessionMeta.tool_set.auto_narrow` is true. Carries the
+ * TurnToolPolicy planner's output so the SPA can show a transparency
+ * badge above the assistant message (TR-9 `<ToolPolicyBadge>`) and
+ * attribute the per-turn planner cost separately (TR-10 CostStrip).
+ *
+ * Not emitted by stock kaos-agents — this is a kaos-ui example
+ * extension. After two release windows of dogfooding, the matching
+ * Program may be promoted into `kaos_agents.planning.policy` and the
+ * event into the canonical taxonomy. Until then, consumers must
+ * tolerate its absence.
+ */
+export interface ToolPolicyDecidedEvent {
+  type: "tool_policy_decided";
+  /** Groups the agent will see this turn (subset of ceiling_groups). */
+  turn_groups: string[];
+  /** The session-level ceiling that bounded the planner's choice. */
+  ceiling_groups: string[];
+  /** One-sentence justification, surfaced to the user. */
+  reasoning: string;
+  /** Planner's self-rated confidence in [0, 1]. */
+  confidence: number;
+  /**
+   * When true, the planner abdicated (low confidence or empty
+   * intersection) and `turn_groups === ceiling_groups`.
+   */
+  fell_back_to_ceiling: boolean;
+  /** Planner LLM cost for this decision. Used by the CostStrip "Planner" row. */
+  cost_usd: number;
+  /** Wall-clock latency of the planner call in milliseconds. */
+  latency_ms: number;
+}
+
 export type KaosAgentEvent =
   | SpanEvent
   | TextDeltaEvent
@@ -116,9 +152,17 @@ export type KaosAgentEvent =
   | MemoryEventEvent
   | RunErrorEvent
   | BudgetExceededEvent
-  | ToolCallApprovalRequiredEvent;
+  | ToolCallApprovalRequiredEvent
+  | ToolPolicyDecidedEvent;
 
-/** All 15 event type strings, in canonical order. */
+/**
+ * All canonical event type strings.
+ *
+ * The first 15 are kaos-agents wire types; `tool_policy_decided` is
+ * a kaos-ui extension (TR-7) — see the type's docstring for promotion
+ * status. Listed here so the event-handler dispatcher recognizes it
+ * without falling through to the unknown-event path.
+ */
 export const ALL_EVENT_TYPES = [
   "span",
   "text_delta",
@@ -135,6 +179,7 @@ export const ALL_EVENT_TYPES = [
   "run_error",
   "budget_exceeded",
   "tool_call_approval_required",
+  "tool_policy_decided",
 ] as const;
 
 export type EventType = (typeof ALL_EVENT_TYPES)[number];

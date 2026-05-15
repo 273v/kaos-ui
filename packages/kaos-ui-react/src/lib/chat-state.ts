@@ -16,6 +16,23 @@ export interface ToolCallSummary {
   result_preview?: string;
 }
 
+/**
+ * Per-turn tool-policy snapshot (TR-7 / TR-9).
+ *
+ * Populated when the backend emits `tool_policy_decided`. Surfaced on
+ * the assistant message as a transparency badge so the user can see
+ * which tool categories were active for this specific turn.
+ */
+export interface ToolPolicySnapshot {
+  turn_groups: string[];
+  ceiling_groups: string[];
+  reasoning: string;
+  confidence: number;
+  fell_back_to_ceiling: boolean;
+  cost_usd: number;
+  latency_ms: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -41,6 +58,12 @@ export interface ChatMessage {
   latency_ms?: number;
   /** Inline tool-call cards rendered inside the assistant message. */
   tool_calls?: ToolCallSummary[];
+  /**
+   * Per-turn tool-policy decision the planner made for this turn.
+   * Optional — set only when the backend emits `tool_policy_decided`
+   * (kaos-ui example extension, TR-7).
+   */
+  tool_policy?: ToolPolicySnapshot;
 }
 
 export type TurnStatusKind =

@@ -25,7 +25,7 @@ from app.auth import require_auth
 from app.deps import get_runtime, get_session_store, get_settings
 from app.exceptions import SessionNotFoundError
 from app.logging_setup import app_logger
-from app.models import FileListResponse, UploadResponse
+from app.models import CorpusSearchHitWire, CorpusSearchResponse, FileListResponse, UploadResponse
 from app.persistence.sessions import SessionStore
 from app.services.uploads import (
     FileNotFoundError,
@@ -107,10 +107,7 @@ async def upload_file(
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail={
-                    "what": (
-                        f"upload exceeded {settings.max_upload_bytes} bytes "
-                        f"while streaming"
-                    ),
+                    "what": (f"upload exceeded {settings.max_upload_bytes} bytes while streaming"),
                     "how_to_fix": (
                         "split the file or compress it; "
                         f"max upload size is {settings.max_upload_bytes // (1024 * 1024)} MiB"
@@ -158,6 +155,53 @@ async def upload_file(
         session_id=session_id,
         file=file_meta,
         tools_enabled=meta.tools_enabled,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/files/search",
+    response_model=CorpusSearchResponse,
+)
+async def search_corpus(
+    session_id: str,
+    store: StoreDep,
+    runtime: RuntimeDep,
+    q: str,
+    top_k: int = 10,
+) -> CorpusSearchResponse:
+    """P2-3 — BM25 search over the session's ready-parsed uploads.
+
+    Returns paragraph-level hits ordered by descending score. The
+    SPA can render hits as "jump to source" affordances; the agent
+    can also call this surface via a future `kaos-content-*` tool
+    bridged on the runtime.
+    """
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    from app.services.corpus_search import search_session_corpus
+
+    hits = await search_session_corpus(
+        runtime=runtime,
+        session_id=session_id,
+        query=q,
+        top_k=max(1, min(top_k, 50)),
+    )
+    return CorpusSearchResponse(
+        session_id=session_id,
+        query=q,
+        count=len(hits),
+        hits=[
+            CorpusSearchHitWire(
+                filename=h.filename,
+                score=h.score,
+                snippet=h.snippet,
+                char_offset=h.char_offset,
+            )
+            for h in hits
+        ],
     )
 
 

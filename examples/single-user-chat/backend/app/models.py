@@ -13,9 +13,64 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 Provider = Literal["anthropic", "openai", "google", "xai"]
+
+
+# ── tool policy (TR-3) ────────────────────────────────────────────────
+
+
+class SessionToolSetWire(BaseModel):
+    """Per-session tool allow / deny policy — wire shape for SessionMeta.
+
+    Round-trips through :class:`kaos_agents.types.SessionToolSet` via
+    :meth:`to_session_tool_set`. JSON-friendly: lists instead of
+    frozensets, ``default_factory`` for the "block everything except
+    explicitly allowed groups" default.
+
+    Semantics (resolves at proxy time, applied in
+    :func:`kaos_agents.context.filter_tools`):
+
+    1. ``allowed_groups`` empty → all groups pass the allow check.
+    2. ``allowed_groups`` non-empty → tool's group must be in this set
+       (groups from :data:`default_tool_group_registry`).
+    3. ``denied_tools`` always wins — tools listed here are blocked
+       even when their group is allowed.
+    4. ``auto_narrow`` controls whether the per-turn TurnToolPolicy
+       planner runs (TR-5). When false, the ceiling above is the
+       effective tool set every turn.
+    """
+
+    allowed_groups: list[str] = Field(
+        default_factory=lambda: ["documents", "citations", "vfs"],
+        description=(
+            "Tool group names that are allowed for this session "
+            "(ceiling). Defaults to documents+citations+vfs — web is "
+            "opt-in because of cost and privacy implications."
+        ),
+    )
+    denied_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tool names that are always blocked, even if their group is "
+            "allowed. The hard read-only floor lives here at config "
+            "time so user toggles can never accept a write tool."
+        ),
+    )
+    auto_narrow: bool = Field(
+        default=True,
+        description=(
+            "When True, the TurnToolPolicy planner Program runs before "
+            "each turn and may narrow the effective tool set within "
+            "this ceiling. When False, the full ceiling is used."
+        ),
+    )
+
+    @property
+    def is_blocking_all(self) -> bool:
+        """True when the ceiling allows no tools (allowed_groups=[])."""
+        return not self.allowed_groups
 
 
 class ModelEntry(BaseModel):
@@ -42,7 +97,13 @@ class SessionMeta(BaseModel):
     title: str
     model: str
     system_prompt: str
-    tools_enabled: bool = False
+    # TR-3: tool_set is the source of truth for what the agent can call.
+    # `tools_enabled` (below) is a derived view kept for one release so
+    # the SPA can migrate without a flag day. Older meta sidecars that
+    # only carry tools_enabled hydrate into the default ceiling
+    # (documents+citations+vfs) — see `_migrate_tool_set` in
+    # services/sessions.py.
+    tool_set: SessionToolSetWire = Field(default_factory=SessionToolSetWire)
     created_at: datetime
     last_message_at: datetime | None = None
     message_count: int = 0
@@ -56,6 +117,47 @@ class SessionMeta(BaseModel):
     # Wall-clock of the last auto-title generation. Used to throttle
     # re-summarization (default cadence: every 10 messages OR 24h).
     title_updated_at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tools_enabled(self) -> bool:
+        """Backward-compat derived view: True when ANY group is allowed.
+
+        The SPA's existing "Enable read-only tools" checkbox reads
+        this field. Until the SettingsSheet migrates to per-category
+        toggles (TR-8), `tools_enabled=False` maps to "block all" and
+        `tools_enabled=True` maps to "default ceiling".
+        """
+        return not self.tool_set.is_blocking_all
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_tools_enabled(cls, data: object) -> object:
+        """Hydrate ``tool_set`` from a legacy ``tools_enabled`` bool.
+
+        Old meta sidecars only carried ``tools_enabled: bool``. Without
+        this migration, those files would silently lose the toggle on
+        load (the bool would be discarded; ``tool_set`` would default
+        to the standard ceiling regardless of what the user had
+        chosen). Run only when ``tool_set`` is absent AND
+        ``tools_enabled`` is present so live data isn't double-mapped.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "tool_set" in data:
+            # New shape — drop any stale tools_enabled key so the
+            # computed_field is authoritative.
+            data.pop("tools_enabled", None)
+            return data
+        legacy = data.pop("tools_enabled", None)
+        if legacy is False:
+            data["tool_set"] = {
+                "allowed_groups": [],
+                "denied_tools": [],
+                "auto_narrow": True,
+            }
+        # legacy True or None → default ceiling (the field default).
+        return data
 
 
 class SessionSummary(BaseModel):
@@ -101,8 +203,75 @@ class PatchMetaBody(BaseModel):
     starred: bool | None = None
 
 
+# ── tool-policy routes (TR-4) ─────────────────────────────────────────
+
+
+class CategoryInfo(BaseModel):
+    """One row of GET /v1/chat/categories.
+
+    Sourced from kaos-agents' ``default_tool_group_registry`` joined
+    with kaos-ui's :data:`KAOS_TOOL_GROUP_DESCRIPTIONS`. The SPA
+    renders one checkbox per row in the SettingsSheet (TR-8).
+    """
+
+    id: str = Field(description="Group name, eg. 'documents'.")
+    label: str = Field(description="Human-readable label for the checkbox.")
+    description: str = Field(description="Tooltip / hint for the user.")
+    default_enabled: bool = Field(
+        description=(
+            "Whether new sessions include this group in their ceiling. "
+            "Maps to :class:`SessionToolSetWire`'s default_factory."
+        ),
+    )
+    tool_count: int = Field(description="Number of tools currently in this group.")
+
+
+class CategoriesResponse(BaseModel):
+    """GET /v1/chat/categories response."""
+
+    categories: list[CategoryInfo]
+
+
+class ToolSetUpdateBody(BaseModel):
+    """PATCH /v1/chat/sessions/{id}/tool-set body.
+
+    Both fields optional — pass only the dimension you're changing.
+    ``allowed_groups`` empty list means "block all" (the session is
+    fully read-only at the proxy layer).
+    """
+
+    allowed_groups: list[str] | None = Field(
+        default=None,
+        description="New ceiling. Use [] to block everything.",
+    )
+    denied_tools: list[str] | None = Field(
+        default=None,
+        description="New per-session deny list. Override the policy floor.",
+    )
+    auto_narrow: bool | None = Field(
+        default=None,
+        description=(
+            "When true, the TurnToolPolicy planner runs per-turn within "
+            "the ceiling. When false, the full ceiling is used every turn."
+        ),
+    )
+
+
 class SendMessageBody(BaseModel):
     message: str = Field(min_length=1, max_length=_MAX_MESSAGE_LEN)
+    # P2-4: per-turn model override for "Re-run with different model".
+    # Doesn't persist to SessionMeta.model — applies to this turn only.
+    # The SPA's user-message kebab → "Re-run with model X" hits POST
+    # /messages with the original message text + a different `model`.
+    model: str | None = Field(
+        default=None,
+        max_length=_MAX_MODEL_LEN,
+        description=(
+            "Optional per-turn model override (provider:model). When "
+            "None, uses SessionMeta.model. The session's stored model "
+            "is unchanged either way."
+        ),
+    )
 
 
 class ArchiveResponse(BaseModel):
@@ -150,37 +319,15 @@ class HistoryResponse(BaseModel):
     messages: list[HistoryMessage]
 
 
-# ── file uploads (P1-1) ───────────────────────────────────────────────
+# ── file uploads (P1-1, promoted to kaos_ui.uploads by P1-5) ──────────
 
 
-class FileParseStatus(BaseModel):
-    """Parse outcome for one uploaded file.
-
-    ``ready`` means the file was parsed and a `.kaos.json` AST sidecar
-    exists in the VFS alongside the original bytes. ``failed`` means
-    parsing raised — the original bytes were still saved.
-    """
-
-    status: Literal["ready", "failed"]
-    error: str | None = None
-
-
-class FileMeta(BaseModel):
-    """Per-file metadata persisted alongside the upload in the VFS.
-
-    Lives at ``sessions/{session_id}/files/{filename}.meta.json``.
-    """
-
-    filename: str
-    size_bytes: int
-    content_type: str | None = None
-    uploaded_at: datetime
-    parse: FileParseStatus
-    # Populated post-parse via kaos-nlp-core + kaos-llm-core. Both are
-    # best-effort — a parse failure or summarizer outage leaves them
-    # null, but the file is still persisted.
-    token_count: int | None = None
-    summary: str | None = None
+# Re-export the canonical Pydantic shapes from kaos_ui.uploads so the
+# FastAPI routes can keep using `response_model=FileMeta` unchanged.
+# Identical fields; the only difference vs the previous definitions
+# here is that the source-of-truth class lives in kaos-ui now and is
+# shared with any other consumer.
+from kaos_ui.uploads import FileMeta, FileParseStatus  # noqa: E402,F401
 
 
 class UploadResponse(BaseModel):
@@ -232,3 +379,24 @@ class ExtractCitationsResponse(BaseModel):
     session_id: str
     count: int
     citations: list[dict]
+
+
+# ── corpus search (P2-3) ──────────────────────────────────────────────
+
+
+class CorpusSearchHitWire(BaseModel):
+    """One BM25 hit on the session's uploaded corpus."""
+
+    filename: str
+    score: float
+    snippet: str = Field(description="First ~300 chars of the matching passage.")
+    char_offset: int = Field(description="Byte offset within the source file's markdown.")
+
+
+class CorpusSearchResponse(BaseModel):
+    """GET /v1/chat/sessions/{id}/files/search response."""
+
+    session_id: str
+    query: str
+    count: int
+    hits: list[CorpusSearchHitWire]

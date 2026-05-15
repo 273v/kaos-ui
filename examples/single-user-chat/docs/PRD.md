@@ -121,7 +121,13 @@ Layout per `UX-LANGUAGE.md` § 4.7 (right-side sheet, no tabs, single scrollable
   - `xai:grok-3`
   - `xai:grok-3-mini`
 - **System prompt** — multi-line textarea; pre-filled with the default; per-session.
-- **Tools** — single toggle: "Enable read-only KAOS tools" (default off). When on, the per-turn `Agent.tools=("*",)` glob exposes everything registered on the runtime; when off, `Agent.tools=("kaos-core-*",)` restricts to core tools only.
+- **Tool policy** (TR-1..TR-13) — per-category checkboxes + preset picker + auto-narrow toggle, replacing the legacy single "Enable read-only tools" checkbox. Categories are populated from `GET /v1/chat/categories` (sourced from `kaos_agents.registry.default_tool_group_registry` which `kaos_ui.agents.register_kaos_tool_groups` populates at startup).
+  - **Categories shipped**: `documents` (kaos-pdf, kaos-office-parse, kaos-content), `citations` (kaos-citations), `vfs` (kaos-core-vfs, kaos-core-artifacts), `web` (kaos-source-*).
+  - **Default ceiling**: `{documents, citations, vfs}`. `web` is opt-in because of cost and privacy implications — Federal Register / EDGAR / eCFR / GovInfo / GLEIF connectors hit the live internet from the user's host.
+  - **Auto-narrow planner** (TR-5/TR-6): when on (default), the `TurnToolPolicy` Program runs before each tool-able turn — a single Haiku-class LLM call that picks the smallest set of categories within the ceiling that this turn needs. Web for research questions; documents for upload questions; etc. Confidence < 0.6 → fall back to the full ceiling. Cost target: ≤ $0.0002/turn. Latency target: ≤ 300ms p95.
+  - **Wire shape**: `SessionMeta.tool_set: {allowed_groups: string[], denied_tools: string[], auto_narrow: boolean}`. Backward-compat: legacy meta sidecars with only `tools_enabled: bool` migrate at load — `False` → blocked ceiling, `True` → default ceiling. The `tools_enabled` property is a derived `@computed_field` for one release window.
+  - **Hard floor**: `denied_tools` is the per-session deny list that always wins over `allowed_groups`. Write tools (`kaos-office-write-*`) are never bridged, so a future write surface cannot slip into a session just because the user enabled the office group.
+  - **Transparency**: a per-turn `tool_policy_decided` SSE event drives a `<ToolPolicyBadge>` chip above the assistant message — "Tools: web · 95%" — clickable for the planner's reasoning. `<CostStrip>` shows planner cost as a separate "Planner" row.
 - **Save** button — issues a PATCH to our metadata router (see `ARCHITECTURE.md` § 3.4) and closes the drawer. Settings apply to the **next** turn (Agent is built fresh per turn).
 - **Export** — two buttons: "Download Markdown" and "Download JSON." Pure client-side render from the session detail payload.
 

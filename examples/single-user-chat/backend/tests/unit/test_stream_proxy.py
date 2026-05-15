@@ -34,26 +34,77 @@ def test_forward_body_disables_tools_with_no_match_filter() -> None:
     assert "Tools are disabled for this session" in body["instructions"]
 
 
-def test_forward_body_enables_tools_with_readonly_allowlist_and_catalog() -> None:
-    """tools_enabled=True must forward the curated read-only allowlist,
-    NOT a wildcard. The UI label "Enable read-only tools" is only true
-    if we keep the glob bounded."""
-    from app.services.catalog import READ_ONLY_TOOL_GLOBS
+def test_forward_body_enables_tools_with_session_tool_set_filter() -> None:
+    """TR-2: tools_enabled=True must resolve the SessionMeta.tool_set
+    ceiling (default = documents + citations + vfs) against the runtime
+    catalog and forward only the matching tool names, not a wildcard."""
+    from kaos_agents.registry import default_tool_group_registry
+    from kaos_agents.types import ToolGroup
+
+    # Register groups so the proxy can resolve allowed_groups -> names.
+    default_tool_group_registry.clear()
+    default_tool_group_registry.register(
+        ToolGroup(
+            name="documents",
+            description="parsing",
+            tool_names=("kaos-pdf-search-document",),
+        )
+    )
+    default_tool_group_registry.register(
+        ToolGroup(
+            name="vfs",
+            description="vfs",
+            tool_names=("kaos-core-list-tools",),
+        )
+    )
 
     body = _build_forward_body(
         _meta(tools_enabled=True),
         "what tools can you use",
         0.5,
-        available_tool_names=("kaos-pdf-search-document", "kaos-core-list-tools"),
+        # Catalog contains one allowed tool (in `documents`) plus one
+        # that is not in any registered group (should be excluded by
+        # the SessionToolSet's allowed_groups filter).
+        available_tool_names=(
+            "kaos-pdf-search-document",
+            "kaos-core-list-tools",
+            "kaos-tabular-query",  # no group registered → excluded
+        ),
     )
 
-    # tools field is the curated allowlist, not "*".
-    assert body["tools"] == list(READ_ONLY_TOOL_GLOBS)
+    # Only the tools whose group is in the default ceiling
+    # (documents + citations + vfs) pass through.
+    assert set(body["tools"]) == {"kaos-pdf-search-document", "kaos-core-list-tools"}
+    assert "kaos-tabular-query" not in body["tools"]
     assert "*" not in body["tools"]
-    # And the system prompt still names the tools the agent can actually use.
-    assert "Available KAOS tool names (2)" in body["instructions"]
-    assert "- kaos-core-list-tools" in body["instructions"]
-    assert "- kaos-pdf-search-document" in body["instructions"]
+    # The system prompt still names every tool in the catalog (the
+    # available_tool_names argument is the un-filtered list — the
+    # filtering happens at the wire layer).
+    assert "Available KAOS tool names (3)" in body["instructions"]
+
+
+def test_forward_body_falls_back_to_group_globs_without_catalog() -> None:
+    """When no available_tool_names is supplied, the proxy can't
+    enumerate the catalog. It falls back to group-prefix globs so the
+    ceiling is still applied (bridge-side fnmatch enforces from there).
+    """
+    body = _build_forward_body(
+        _meta(tools_enabled=True),
+        "hi",
+        0.5,
+        # No available_tool_names → fallback path.
+    )
+
+    # Default ceiling is documents+citations+vfs, which expands to:
+    expected_prefixes = {
+        "kaos-pdf-*",
+        "kaos-office-parse-*",
+        "kaos-content-*",
+        "kaos-citations-*",
+        "kaos-core-vfs-*",
+        "kaos-core-artifacts-*",
+    }
+    assert set(body["tools"]) == expected_prefixes
 
 
 def test_readonly_allowlist_excludes_write_globs() -> None:

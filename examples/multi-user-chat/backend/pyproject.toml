@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multi-user-chat-backend"
+version = "0.1.0-alpha.0"
+description = "Multi-tenant kaos-agents chat backend — proves @273v/kaos-ui-react generalizes (UI-I)."
+requires-python = ">=3.13"
+dependencies = [
+  # Same kaos-* stack as single-user. The difference is at the auth
+  # + storage layer, not the chat pipeline.
+  "kaos-agents>=0.1.0a1,<0.2",
+  "kaos-core>=0.1.0a6,<0.2",
+  "kaos-ui>=0.1.0a1,<0.2",
+  "kaos-llm-core>=0.1.0a7,<0.2",
+  "kaos-llm-client>=0.1.0a3,<0.2",
+  # JWT verification — HS256 minimal shape; swap for OIDC JWKS in prod.
+  "PyJWT>=2.9,<3",
+  # Same FastAPI / SSE / multipart / pydantic baseline as single-user.
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.32,<1.0",
+  "sse-starlette>=2.1,<3",
+  "python-multipart>=0.0.20,<1",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.8,<3",
+  "ulid-py>=1.1,<2",
+  "httpx>=0.28,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

@@ -22,7 +22,7 @@ from kaos_core.vfs import VFSConfig, VirtualFileSystem
 from kaos_core.vfs.models import IsolationMode
 
 from app.exceptions import SessionNotFoundError
-from app.models import SessionMeta, SessionSummary
+from app.models import SessionMeta, SessionSummary, SessionToolSetWire
 
 _NS = "single-user-chat/sessions"
 _ARCHIVED_NS = "single-user-chat/archived"
@@ -92,14 +92,24 @@ class SessionStore:
         Caller is responsible for creating the matching kaos-agents
         session (POST /v1/sessions with this same id). The two sides
         share the id but maintain separate state.
+
+        ``tools_enabled`` is back-compat sugar: maps to a default
+        ceiling (``True``) or to a fully-blocked ceiling (``False``).
+        Callers wanting per-group control should mutate ``tool_set``
+        via :meth:`patch` after creation.
         """
         sid = session_id or new_session_id()
+        # Translate the boolean knob into the new ceiling-based shape.
+        if tools_enabled:
+            tool_set = SessionToolSetWire()  # default ceiling
+        else:
+            tool_set = SessionToolSetWire(allowed_groups=[], denied_tools=[], auto_narrow=True)
         meta = SessionMeta(
             id=sid,
             title=title,
             model=model,
             system_prompt=system_prompt,
-            tools_enabled=tools_enabled,
+            tool_set=tool_set,
             created_at=_now(),
             last_message_at=None,
             message_count=0,
@@ -175,6 +185,7 @@ class SessionStore:
         model: str | None = None,
         system_prompt: str | None = None,
         tools_enabled: bool | None = None,
+        tool_set: SessionToolSetWire | None = None,
         starred: bool | None = None,
         title_source: str | None = None,
         title_updated_at: datetime | None = None,
@@ -192,8 +203,18 @@ class SessionStore:
             updates["model"] = model
         if system_prompt is not None:
             updates["system_prompt"] = system_prompt
-        if tools_enabled is not None:
-            updates["tools_enabled"] = tools_enabled
+        # TR-3: tool_set is the source of truth. A bool tools_enabled
+        # patch is back-compat sugar — translate to a tool_set update.
+        # When both are supplied, tool_set wins (explicit beats sugar).
+        if tool_set is not None:
+            updates["tool_set"] = tool_set
+        elif tools_enabled is not None:
+            if tools_enabled:
+                updates["tool_set"] = SessionToolSetWire()  # default ceiling
+            else:
+                updates["tool_set"] = SessionToolSetWire(
+                    allowed_groups=[], denied_tools=[], auto_narrow=True
+                )
         if starred is not None:
             updates["starred"] = starred
         if title_source is not None:

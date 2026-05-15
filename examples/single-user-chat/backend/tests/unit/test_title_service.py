@@ -83,10 +83,7 @@ def test_pre_existing_session_left_alone_off_cadence() -> None:
     heuristic title.
     """
     for count in (3, 4, 5, 6, 7, 8, 9, 11, 13, 99):
-        assert (
-            _should_retitle(_meta(message_count=count, title_updated_at=None))
-            is False
-        ), count
+        assert _should_retitle(_meta(message_count=count, title_updated_at=None)) is False, count
 
 
 def test_stale_auto_title_refreshes_after_24h() -> None:

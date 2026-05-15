@@ -225,6 +225,14 @@ These are not in our codebase. We don't document their shapes in detail here —
 | POST | `/v1/chat/sessions/{id}/messages` | `{message: str}` | `EventSourceResponse` — proxy stream |
 | GET | `/v1/chat/sessions/{id}/transcript` | — query: `?format=markdown\|json` | text/markdown or application/json |
 | POST | `/v1/chat/sessions/{id}/archive` | — | `{ok: true, archived_at}` |
+| GET | `/v1/chat/categories` | — | `{categories: CategoryInfo[]}` (TR-4) |
+| PATCH | `/v1/chat/sessions/{id}/tool-set` | `{allowed_groups?, denied_tools?, auto_narrow?}` | `SessionMeta` (TR-4) |
+| GET | `/v1/chat/sessions/{id}/files` | — | `{files: FileMeta[]}` (P1-2) |
+| POST | `/v1/chat/sessions/{id}/files` | multipart | `{file: FileMeta, tools_enabled}` (P1-1) |
+| GET | `/v1/chat/sessions/{id}/files/{name}/download` | — | binary (FEAT-5) |
+| DELETE | `/v1/chat/sessions/{id}/files/{name}` | — | 204 |
+| POST | `/v1/chat/sessions/{id}/files:backfill` | `{overwrite?, filename?}` | `{updated: int}` (FIX-2) |
+| POST | `/v1/chat/sessions/{id}/citations` | `{text}` | `{citations[], count}` (P2-1) |
 
 ### 3.3 Pydantic shapes
 
@@ -236,16 +244,29 @@ class ModelEntry(BaseModel):
     context_window: int | None = None
     recommended_for: str | None = None
 
+class SessionToolSetWire(BaseModel):
+    # TR-3: per-session tool ceiling. allowed_groups bounds the
+    # planner's per-turn choice; denied_tools is the hard floor.
+    allowed_groups: list[str] = Field(
+        default_factory=lambda: ["documents", "citations", "vfs"]
+    )
+    denied_tools: list[str] = Field(default_factory=list)
+    auto_narrow: bool = True
+
 class SessionMeta(BaseModel):
     id: str                            # ULID, shared with kaos-agents session_id
     title: str
     model: str                         # "provider:model"
     system_prompt: str
-    tools_enabled: bool = False
+    tool_set: SessionToolSetWire       # TR-3 — source of truth
+    tools_enabled: bool                # @computed_field, = not tool_set.is_blocking_all
     created_at: datetime
     last_message_at: datetime | None = None
     message_count: int = 0
     archived: bool = False
+    starred: bool = False
+    title_source: Literal["manual", "auto"] = "auto"
+    title_updated_at: datetime | None = None
 
 class SessionSummary(BaseModel):
     id: str
@@ -284,6 +305,22 @@ async def send(session_id: str, body: SendMessageBody, request: Request):
 `stream_proxy` is `httpx.AsyncClient.stream("POST", upstream_url, headers={Authorization, Accept: text/event-stream}, json=forward_body)` — see `services/stream_proxy.py`. After the stream completes, the proxy bumps `meta.last_message_at` and `meta.message_count` in our sidecar.
 
 **Why HTTP-forward instead of in-process `Runner.run()`?** Per-turn overrides on the wire mean we don't need to construct an Agent ourselves — kaos-agents builds it from the body. Less coupling to kaos-agents internals. The HTTP hop is on localhost; latency is negligible vs. the LLM round-trip.
+
+### 3.5 Per-turn latency budget (DOC-3)
+
+End-to-end target for a tool-able turn with `auto_narrow=True`:
+
+| Stage | Typical | Notes |
+|---|---|---|
+| `IntentExtractor` (kaos-agents) | ~1.5s | Haiku classify "TOOL_USE vs RESPOND" |
+| `TurnToolPolicy` planner (TR-5) | ~1.1s | Haiku narrow categories; cost ~$0.001 |
+| ReAct LLM call(s) | 2–10s | The expensive step; bounded by `APP_TURN_BUDGET_USD` |
+| Tool execution | 0.1–8s | Depends on the tool (Federal Register search is ~1.5s remote) |
+| `turn_summary` emit + meta touch | <50ms | Pure local write |
+| **End-to-end p50** | 5–8s | One tool call + one LLM round trip |
+| **End-to-end p95** | 12–18s | Two ReAct iterations + slow tool |
+
+Provider transport is `pydantic-ai-slim` via `kaos-llm-client`. `kaos-source` connectors gated through `SessionToolSet.allowed_groups` at the proxy (TR-2); the agent never sees a denied tool. Auto-title (POL-B) uses a separate `kaos-llm-core.programs.summarize_session_title` Call (Haiku default; configurable via `APP_AUTO_TITLE_MODEL`); `title_source` flips from "auto" to "manual" the moment the user renames a session via PATCH /meta.
 
 ## 4. Backend internals (extension layer)
 
@@ -338,7 +375,57 @@ Note env literal: `"development"` not `"dev"`, matching the template (verified a
 
 We do **not** redeclare `KAOS_AGENTS_API_TOKEN`, CORS origins, etc. — they live in kaos-agents' own settings (`KaosAgentsAPISettings`). `.env.example` documents both blocks side by side.
 
-### 4.3 The chat proxy router
+### 4.3 Tool policy — registry + per-session ceiling + per-turn planner
+
+The example demonstrates **two layers** of tool gating on top of
+kaos-agents:
+
+```
+SettingsSheet (TR-8)
+  ├─ PATCH /v1/chat/sessions/:id/tool-set        (TR-4)
+  │     ↓
+  │  SessionMeta.tool_set  (TR-3, persisted)
+  │  { allowed_groups, denied_tools, auto_narrow }
+  │     ↓
+  │  (read at every turn)
+  │     ↓
+TurnToolPolicy Program  (TR-5, optional per-turn narrowing)
+  ↓
+  effective_tool_set = ceiling ∩ planner_groups
+  ↓
+filter_tools(runtime.tools, SessionToolSet)       (TR-2)
+  ↓
+kaos-agents Runner sees ONLY the narrowed catalog
+  ↓
+tool_policy_decided SSE event           (TR-7, transparency)
+  ↓
+<ToolPolicyBadge> above the assistant message  (TR-9)
++ <CostStrip> "Planner" row             (TR-10)
+```
+
+Tool groups are partitioned by kaos-ui's
+`register_kaos_tool_groups(runtime)` (TR-1) which runs at app
+startup after every `register_*_tools` call. The four shipped
+groups (`web`, `documents`, `citations`, `vfs`) live in
+`kaos_agents.registry.default_tool_group_registry` so that
+`kaos_agents.context.filter_tools` can resolve a SessionToolSet
+against them.
+
+The `auto_narrow` planner (TR-5) is a single kaos-llm-core
+`Call` (Haiku by default, configurable via `APP_TURN_POLICY_MODEL`).
+Cost target ≤ $0.0002/turn, latency p95 ≤ 300ms; the planner
+abdicates to the full ceiling when its confidence is below 0.6
+(`APP_TURN_POLICY_CONFIDENCE_THRESHOLD`). Refusing to narrow is
+always safe — false narrowing wastes a turn, false broadening
+costs at most a few cents of prompt tokens.
+
+The `denied_tools` floor in SessionToolSetWire is the security
+boundary — write tools (`kaos-office-write-*`) are never bridged,
+even when the user enables every group. Promotion of this Program
+into `kaos_agents.planning.policy` is the followup; until then
+the example carries the lone implementation.
+
+### 4.4 The chat proxy router
 
 ```python
 # backend/app/routers/chat.py
@@ -393,7 +480,7 @@ async def transcript(sid: str, format: Literal["markdown", "json"] = "markdown",
     ...
 ```
 
-### 4.4 Stream service
+### 4.5 Stream service
 
 ```python
 # backend/app/services/stream_proxy.py

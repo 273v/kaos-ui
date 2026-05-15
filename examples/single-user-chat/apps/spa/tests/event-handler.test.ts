@@ -37,8 +37,11 @@ function makeSpan(subject: string, phase: string, attrs: Record<string, unknown>
 }
 
 describe("event-handler — wire-event coverage", () => {
-  it("covers all 15 event type strings", () => {
-    expect(ALL_EVENT_TYPES.length).toBe(15);
+  it("covers all 16 event type strings (15 kaos-agents + 1 kaos-ui ext)", () => {
+    // 15 canonical kaos-agents wire events + 1 kaos-ui extension
+    // (tool_policy_decided, TR-7) — see events.ts header docstring.
+    expect(ALL_EVENT_TYPES.length).toBe(16);
+    expect(ALL_EVENT_TYPES).toContain("tool_policy_decided");
   });
 
   it("text_delta appends to the streaming assistant message", () => {
@@ -244,6 +247,42 @@ describe("event-handler — span cartesian", () => {
     const next = applyEvent(initialState, makeSpan("step", "start", { step_index: 3 }));
     expect(next.status.kind).toBe("step");
     if (next.status.kind === "step") expect(next.status.index).toBe(3);
+  });
+
+  it("tool_policy_decided attaches policy snapshot to the streaming assistant", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "tool_policy_decided",
+      turn_groups: ["web"],
+      ceiling_groups: ["documents", "citations", "vfs", "web"],
+      reasoning: "User asked to search Federal Register.",
+      confidence: 0.95,
+      fell_back_to_ceiling: false,
+      cost_usd: 0.001,
+      latency_ms: 1100,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.tool_policy?.turn_groups).toEqual(["web"]);
+    expect(msg?.tool_policy?.confidence).toBe(0.95);
+    expect(msg?.tool_policy?.fell_back_to_ceiling).toBe(false);
+    expect(msg?.tool_policy?.cost_usd).toBe(0.001);
+  });
+
+  it("tool_policy_decided handles the fell-back-to-ceiling state", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "tool_policy_decided",
+      turn_groups: ["documents", "citations", "vfs"],
+      ceiling_groups: ["documents", "citations", "vfs"],
+      reasoning: "Low confidence — using full ceiling.",
+      confidence: 0.4,
+      fell_back_to_ceiling: true,
+      cost_usd: 0.0008,
+      latency_ms: 950,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.tool_policy?.fell_back_to_ceiling).toBe(true);
+    expect(msg?.tool_policy?.confidence).toBe(0.4);
   });
 });
 
