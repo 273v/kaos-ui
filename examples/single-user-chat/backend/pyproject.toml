@@ -11,28 +11,28 @@ requires-python = ">=3.13,<3.15"
 license = { text = "LicenseRef-Proprietary" }
 
 dependencies = [
-    # Verified on PyPI 2026-05-14; see docs/PRD.md § 12.
-    "kaos-agents>=0.1.0a1,<0.2",
-    "kaos-core>=0.1.0a6,<0.2",
-    # kaos-ui ships the canonical `kaos_ui.agents` helpers (disk runtime
-    # + KaosContext bridge patch + tool catalog injection + tool-glob
-    # sentinel). Consumed from PyPI 0.1.0a1.
+    # FIX-14..16 + FIX-18 release coordination (2026-05-15):
+    # All KAOS tool-schema fixes ship from PyPI in these floors. The
+    # `[tool.uv.sources]` block at the bottom keeps kaos-ui itself
+    # local-only until kaos-ui 0.1.0a2 ships with TR-1 + P1-5.
+    "kaos-agents>=0.1.0a2,<0.2",
+    "kaos-core>=0.1.0a7,<0.2",
     "kaos-ui>=0.1.0a1,<0.2",
-    # NOT transitive from kaos-agents 0.1.0a1 — declare explicitly.
+    # NOT transitive from kaos-agents 0.1.0a2 — declare explicitly.
     "kaos-llm-core>=0.1.0a7,<0.2",
     "kaos-llm-client>=0.1.0a3,<0.2",
     # Optional content/extraction tools — only invoked when a session
     # has tools_enabled=True. kaos_ui.agents.build_chat_runtime
     # registers these conditionally via contextlib.suppress(ImportError).
-    "kaos-content[markdown]>=0.1.0a6,<0.2",
-    "kaos-pdf>=0.1.0a2,<0.2",
-    "kaos-office>=0.1.0a2,<0.2",
+    "kaos-content[markdown]>=0.1.0a7,<0.2",
+    "kaos-pdf>=0.1.0a3,<0.2",
+    "kaos-office>=0.1.0a3,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
     "kaos-citations>=0.1.0a2,<0.2",
     # P2-1b: source discovery + materialization. Federal Register / eCFR /
     # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
     # parsers. Registers 30 read-only tools (`kaos-source-*`).
-    "kaos-source>=0.1.0a3,<0.2",
+    "kaos-source>=0.1.0a4,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",
@@ -59,13 +59,12 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
-# Dev-local KAOS source overrides. Use these when iterating on a tool
-# schema fix or kaos-agents change before the package ships to PyPI.
-# Remove (or comment out) the override once the upstream release lands.
+# Dev-local KAOS source override. kaos-core/pdf/office/content/source/
+# tabular/graph/agents are pinned to their PyPI releases above (FIX-18
+# coordination, 2026-05-15). The kaos-ui override stays in place until
+# kaos-ui 0.1.0a2 ships with TR-1 (`register_kaos_tool_groups`) +
+# P1-5 (`kaos_ui.uploads` module) — see FIX-18j in the project tracker.
 [tool.uv.sources]
-kaos-core = { path = "../../../../kaos-core", editable = true }
-kaos-pdf = { path = "../../../../kaos-pdf", editable = true }
-kaos-agents = { path = "../../../../kaos-agents", editable = true }
 kaos-ui = { path = "../../..", editable = true }
 
 [tool.pytest.ini_options]
