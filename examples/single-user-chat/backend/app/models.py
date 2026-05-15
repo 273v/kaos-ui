@@ -366,3 +366,24 @@ class ExtractCitationsResponse(BaseModel):
     session_id: str
     count: int
     citations: list[dict]
+
+
+# ── corpus search (P2-3) ──────────────────────────────────────────────
+
+
+class CorpusSearchHitWire(BaseModel):
+    """One BM25 hit on the session's uploaded corpus."""
+
+    filename: str
+    score: float
+    snippet: str = Field(description="First ~300 chars of the matching passage.")
+    char_offset: int = Field(description="Byte offset within the source file's markdown.")
+
+
+class CorpusSearchResponse(BaseModel):
+    """GET /v1/chat/sessions/{id}/files/search response."""
+
+    session_id: str
+    query: str
+    count: int
+    hits: list[CorpusSearchHitWire]
