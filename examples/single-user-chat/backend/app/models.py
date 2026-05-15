@@ -306,37 +306,15 @@ class HistoryResponse(BaseModel):
     messages: list[HistoryMessage]
 
 
-# ── file uploads (P1-1) ───────────────────────────────────────────────
+# ── file uploads (P1-1, promoted to kaos_ui.uploads by P1-5) ──────────
 
 
-class FileParseStatus(BaseModel):
-    """Parse outcome for one uploaded file.
-
-    ``ready`` means the file was parsed and a `.kaos.json` AST sidecar
-    exists in the VFS alongside the original bytes. ``failed`` means
-    parsing raised — the original bytes were still saved.
-    """
-
-    status: Literal["ready", "failed"]
-    error: str | None = None
-
-
-class FileMeta(BaseModel):
-    """Per-file metadata persisted alongside the upload in the VFS.
-
-    Lives at ``sessions/{session_id}/files/{filename}.meta.json``.
-    """
-
-    filename: str
-    size_bytes: int
-    content_type: str | None = None
-    uploaded_at: datetime
-    parse: FileParseStatus
-    # Populated post-parse via kaos-nlp-core + kaos-llm-core. Both are
-    # best-effort — a parse failure or summarizer outage leaves them
-    # null, but the file is still persisted.
-    token_count: int | None = None
-    summary: str | None = None
+# Re-export the canonical Pydantic shapes from kaos_ui.uploads so the
+# FastAPI routes can keep using `response_model=FileMeta` unchanged.
+# Identical fields; the only difference vs the previous definitions
+# here is that the source-of-truth class lives in kaos-ui now and is
+# shared with any other consumer.
+from kaos_ui.uploads import FileMeta, FileParseStatus  # noqa: E402,F401
 
 
 class UploadResponse(BaseModel):
