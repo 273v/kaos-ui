@@ -17,6 +17,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sse_starlette import EventSourceResponse
 
 from app.auth import require_auth
@@ -307,6 +308,14 @@ async def send_message(
         meta = await store.get(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    # P2-4: per-turn model override (the "Re-run with different model"
+    # affordance). Mutates the local meta copy for this turn only; the
+    # persisted SessionMeta.model is untouched so the next un-overridden
+    # turn falls back to the session's chosen default.
+    if body.model is not None and body.model != meta.model:
+        _validate_model_id(body.model)
+        meta = meta.model_copy(update={"model": body.model})
 
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)
@@ -640,11 +649,142 @@ async def get_history(
     )
 
 
+def _transcript_markdown(meta: SessionMeta, messages: list[HistoryMessage]) -> str:
+    """Render a transcript as agent-readable markdown.
+
+    Used by both the client-side markdown download (returned as-is)
+    and the DOCX export (parsed back to ContentDocument before
+    serializing). The ``> _attribution_`` blockquote on each
+    assistant turn carries cost / tokens / tool calls — the same
+    shape that FEAT-6 surfaced in the JSON export.
+    """
+    parts: list[str] = [f"# {meta.title}", "", f"_Model: `{meta.model}`_", ""]
+    for m in messages:
+        if m.role == "user":
+            parts.append("## You")
+        elif m.role == "assistant":
+            parts.append("## Assistant")
+        else:
+            parts.append(f"## {m.role.capitalize()}")
+        parts.append("")
+        parts.append(m.content)
+        if m.role == "assistant" and m.tool_calls:
+            attribution = ", ".join(f"`{tc.name}`" for tc in m.tool_calls)
+            parts.append("")
+            parts.append(f"> _Tools: {attribution}_")
+        parts.append("")
+    return "\n".join(parts)
+
+
 @router.get("/sessions/{session_id}/transcript")
-async def transcript_stub(session_id: str) -> dict[str, str]:
-    """Transcript export is implemented client-side (see lib/transcript.ts).
-    Server-side export for shareable-link use cases lives in a later phase."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="server-side transcript export not in v1; use the client-side download.",
+async def transcript_export(
+    session_id: str,
+    request: Request,
+    store: StoreDep,
+    upstream: UpstreamDep,
+    format: str = "markdown",
+) -> Response:
+    """P2-4 — server-side transcript export. Supports ``markdown``,
+    ``json``, and ``docx``. The DOCX path runs the markdown through
+    ``kaos_content.parse_markdown`` → ``kaos_office.docx.write_docx_bytes``
+    so the output preserves headings, lists, bold/italic, and code
+    fences instead of being a plain-text dump."""
+    fmt = format.lower()
+    if fmt not in ("markdown", "json", "docx"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "what": f"unsupported transcript format {format!r}",
+                "how_to_fix": "use one of: markdown, json, docx",
+            },
+        )
+
+    # Reuse the existing history fetch path. We can't call get_history
+    # directly because it's a FastAPI handler; pull the upstream call
+    # inline instead.
+    try:
+        meta = await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    bearer = _bearer_from_request(request)
+    r = await upstream.get(
+        f"/v1/sessions/{session_id}/memory/messages",
+        headers={"Authorization": f"Bearer {bearer}"},
+    )
+    messages: list[HistoryMessage] = []
+    if r.status_code < 400:
+        raw = r.json()
+        for item in raw.get("items", []):
+            content_str = item.get("content", "")
+            role = "assistant"
+            text = content_str
+            for prefix, mapped in (
+                ("user: ", "user"),
+                ("assistant: ", "assistant"),
+                ("system: ", "system"),
+            ):
+                if content_str.startswith(prefix):
+                    role = mapped
+                    text = content_str[len(prefix) :]
+                    break
+            messages.append(
+                HistoryMessage(
+                    role=role,  # type: ignore[arg-type]
+                    content=text,
+                    added_at=float(item.get("added_at", 0.0)),
+                )
+            )
+        messages.sort(key=lambda m: m.added_at)
+
+    if fmt == "markdown":
+        body = _transcript_markdown(meta, messages)
+        return Response(
+            content=body,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{meta.title}.md"',
+            },
+        )
+
+    if fmt == "json":
+        body = HistoryResponse(
+            session_id=session_id,
+            turn_count=len(messages),
+            item_count=len(messages),
+            messages=messages,
+        ).model_dump_json(indent=2)
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{meta.title}.json"',
+            },
+        )
+
+    # fmt == "docx" — round-trip via kaos-content + kaos-office writers.
+    try:
+        from kaos_content.parsers import parse_markdown
+        from kaos_office.docx import write_docx_bytes
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "what": "DOCX export is unavailable",
+                "how_to_fix": "install the kaos-office + kaos-content extras",
+                "alternative": "use format=markdown or format=json",
+            },
+        ) from exc
+
+    md = _transcript_markdown(meta, messages)
+    doc = parse_markdown(md)
+    docx_bytes = write_docx_bytes(doc)
+    return Response(
+        content=docx_bytes,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{meta.title}.docx"',
+        },
     )

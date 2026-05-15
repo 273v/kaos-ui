@@ -259,6 +259,19 @@ class ToolSetUpdateBody(BaseModel):
 
 class SendMessageBody(BaseModel):
     message: str = Field(min_length=1, max_length=_MAX_MESSAGE_LEN)
+    # P2-4: per-turn model override for "Re-run with different model".
+    # Doesn't persist to SessionMeta.model — applies to this turn only.
+    # The SPA's user-message kebab → "Re-run with model X" hits POST
+    # /messages with the original message text + a different `model`.
+    model: str | None = Field(
+        default=None,
+        max_length=_MAX_MODEL_LEN,
+        description=(
+            "Optional per-turn model override (provider:model). When "
+            "None, uses SessionMeta.model. The session's stored model "
+            "is unchanged either way."
+        ),
+    )
 
 
 class ArchiveResponse(BaseModel):
