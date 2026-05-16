@@ -83,6 +83,12 @@ packages = ["app"]
 # `uv lock` so the project goes back to a pure-PyPI resolution.
 [tool.uv.sources]
 kaos-agents = { git = "https://github.com/273v/kaos-agents.git", tag = "v0.1.0a5" }
+# Local editable install for kaos-ui so changes to
+# `kaos_ui.agents.augment_instructions` (system-prompt composition,
+# date preamble, search-before-answer rule) reach the running
+# backend without a publish cycle. Drop this once kaos-ui 0.1.0a8
+# is on PyPI.
+kaos-ui = { path = "../../../", editable = true }
 
 [tool.pytest.ini_options]
 minversion = "8.0"
