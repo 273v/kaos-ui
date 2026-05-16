@@ -66,14 +66,24 @@ export function Message({
     return null;
   }, [isAssistant, message.content]);
 
+  // Slightly more vertical room per turn — 24px above / 24px below
+  // beats the previous 16/16 for a reading-flow feel without
+  // burning vertical real-estate on short replies.
   return (
     <article
-      className={`py-4 ${isError ? "border-l-2 border-destructive pl-3" : ""}`}
+      className={`py-6 ${isError ? "border-l-2 border-destructive pl-4" : ""}`}
       aria-label={`${roleLabel} message`}
     >
-      <header className="mb-1">
+      <header className="mb-2">
         <span
-          className={`text-[11px] uppercase tracking-wide ${isError ? "text-destructive" : "text-muted-foreground"}`}
+          className={
+            "text-[11px] uppercase tracking-[0.08em] font-medium " +
+            (isError
+              ? "text-destructive"
+              : isUser
+                ? "text-foreground/60"
+                : "text-foreground/70")
+          }
         >
           {roleLabel}
         </span>
@@ -91,7 +101,15 @@ export function Message({
       )}
 
       <div
-        className={`kaos-md max-w-none leading-relaxed ${isAssistant ? "" : "whitespace-pre-wrap "}${isError ? "text-destructive" : "text-foreground"}`}
+        className={
+          // Assistant turns flow as rendered markdown via `.kaos-md`
+          // which carries the editorial body type (16px / 1.65).
+          // User + tool + error turns are pre-wrapped plain text and
+          // use the chrome-body size (15px) so the user's question
+          // doesn't look like a heading next to the answer.
+          (isAssistant ? "kaos-md max-w-none " : "text-[15px] leading-relaxed whitespace-pre-wrap ") +
+          (isError ? "text-destructive" : "text-foreground")
+        }
       >
         {isAssistant && rendered ? (
           // renderMarkdown disables raw HTML and validates link schemes

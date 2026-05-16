@@ -147,17 +147,29 @@ export function SessionListItem({ session, active }: Props) {
           </div>
         ) : (
           <>
+            {/*
+              Sidebar row — anchored at 13px text (UI chrome size).
+              Active state uses an inline left-edge stripe in the
+              accent color (UX-LANGUAGE.md §4.6) instead of the
+              softer bg-muted fill, which now signals hover only.
+            */}
             <Link
               to="/sessions/$id"
               params={{ id: session.id }}
-              className={`flex items-center h-9 px-2 rounded-md text-sm transition-colors flex-1 min-w-0 gap-2 ${
-                active ? "bg-muted text-foreground" : "text-foreground hover:bg-muted"
+              className={`relative flex items-center h-8 pl-3 pr-2 rounded-md text-[13px] leading-tight transition-colors flex-1 min-w-0 gap-2 ${
+                active
+                  ? "bg-muted/70 text-foreground font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-accent"
+                  : "text-foreground/85 hover:bg-muted hover:text-foreground"
               }`}
               title={session.title}
             >
               <span className="truncate flex-1">{session.title || "Untitled"}</span>
               {session.message_count > 0 && (
-                <span className="shrink-0 inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-full bg-muted-foreground/20 text-[10px] tabular-nums text-foreground/80">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 inline-flex items-center justify-center h-[18px] min-w-[1.375rem] px-1 rounded-full bg-muted-foreground/15 text-[10px] tabular-nums text-foreground/75"
+                  title={`${session.message_count} messages`}
+                >
                   {session.message_count}
                 </span>
               )}

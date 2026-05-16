@@ -20,3 +20,16 @@ export { ElevationPill } from "./ElevationPill.js";
 export { CapabilityApproval } from "./CapabilityApproval.js";
 export type { CapabilityDecision } from "./CapabilityApproval.js";
 export { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
+
+// Tabular primitive — used inline in transcripts (kaos-md table
+// auto-promotion) and standalone for `kaos-tabular` comparison
+// grids. Lives under `/chat` for now because that's where its
+// first consumers are; promote to `/data` if more rectangular
+// surfaces want it.
+export { DataTable } from "../data/DataTable.js";
+export type {
+  Column,
+  ColumnKind,
+  DataTableDensity,
+  DataTableProps,
+} from "../data/DataTable.js";

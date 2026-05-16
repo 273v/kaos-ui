@@ -182,15 +182,25 @@ function ChatDetail() {
   return (
     <div className="flex h-full">
       <div className="flex flex-1 min-w-0 flex-col">
-        <header className="border-b border-border px-6 py-3 flex items-center gap-3">
+        <header className="border-b border-border px-6 py-3.5 flex items-center gap-3">
           <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-medium truncate" title={meta?.title}>
+            <h1
+              className="font-serif text-lg leading-tight truncate text-foreground"
+              title={meta?.title}
+            >
               {meta?.title ?? "Loading…"}
             </h1>
             {meta && (
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {meta.model} · {meta.message_count} messages
-                {meta.tools_enabled && " · tools on"}
+              <p className="text-xs text-foreground/70 tabular-nums mt-0.5">
+                <span className="font-mono">{meta.model}</span>
+                <span className="mx-1.5 text-foreground/40">·</span>
+                {meta.message_count} {meta.message_count === 1 ? "message" : "messages"}
+                {meta.tools_enabled && (
+                  <>
+                    <span className="mx-1.5 text-foreground/40">·</span>
+                    tools on
+                  </>
+                )}
               </p>
             )}
           </div>
