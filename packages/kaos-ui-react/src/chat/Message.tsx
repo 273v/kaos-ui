@@ -19,6 +19,7 @@ import { CapabilityApproval, type CapabilityDecision } from "./CapabilityApprova
 import { ElevationPill } from "./ElevationPill.js";
 import { GoalCheckBadge } from "./GoalCheckBadge.js";
 import { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
+import { ReasoningSummary } from "./ReasoningSummary.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
 import { ToolPolicyBadge } from "./ToolPolicyBadge.js";
 import { UsageChip } from "./UsageChip.js";
@@ -98,6 +99,13 @@ export function Message({
           elevations={message.elevations}
           onPinToSession={onPinElevationToSession}
         />
+      )}
+
+      {/* Reasoning summary — rendered ABOVE the answer body so the
+          reader sees the critic's verdict before scrolling through
+          the full prose. Collapsed by default; click to expand. */}
+      {isAssistant && message.goal_check && (
+        <ReasoningSummary goal={message.goal_check} />
       )}
 
       <div

@@ -144,7 +144,10 @@ export function Composer({
               type="button"
               onClick={onStop}
               aria-label="Stop generating"
-              className="absolute right-2.5 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-md bg-muted text-foreground hover:bg-muted/80 border border-border transition-colors"
+              // h-10 w-10 = 40px touch target (WCAG 2.5.8 AA minimum
+              // for desktop is 24px, but mobile recommendation is
+              // 44px; 40 is a sane middle).
+              className="absolute right-2.5 bottom-2.5 h-10 w-10 inline-flex items-center justify-center rounded-md bg-muted text-foreground hover:bg-muted/80 border border-border transition-colors"
               title="Stop"
             >
               <Square className="h-3.5 w-3.5" fill="currentColor" />
@@ -155,7 +158,7 @@ export function Composer({
               onClick={onSubmit}
               disabled={!canSend}
               aria-label="Send"
-              className="absolute right-2.5 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+              className="absolute right-2.5 bottom-2.5 h-10 w-10 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
             >
               <ArrowUp className="h-4 w-4" />
             </button>

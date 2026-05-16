@@ -8,6 +8,8 @@ import {
   DropZone,
   FileChips,
   Message,
+  SlashMenu,
+  type Skill,
   TurnStatus,
 } from "@273v/kaos-ui-react/chat";
 import { RunInspector } from "@273v/kaos-ui-react/debug";
@@ -27,12 +29,14 @@ import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
+import { PlanActChip } from "@/components/settings/PlanActChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import { usePatchToolSet } from "@/hooks/use-patch-tool-set";
 import { useSession } from "@/hooks/use-session";
 import { useSessionMessages } from "@/hooks/use-session-messages";
 import { apiFetch } from "@/lib/api-fetch";
+import { BUILTIN_SKILLS } from "@/lib/skills";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
 import type { CapabilityDecision } from "@273v/kaos-ui-react/chat";
@@ -138,6 +142,39 @@ function ChatDetail() {
     void stream.send(text);
   };
 
+  // Slash-menu state. The menu opens when the composer text *starts*
+  // with `/` and the user is still editing the first token (no
+  // whitespace yet). The query is the substring after the slash.
+  const slashOpen =
+    input.startsWith("/") && !input.slice(1).includes(" ") && !input.slice(1).includes("\n");
+  const slashQuery = slashOpen ? input.slice(1) : "";
+
+  const onPickSkill = (skill: Skill) => {
+    // Replace the leading `/<query>` with the skill's prefill text.
+    setInput(skill.prefill);
+    // Optionally tune the session policy. We don't switch model
+    // automatically — the user can pick that themselves from the
+    // composer chip — but we DO apply the tool-group ceiling if the
+    // skill specifies one, so "Forensics" really locks the egress.
+    if (skill.allowed_groups || skill.persona) {
+      patchToolSet.mutate({
+        allowed_groups: skill.allowed_groups,
+        // persona is patched via the policy field on the wire;
+        // the SPA's PATCH body only exposes ceiling fields today,
+        // so persona requires a follow-up release.
+      });
+    }
+    // Re-focus the composer + drop the caret at the end. The next
+    // tick lets React commit the new value first.
+    setTimeout(() => {
+      const ta = document.getElementById("composer-message");
+      if (ta instanceof HTMLTextAreaElement) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    }, 0);
+  };
+
   const onModelChange = (modelId: string) => {
     if (!session.data || session.data.model === modelId) return;
     patch.mutate({ model: modelId });
@@ -152,6 +189,34 @@ function ChatDetail() {
     for (const g of groups) current.add(g);
     if (current.size === session.data.policy.allowed_groups.length) return;
     patchToolSet.mutate({ allowed_groups: Array.from(current).sort() });
+  };
+
+  // Highlight-to-Ask flow (F.9). When the user selects text inside a
+  // doc-explorer summary and clicks the floating "Ask about this"
+  // pill, we prefill the composer with a structured passage prompt
+  // and focus the chat. The passage is truncated at 600 chars so
+  // the composer textarea stays scannable; the full passage is
+  // implied by the citation.
+  const onAskAboutSelection = ({
+    filename,
+    passage,
+  }: {
+    filename: string;
+    passage: string;
+  }) => {
+    const MAX_PASSAGE = 600;
+    const trimmed =
+      passage.length > MAX_PASSAGE ? `${passage.slice(0, MAX_PASSAGE)}…` : passage;
+    const composed = `About this passage from \`${filename}\`:\n\n> ${trimmed.replace(/\n/g, "\n> ")}\n\n`;
+    setInput(composed);
+    // Defer focus so React commits the textarea value first.
+    setTimeout(() => {
+      const ta = document.getElementById("composer-message");
+      if (ta instanceof HTMLTextAreaElement) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    }, 0);
   };
 
   // Yellow-confirm capability resolution. The AgenticLoop fires the
@@ -419,25 +484,48 @@ function ChatDetail() {
           </div>
         )}
 
-        <Composer
-          value={input}
-          onChange={setInput}
-          onSubmit={onSubmit}
-          onStop={stream.abort}
-          pending={stream.state.pending}
-          placeholder={`Message ${meta?.title ?? "this conversation"}…`}
-          onAttach={onAttach}
-          uploading={upload.isPending}
-          leftChips={
-            meta && (
-              <ModelPickerChip
-                value={meta.model}
-                onChange={onModelChange}
-                disabled={stream.state.pending}
+        <div className="relative">
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSubmit={onSubmit}
+            onStop={stream.abort}
+            pending={stream.state.pending}
+            placeholder={`Message ${meta?.title ?? "this conversation"}…  ·  type / for skills`}
+            onAttach={onAttach}
+            uploading={upload.isPending}
+            leftChips={
+              meta && (
+                <>
+                  <ModelPickerChip
+                    value={meta.model}
+                    onChange={onModelChange}
+                    disabled={stream.state.pending}
+                  />
+                  <PlanActChip meta={meta} disabled={stream.state.pending} />
+                </>
+              )
+            }
+          />
+          {/*
+            Slash menu floats above the textarea anchored to the
+            composer container. The composer itself doesn't know
+            about skills — keeping the menu out of the package lets
+            us swap server-loaded skill registries in later without
+            changing the component API.
+          */}
+          <div className="mx-auto max-w-3xl px-4 pointer-events-none">
+            <div className="relative pointer-events-auto">
+              <SlashMenu
+                skills={BUILTIN_SKILLS}
+                query={slashQuery}
+                open={slashOpen}
+                onPick={onPickSkill}
+                onClose={() => setInput("")}
               />
-            )
-          }
-        />
+            </div>
+          </div>
+        </div>
 
         {meta && (
           <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} meta={meta} />
@@ -463,6 +551,7 @@ function ChatDetail() {
             ? new Set([backfill.variables.filename])
             : undefined
         }
+        onAskAboutSelection={onAskAboutSelection}
         onDownload={async (filename) => {
           // Authenticated fetch → blob → trigger save. A plain <a href>
           // wouldn't attach the bearer token (the browser doesn't
