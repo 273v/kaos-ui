@@ -521,7 +521,18 @@ function ChatDetail() {
                 query={slashQuery}
                 open={slashOpen}
                 onPick={onPickSkill}
-                onClose={() => setInput("")}
+                // Esc dismisses the menu without destroying the
+                // user's draft — strip the leading `/<query>` token
+                // and keep whatever follows. Previously this was
+                // `setInput("")` which wiped real text the user had
+                // pasted starting with a slash.
+                onClose={() => {
+                  setInput((cur) => {
+                    if (!cur.startsWith("/")) return cur;
+                    const rest = cur.replace(/^\/\S*\s*/, "");
+                    return rest;
+                  });
+                }}
               />
             </div>
           </div>

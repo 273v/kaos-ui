@@ -168,6 +168,15 @@ def _instructions_with_corpus(
         "The user has uploaded the following documents. Their contents are "
         "inlined below (long files are truncated). Cite the source filename "
         "when answering questions grounded in this material.\n\n"
+        "**Search-before-clarify rule.** When the user's question is "
+        "ambiguous or could plausibly be answered from these attached "
+        "documents, CALL THE TOOLS to search them BEFORE asking the user "
+        "for clarification. Concretely: use `kaos-content-search-document` "
+        "or `kaos-pdf-extract-page-text` with the literal terms from the "
+        "user's question against every attached file. Only ask a "
+        "clarifying question AFTER a tool search returns nothing relevant. "
+        "Apologising for ambiguity while uploaded documents go unread is "
+        "the failure mode this rule is here to prevent.\n\n"
         f"{corpus_markdown}"
     )
 

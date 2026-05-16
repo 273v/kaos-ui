@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a8] — 2026-05-16
+
+### Fixed — Bug bundle (B1, B2, B3 / F.11.A-D + T)
+
+**B1 — Composer "typing broken after first chat" hardening.** Could
+not reliably reproduce via Chrome DevTools MCP with real keyboard
+events; the most plausible root cause for the user's report was a
+window of `dist/chat/index.js` pre-transform errors during package
+rebuilds. Two real UX bugs in the same family did surface during the
+investigation and are fixed:
+
+- `SlashMenu` global keydown listener no longer intercepts Enter /
+  Tab / Esc unless the composer textarea is the active element. Means
+  pasting a literal `/path/to/file` and pressing Enter now sends the
+  message instead of triggering a skill insertion.
+  (`packages/kaos-ui-react/src/chat/SlashMenu.tsx`)
+- Esc inside the slash menu no longer wipes the entire composer
+  draft. Strips only the leading `/<query>` token and preserves
+  whatever the user wrote after.
+  (`apps/spa/src/routes/_auth.sessions.$id.tsx`)
+
+**B2 — `[/response]` scratchpad-tag leak.** Haiku 4.5 (and other
+instruction-tuned models) was emitting `[/response]` closers into
+the SPA when the agent's respond handler used `ChatCodec` for the
+single-output `RespondSignature`. Root-cause fix lives in
+kaos-agents (BaseAgent.\_simple\_respond now uses the default
+`JSONCodec` — native structured output via the provider's JSON-schema
+path — and strips any residual scratchpad-tag closers post-decode);
+UI-side belt-and-suspenders strips `[/\\w+]` / `</\\w+>` from
+`text_delta` content in the reducer so a future codec regression
+can't reach `Message` rendering.
+(`packages/kaos-ui-react/src/lib/event-handler.ts`)
+
+**B3 — Agent asks for clarification instead of searching the
+attached PDF.** Pre-existing failure mode where an ambiguous query
+("who's teaching 800?") against a session with an uploaded
+`course-descriptions.pdf` produced an "I need more context" reply
+instead of a `kaos-content-search-document` call. Fixed at two
+layers (F.11.A + F.11.B):
+
+- **F.11.A — Backend planner gate** in
+  `apps/single-user-chat/backend/app/routers/chat.py`. When the
+  per-turn `corpus_headlines` is non-empty, the chat router now
+  widens `SessionPolicy.allowed_groups` and `soft_ceiling` to
+  include `documents` and `vfs` before handing the policy to
+  `run_agentic_turn`. The planner's `ceiling_groups` input thus
+  always exposes the doc-search path when there are docs to search.
+- **F.11.B — Strengthened corpus directive** in
+  `apps/single-user-chat/backend/app/services/stream_proxy.py`.
+  The "Documents attached" block now carries an explicit
+  "search-before-clarify" rule directing the model to call
+  `kaos-content-search-document` / `kaos-pdf-extract-page-text`
+  with the user's literal query terms BEFORE asking a clarifying
+  question.
+- **F.11.T — Regression test** in
+  `tests/integration/test_chat_agentic_loop.py` —
+  `test_attached_files_force_documents_and_vfs_into_policy`:
+  narrows the session ceiling to a single non-doc group, attaches a
+  tiny PDF, sends a turn, and asserts the captured `policy.allowed_groups`
+  contains both `documents` and `vfs`.
+
+F.11.C (UI fallback pill) is deferred — A+B+T together should kill
+the failure live; C would only ship if a smoke pass shows
+regressions.
+
+### Changed — Memory: Structured-output-only policy
+
+Recorded a project-wide preference in agent memory: **always prefer
+native JSON-schema / structured output for kaos-llm-core
+Signatures**; never `ChatCodec` / `XMLCodec`. Modern Claude 4.x /
+GPT-5.x / Gemini 2.5 all support first-class structured output —
+text-marker codecs cause exactly the `[/field]` closer leakage this
+release fixes.
+
 ## [0.1.0a7] — 2026-05-16
 
 ### Added — Top-5-easiest features from the framework survey

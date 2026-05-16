@@ -430,6 +430,26 @@ async def send_message(
         from app.services.agentic_worker import make_worker
 
         session_policy = meta.policy.to_session_policy()
+        # F.11.A — When files are attached to the session, the planner
+        # has historically picked "clarify the user" over "search the
+        # attached docs" for ambiguous queries (e.g. "who's teaching
+        # 800" against a course-descriptions PDF). Widening the
+        # session ceiling to include `documents` + `vfs` whenever
+        # `corpus_headlines` is non-empty guarantees the planner sees
+        # them in its `ceiling_groups` input — which raises the odds
+        # that the planner's kept_groups includes them. Belt-and-
+        # suspenders alongside the prompt strengthening (F.11.B).
+        if corpus_headlines:
+            import dataclasses as _dc
+
+            forced = frozenset({"documents", "vfs"})
+            missing = forced - session_policy.allowed_groups
+            if missing:
+                session_policy = _dc.replace(
+                    session_policy,
+                    allowed_groups=session_policy.allowed_groups | forced,
+                    soft_ceiling=session_policy.soft_ceiling | forced,
+                )
         available_groups = sorted(default_tool_group_registry.list_names())
         worker = make_worker(
             client=upstream,

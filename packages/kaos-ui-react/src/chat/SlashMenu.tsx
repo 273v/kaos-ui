@@ -86,10 +86,17 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
   }, [filtered.length]);
 
   // Keyboard navigation. We listen on `document` so the composer
-  // textarea retains focus while the menu drives selection.
+  // textarea retains focus while the menu drives selection — but we
+  // bail out unless the composer textarea (or another input target)
+  // is the active element. Otherwise pasting `/path/to/file` and
+  // hitting Enter to send would pick a skill instead.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      const target = document.activeElement;
+      const isComposerActive =
+        target instanceof HTMLTextAreaElement && target.id === "composer-message";
+      if (!isComposerActive) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
@@ -102,9 +109,7 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setActive((i) =>
-          filtered.length === 0 ? 0 : (i - 1 + filtered.length) % filtered.length,
-        );
+        setActive((i) => (filtered.length === 0 ? 0 : (i - 1 + filtered.length) % filtered.length));
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -130,9 +135,7 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
       className="absolute bottom-full left-0 mb-2 w-80 max-h-72 overflow-y-auto rounded-lg border border-border bg-card shadow-md py-1 text-xs"
     >
       {filtered.length === 0 ? (
-        <div className="px-3 py-3 italic text-foreground/55">
-          No skills match {`"${query}"`}.
-        </div>
+        <div className="px-3 py-3 italic text-foreground/55">No skills match {`"${query}"`}.</div>
       ) : (
         filtered.map((s, i) => (
           <button
@@ -157,9 +160,7 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
             </span>
             <span className="flex-1 min-w-0">
               <span className="block font-medium">{s.name}</span>
-              <span className="block mt-0.5 text-foreground/60 leading-snug">
-                {s.description}
-              </span>
+              <span className="block mt-0.5 text-foreground/60 leading-snug">{s.description}</span>
               {(s.persona || s.allowed_groups) && (
                 <span className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide text-foreground/50">
                   {s.persona && (
@@ -180,7 +181,9 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
       )}
       <div className="border-t border-border/60 px-3 py-1.5 text-[10px] text-foreground/50 tabular-nums flex items-center justify-between">
         <span>↑↓ to navigate · ↵ to insert · esc to dismiss</span>
-        <span>{filtered.length} skill{filtered.length === 1 ? "" : "s"}</span>
+        <span>
+          {filtered.length} skill{filtered.length === 1 ? "" : "s"}
+        </span>
       </div>
     </div>
   );

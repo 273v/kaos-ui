@@ -267,3 +267,68 @@ def test_run_id_encodes_pre_turn_message_count(
     r = client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "first"})
     assert r.status_code == 200
     assert captured["run_id"] == "turn-0"
+
+
+def test_attached_files_force_documents_and_vfs_into_policy(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F.11.A regression — when at least one file is attached to the
+    session, the chat router must widen the SessionPolicy's
+    ``allowed_groups`` (and ``soft_ceiling``) to include
+    ``documents`` and ``vfs`` before handing the policy to
+    :func:`run_agentic_turn`. Without this gate the planner has
+    historically picked "ask a clarifying question" over "search the
+    attached docs" for ambiguous queries, even when the answer was
+    in the inlined corpus head excerpt.
+    """
+    captured = _patch_agentic_turn(monkeypatch)
+    sid = _create_session(client, tools_enabled=True)
+
+    # Narrow the session ceiling to a single group that's neither
+    # `documents` nor `vfs`, so the assertions below test the WIDENING
+    # behavior — not the default-policy passthrough.
+    patch_r = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"allowed_groups": ["web"], "denied_tools": []},
+    )
+    assert patch_r.status_code == 200, patch_r.text
+
+    # Attach a tiny valid PDF so the chat router computes a non-empty
+    # `corpus_headlines` string before calling run_agentic_turn.
+    pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\n"
+        b"xref\n0 3\n0000000000 65535 f\n0000000009 00000 n\n"
+        b"0000000052 00000 n\ntrailer<</Size 3/Root 1 0 R>>\n"
+        b"startxref\n96\n%%EOF\n"
+    )
+    upload_r = client.post(
+        f"/v1/chat/sessions/{sid}/files",
+        files={"file": ("course-descriptions.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload_r.status_code == 201, upload_r.text
+
+    r = client.post(
+        f"/v1/chat/sessions/{sid}/messages",
+        json={"message": "who's teaching 800?"},
+    )
+    assert r.status_code == 200
+
+    from kaos_agents.types.session_policy import SessionPolicy
+
+    policy = captured["policy"]
+    assert isinstance(policy, SessionPolicy)
+    # The router must have FORCED these in even though the user
+    # narrowed the ceiling to just `web`.
+    assert "documents" in policy.allowed_groups, (
+        f"documents missing from allowed_groups: {sorted(policy.allowed_groups)}"
+    )
+    assert "vfs" in policy.allowed_groups, (
+        f"vfs missing from allowed_groups: {sorted(policy.allowed_groups)}"
+    )
+    # Soft ceiling raised in lockstep so auto-elevation can keep them.
+    assert "documents" in policy.soft_ceiling
+    assert "vfs" in policy.soft_ceiling
+    # corpus_headlines must be non-empty (sanity check on the precondition).
+    assert captured["corpus_headlines"]
+    assert "course-descriptions.pdf" in captured["corpus_headlines"]

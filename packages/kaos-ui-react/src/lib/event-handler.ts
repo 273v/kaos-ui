@@ -39,6 +39,21 @@ function currentAssistant(messages: ChatMessage[]): ChatMessage | null {
   return null;
 }
 
+// Defense-in-depth: drop bracketed scratchpad closers that some
+// instruction-tuned models hallucinate when given an opener-only
+// field marker by a non-JSON codec — e.g. `[/response]`, `</response>`.
+// kaos-agents 0.1.0a5+ uses native JSONCodec for the respond handler
+// so this is a belt-and-suspenders guard against future codec
+// regressions or a stray non-JSON Signature elsewhere on the wire.
+// Conservative pattern: only matches whole bracket-name-bracket
+// tokens whose name is a `\w+` slug (no internal whitespace), so
+// we won't eat literal text like `[/path/to/file]`.
+const SCRATCHPAD_TAG_RE = /\[\/\w+\]|<\/\w+>/g;
+function stripScratchpadTags(text: string): string {
+  if (!text) return text;
+  return text.replace(SCRATCHPAD_TAG_RE, "");
+}
+
 function patchAssistant(messages: ChatMessage[], updates: Partial<ChatMessage>): ChatMessage[] {
   const target = currentAssistant(messages);
   if (!target) return messages;
@@ -141,10 +156,12 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     case "text_delta": {
       const target = currentAssistant(state.messages);
       if (!target) return state;
+      const cleaned = stripScratchpadTags(event.content);
+      if (!cleaned) return state;
       return {
         ...state,
         messages: patchAssistant(state.messages, {
-          content: target.content + event.content,
+          content: target.content + cleaned,
         }),
       };
     }
