@@ -576,9 +576,17 @@ class CategoriesResponse(BaseModel):
 class ToolSetUpdateBody(BaseModel):
     """PATCH /v1/chat/sessions/{id}/tool-set body.
 
-    Both fields optional — pass only the dimension you're changing.
+    Every field optional — pass only the dimension you're changing.
     ``allowed_groups`` empty list means "block all" (the session is
     fully read-only at the proxy layer).
+
+    M.6: the body widened from the legacy ``allowed_groups`` /
+    ``denied_tools`` / ``auto_narrow`` trio to also carry the three
+    AgenticLoop toggles (``auto_elevate`` / ``auto_loop`` /
+    ``persona``). Pre-M.6 the SPA's PlanActChip and SettingsSheet
+    had no way to flip those bits — the chip silently piggy-backed
+    on ``auto_narrow`` which left ``auto_loop``/``auto_elevate``
+    untouched and the chip's "Plan" mode wedged.
     """
 
     allowed_groups: list[str] | None = Field(
@@ -594,6 +602,34 @@ class ToolSetUpdateBody(BaseModel):
         description=(
             "When true, the TurnToolPolicy planner runs per-turn within "
             "the ceiling. When false, the full ceiling is used every turn."
+        ),
+    )
+    auto_elevate: bool | None = Field(
+        default=None,
+        description=(
+            "When true, the AgenticLoop may silently widen "
+            "``allowed_groups`` up to ``soft_ceiling`` whenever the "
+            "per-turn planner reports green-auto ``dropped_groups``. "
+            "When false, the loop runs with only the current "
+            "``allowed_groups`` (no auto-elevation)."
+        ),
+    )
+    auto_loop: bool | None = Field(
+        default=None,
+        description=(
+            "When true, enable the multi-iteration AgenticLoop with "
+            "goal checking between iterations. When false, the chat "
+            "router runs a single ReAct turn (pre-loop behavior)."
+        ),
+    )
+    persona: Persona | None = Field(
+        default=None,
+        description=(
+            "Named persona preset for this session — threaded into "
+            "the per-turn TurnToolPolicy Signature as session_intent. "
+            "Does NOT rewrite ``allowed_groups`` / ``soft_ceiling`` "
+            "(those are explicit fields the caller must pass alongside "
+            "if they want a full persona swap)."
         ),
     )
 

@@ -96,6 +96,18 @@ export interface ToolSetUpdateBody {
   allowed_groups?: string[];
   denied_tools?: string[];
   auto_narrow?: boolean;
+  /** M.6 (kaos-ui 0.1.0a8) — partial-update field for the AgenticLoop
+   *  auto-elevation master toggle. Pre-M.6 the SPA could only flip
+   *  ``auto_narrow``; PlanActChip relied on that and broke. */
+  auto_elevate?: boolean;
+  /** M.6 (kaos-ui 0.1.0a8) — partial-update field for the AgenticLoop
+   *  multi-iteration loop toggle. */
+  auto_loop?: boolean;
+  /** M.6 (kaos-ui 0.1.0a8) — partial-update field for the per-session
+   *  persona preset. Does NOT rewrite ``allowed_groups`` /
+   *  ``soft_ceiling``; the caller must pass those alongside if they
+   *  want a full persona swap. */
+  persona?: Persona;
 }
 
 export interface SessionSummary {

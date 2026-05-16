@@ -278,7 +278,14 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    new_tool_set = current.tool_set.model_copy()
+    # Build a merged SessionPolicyWire from the current policy + the
+    # partial body. M.6 — every body field is optional; only the
+    # dimensions the caller passed get rewritten. The patch goes
+    # through the canonical `policy=` path on SessionStore.patch so
+    # auto_elevate / auto_loop / persona land on the live policy
+    # (previously the handler built a legacy SessionToolSetWire which
+    # carried only the 3 legacy fields, silently dropping the new
+    # toggles — the source of the PlanActChip "stuck on Act" bug).
     if body.allowed_groups is not None:
         known = set(default_tool_group_registry.list_names())
         unknown = [g for g in body.allowed_groups if g not in known]
@@ -294,13 +301,26 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
                     "alternative": "Pass [] to fully disable tools for this session.",
                 },
             )
-        new_tool_set = new_tool_set.model_copy(update={"allowed_groups": body.allowed_groups})
-    if body.denied_tools is not None:
-        new_tool_set = new_tool_set.model_copy(update={"denied_tools": body.denied_tools})
-    if body.auto_narrow is not None:
-        new_tool_set = new_tool_set.model_copy(update={"auto_narrow": body.auto_narrow})
 
-    return await store.patch(session_id, tool_set=new_tool_set)
+    policy_updates: dict[str, object] = {}
+    if body.allowed_groups is not None:
+        policy_updates["allowed_groups"] = list(body.allowed_groups)
+    if body.denied_tools is not None:
+        policy_updates["denied_tools"] = list(body.denied_tools)
+    if body.auto_narrow is not None:
+        policy_updates["auto_narrow"] = body.auto_narrow
+    if body.auto_elevate is not None:
+        policy_updates["auto_elevate"] = body.auto_elevate
+    if body.auto_loop is not None:
+        policy_updates["auto_loop"] = body.auto_loop
+    if body.persona is not None:
+        policy_updates["persona"] = body.persona
+    if policy_updates:
+        new_policy = current.policy.model_copy(update=policy_updates)
+    else:
+        new_policy = current.policy
+
+    return await store.patch(session_id, policy=new_policy)
 
 
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)
@@ -429,6 +449,15 @@ async def send_message(
 
         from app.services.agentic_worker import make_worker
 
+        # The planner Signature owns the kept_groups decision (see
+        # kaos-agents `_TurnToolPolicySignature` docstring — its
+        # corpus-kinds hints already favor `documents` when files are
+        # attached and the question references the document). Earlier
+        # this block force-elevated documents+vfs from the chat router
+        # as a belt-and-suspenders workaround; that created two
+        # sources of truth for the policy and was deleted as part of
+        # the thin-worker-prompt refactor. The planner is the policy.
+        # See kaos-modules/docs/plans/thin-worker-prompt.md M1.
         session_policy = meta.policy.to_session_policy()
         available_groups = sorted(default_tool_group_registry.list_names())
         worker = make_worker(

@@ -267,3 +267,75 @@ def test_run_id_encodes_pre_turn_message_count(
     r = client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "first"})
     assert r.status_code == 200
     assert captured["run_id"] == "turn-0"
+
+
+def test_chat_router_passes_policy_through_unchanged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The chat router must NOT mutate the session policy before
+    handing it to :func:`run_agentic_turn`.
+
+    Earlier (F.11.A, 2026-05-16) the router force-elevated
+    ``documents`` + ``vfs`` into ``allowed_groups`` whenever files
+    were attached, on the theory that the planner Signature was
+    untrustworthy. This created two sources of truth for the
+    kept-groups decision: the router's hardcoded English heuristic
+    AND the planner's :class:`_TurnToolPolicySignature` docstring.
+    They could disagree.
+
+    The thin-worker-prompt refactor
+    (kaos-modules/docs/plans/thin-worker-prompt.md M1) reverted
+    that bypass. The planner Signature owns the decision; the
+    router carries the policy through. This test pins the
+    pass-through contract — if a future contributor reintroduces a
+    `dataclasses.replace(session_policy, ...)` block, it fails.
+    """
+    captured = _patch_agentic_turn(monkeypatch)
+    sid = _create_session(client, tools_enabled=True)
+
+    # Narrow the session ceiling to a single non-doc/vfs group.
+    patch_r = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"allowed_groups": ["web"], "denied_tools": []},
+    )
+    assert patch_r.status_code == 200, patch_r.text
+
+    # Attach a tiny valid PDF so corpus_headlines is non-empty
+    # (the trigger F.11.A used to widen the policy).
+    pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\n"
+        b"xref\n0 3\n0000000000 65535 f\n0000000009 00000 n\n"
+        b"0000000052 00000 n\ntrailer<</Size 3/Root 1 0 R>>\n"
+        b"startxref\n96\n%%EOF\n"
+    )
+    upload_r = client.post(
+        f"/v1/chat/sessions/{sid}/files",
+        files={"file": ("course-descriptions.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload_r.status_code == 201, upload_r.text
+
+    r = client.post(
+        f"/v1/chat/sessions/{sid}/messages",
+        json={"message": "who's teaching 800?"},
+    )
+    assert r.status_code == 200
+
+    from kaos_agents.types.session_policy import SessionPolicy
+
+    policy = captured["policy"]
+    assert isinstance(policy, SessionPolicy)
+    # The user narrowed to {"web"}; the router must NOT have
+    # widened this on its own. If documents/vfs are present, the
+    # router is overriding the policy again — fail.
+    assert policy.allowed_groups == frozenset({"web"}), (
+        "Router widened policy.allowed_groups from user-narrowed {'web'} "
+        f"to {sorted(policy.allowed_groups)}. The planner Signature is the "
+        "single source of truth for kept_groups — see "
+        "kaos-modules/docs/plans/thin-worker-prompt.md §2.3 and §5."
+    )
+    # Confirm corpus_headlines IS being passed through to the
+    # planner (it's a real Signature input, just not a router-side
+    # policy-mutation trigger).
+    assert captured["corpus_headlines"]
+    assert "course-descriptions.pdf" in captured["corpus_headlines"]

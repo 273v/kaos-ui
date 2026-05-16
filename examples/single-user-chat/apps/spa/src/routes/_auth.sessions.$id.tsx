@@ -22,10 +22,11 @@ import {
   useSessionFiles,
   useUploadFile,
 } from "@273v/kaos-ui-react/hooks";
-import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
+import { type ChatMessage, newId, stripScratchpadTags } from "@273v/kaos-ui-react/lib";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
@@ -36,6 +37,7 @@ import { usePatchToolSet } from "@/hooks/use-patch-tool-set";
 import { useSession } from "@/hooks/use-session";
 import { useSessionMessages } from "@/hooks/use-session-messages";
 import { apiFetch } from "@/lib/api-fetch";
+import { queryKeys } from "@/lib/query-keys";
 import { BUILTIN_SKILLS } from "@/lib/skills";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
@@ -59,6 +61,7 @@ export const Route = createFileRoute("/_auth/sessions/$id")({
 
 function ChatDetail() {
   const { id } = Route.useParams();
+  const queryClient = useQueryClient();
   const session = useSession(id);
   const history = useSessionMessages(id);
   const patch = usePatchMeta(id);
@@ -87,10 +90,56 @@ function ChatDetail() {
   // sidecars we tee off the live SSE stream.
   const initialMessages = useMemo<ChatMessage[]>(() => {
     if (!history.data) return [];
-    return history.data.messages.map((m) => ({
+    // B11 — collapse AgenticLoop replan-iteration duplicates. When
+    // `auto_loop=true` and the GoalChecker keeps returning
+    // `needs_more_work`, the kaos-agents worker re-runs the user
+    // turn N times and appends a fresh `user:` + `assistant:` pair
+    // to SessionMemory on EACH iteration. The user typed the
+    // message once; we keep only the final user+assistant pair from
+    // each consecutive-duplicate group so the transcript reads as
+    // one turn per user-typed-message.
+    //
+    // Architecturally this should land in kaos-agents (the
+    // AgenticLoop should own a single memory write per turn), but
+    // until that release the SPA does the dedupe so users don't
+    // see the same question rendered 3x. `meta.message_count` is
+    // already the correct turn count — it only increments by 2 per
+    // `run_agentic_turn` call.
+    const raw = history.data.messages;
+    const deduped: typeof raw = [];
+    for (let i = 0; i < raw.length; i++) {
+      const cur = raw[i];
+      if (!cur) continue;
+      if (cur.role === "user") {
+        let lastDupIdx = i;
+        let j = i + 2;
+        while (
+          j < raw.length &&
+          raw[j]?.role === "user" &&
+          raw[j]?.content === cur.content
+        ) {
+          lastDupIdx = j;
+          j += 2;
+        }
+        const finalUser = raw[lastDupIdx];
+        const finalAsst = raw[lastDupIdx + 1];
+        if (finalUser) deduped.push(finalUser);
+        if (finalAsst && finalAsst.role === "assistant") deduped.push(finalAsst);
+        i = lastDupIdx + (finalAsst?.role === "assistant" ? 1 : 0);
+      } else {
+        deduped.push(cur);
+      }
+    }
+    return deduped.map((m) => ({
       id: newId(),
       role: m.role === "system" ? "system" : m.role,
-      content: m.content,
+      // B10 — strip scratchpad tags (`[/response]`, `<function_calls>`)
+      // from historical assistant turns. Sessions created against
+      // older kaos-agents (< 0.1.0a5) persisted dirty bytes into
+      // session memory; this strip keeps the transcript clean even
+      // for those legacy sessions. The live SSE reducer applies the
+      // same strip via event-handler.ts.
+      content: m.role === "assistant" ? stripScratchpadTags(m.content) : m.content,
       created_at: m.added_at * 1000,
       streaming: false,
       tool_calls:
@@ -134,6 +183,25 @@ function ChatDetail() {
   // stays on across reloads + new sessions. Keyed under a stable
   // string so a future "global UI prefs" page can introspect it.
   const [verboseTools, setVerboseTools] = useLocalStorage("kaos:verbose-tools", false);
+
+  // B8 — refresh the session meta + message-history + sidebar list
+  // when a turn finishes streaming. Without this, the immediate-
+  // heuristic title patch the backend writes on the first turn
+  // (and the message_count bump on every turn) doesn't surface in
+  // the chat header or the sidebar until the user reloads or
+  // switches sessions and back. Trigger fires on the pending
+  // true→false edge.
+  const wasPendingRef = useRef(false);
+  useEffect(() => {
+    if (wasPendingRef.current && !stream.state.pending) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.session(id), "history"],
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    }
+    wasPendingRef.current = stream.state.pending;
+  }, [stream.state.pending, id, queryClient]);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -228,19 +296,24 @@ function ChatDetail() {
   //   - enable_session:  persist the groups into allowed_groups
   //   - deny_continue:   dismiss the card
   //   - deny_stop:       dismiss + abort any active stream
-  const onCapabilityDecide = (decision: CapabilityDecision, groups: string[]) => {
+  const onCapabilityDecide = (
+    decision: CapabilityDecision,
+    groups: string[],
+    messageId: string,
+  ) => {
     if (decision === "enable_session") {
       onPinElevationToSession(groups);
     }
     if (decision === "deny_stop") {
       stream.abort();
     }
-    // All four decisions clear the per-message capability_request snapshot
-    // so the card unmounts. The reducer leaves `pending` alone so the
-    // streaming message can keep accumulating text deltas if any are
-    // still arriving.
-    // (We don't mutate state directly here — Message's local-clear
-    // affordance + the next loop_terminated event handle visibility.)
+    // All four decisions clear the per-message capability_request
+    // snapshot so the card unmounts. Pre-0.1.0a8 this comment
+    // claimed the card relied on `loop_terminated` for visibility,
+    // but that event arrives long after the user's choice — leaving
+    // the card mounted in the meantime. `clearCapability` flips it
+    // off the millisecond the user clicks.
+    stream.clearCapability(messageId);
   };
 
   const meta = session.data;
@@ -270,46 +343,17 @@ function ChatDetail() {
             )}
           </div>
 
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setExportOpen((v) => !v)}
-              disabled={!meta || stream.state.messages.length === 0}
-              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
-              title="Export transcript"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export
-            </button>
-            {exportOpen && meta && (
-              <div
-                role="menu"
-                className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm"
-                onMouseLeave={() => setExportOpen(false)}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadMarkdown({ meta, messages: stream.state.messages });
-                    setExportOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
-                >
-                  Download Markdown
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadJSON({ meta, messages: stream.state.messages });
-                    setExportOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
-                >
-                  Download JSON
-                </button>
-              </div>
-            )}
-          </div>
+          <ExportMenu
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            disabled={!meta || stream.state.messages.length === 0}
+            onDownloadMarkdown={() => {
+              if (meta) downloadMarkdown({ meta, messages: stream.state.messages });
+            }}
+            onDownloadJSON={() => {
+              if (meta) downloadJSON({ meta, messages: stream.state.messages });
+            }}
+          />
 
           <button
             type="button"
@@ -401,7 +445,7 @@ function ChatDetail() {
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-4xl px-6 py-8" role="log" aria-live="polite">
+          <div className="mx-auto max-w-3xl px-6 py-8" role="log" aria-live="polite">
             {stream.state.banners.length > 0 && (
               <div className="mb-4 space-y-2">
                 {stream.state.banners.map((b) => (
@@ -521,7 +565,18 @@ function ChatDetail() {
                 query={slashQuery}
                 open={slashOpen}
                 onPick={onPickSkill}
-                onClose={() => setInput("")}
+                // Esc dismisses the menu without destroying the
+                // user's draft — strip the leading `/<query>` token
+                // and keep whatever follows. Previously this was
+                // `setInput("")` which wiped real text the user had
+                // pasted starting with a slash.
+                onClose={() => {
+                  setInput((cur) => {
+                    if (!cur.startsWith("/")) return cur;
+                    const rest = cur.replace(/^\/\S*\s*/, "");
+                    return rest;
+                  });
+                }}
               />
             </div>
           </div>
@@ -586,6 +641,93 @@ function ChatDetail() {
         pending={citations.pending}
         error={citations.error}
       />
+    </div>
+  );
+}
+
+/**
+ * Chat-header Export menu. Keyboard-accessible dropdown with two
+ * actions (Markdown / JSON). Mirrors the dismiss pattern from
+ * PlanActChip — Escape + click-outside close the menu, focus
+ * returns to the trigger after pick. Proper menu / menuitem ARIA
+ * roles so screen-reader users see this as a real menu.
+ */
+function ExportMenu(props: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  disabled: boolean;
+  onDownloadMarkdown: () => void;
+  onDownloadJSON: () => void;
+}) {
+  const { open, onOpenChange, disabled, onDownloadMarkdown, onDownloadJSON } = props;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) onOpenChange(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onOpenChange(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+        title="Export transcript"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Export transcript"
+          className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm shadow-md"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onDownloadMarkdown();
+              onOpenChange(false);
+            }}
+            className="w-full text-left px-3 py-1.5 hover:bg-muted focus:bg-muted focus:outline-none"
+          >
+            Download Markdown
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onDownloadJSON();
+              onOpenChange(false);
+            }}
+            className="w-full text-left px-3 py-1.5 hover:bg-muted focus:bg-muted focus:outline-none"
+          >
+            Download JSON
+          </button>
+        </div>
+      )}
     </div>
   );
 }

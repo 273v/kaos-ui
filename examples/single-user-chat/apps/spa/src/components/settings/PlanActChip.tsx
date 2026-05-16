@@ -88,13 +88,16 @@ export function PlanActChip({ meta, disabled }: Props) {
     // Re-derive the policy preset around the new mode. We deliberately
     // keep allowed_groups + soft_ceiling + denied_tools intact — the
     // user's tool-ceiling choice is orthogonal to plan-vs-act.
+    //
+    // M.6 (0.1.0a8) — the chip reads `meta.policy.auto_loop` and
+    // `meta.policy.auto_elevate` for mode detection, so we MUST
+    // write those same fields. Pre-M.6 we wrote `auto_narrow` as a
+    // workaround, which left the read-side fields stale and wedged
+    // the chip in whichever mode the session was created with.
+    const act = next === "act";
     patchToolSet.mutate({
-      // The PATCH route accepts policy via `policy` (see backend
-      // SessionStore.patch), but the SPA's ToolSetUpdateBody only
-      // models `allowed_groups`/`denied_tools`/`auto_narrow` today.
-      // Persist the bit by toggling `auto_narrow` — it's the closest
-      // proxy and the AgenticLoop respects it.
-      auto_narrow: next === "act",
+      auto_loop: act,
+      auto_elevate: act,
     });
     setOpen(false);
   };

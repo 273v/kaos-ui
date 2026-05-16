@@ -162,6 +162,38 @@ def install_tool_bridge_runtime_patch() -> None:
 # ── system-prompt augmentation ──────────────────────────────────────
 
 
+def _today_iso() -> str:
+    """Return today's date as ISO-8601 (UTC). Pulled out so tests can patch."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).date().isoformat()
+
+
+def _date_preamble() -> str:
+    """Top-of-prompt date marker.
+
+    Claude / GPT / Gemini all default to their training-cutoff
+    perception of "now" if no date is in context — which produces
+    catastrophically confident hallucinations like "we are
+    currently in 2024-2025; 2026 has not occurred yet." The model
+    needs an explicit, unambiguous marker AT THE TOP of the
+    system prompt, plus a directive to trust the marker over its
+    training perception.
+    """
+    today = _today_iso()
+    return (
+        f"## TODAY IS {today}\n\n"
+        f"The current date is **{today}**. Trust this date over any "
+        "date you would otherwise infer from your training data. "
+        "Your training cutoff is in the past; the user is asking "
+        f"about the present, which is {today}. Never tell the user "
+        '"that year has not occurred yet" or "we are currently in '
+        '<some earlier year>" unless your evidence contradicts the '
+        "date above — and your evidence had better be a tool result, "
+        "not your training-data prior.\n\n"
+    )
+
+
 def augment_instructions(
     *,
     base_prompt: str,
@@ -173,7 +205,8 @@ def augment_instructions(
     kaos-agents 0.1.0a1 doesn't inject the tool catalog into the
     system prompt automatically. Without that, the LLM denies having
     tools even when they're properly bridged. We patch around it by
-    prepending the catalog ourselves.
+    prepending the catalog ourselves. We also prepend today's date
+    (Claude-class models confidently hallucinate the year otherwise).
 
     Args:
         base_prompt: The user-facing system prompt from session
@@ -187,9 +220,10 @@ def augment_instructions(
         A composed system prompt ready to thread into
         ``MessageRequest.instructions``.
     """
+    preamble = _date_preamble()
     if not tools_enabled:
         return (
-            f"{base_prompt}\n\n"
+            f"{preamble}{base_prompt}\n\n"
             "Tools are disabled for this session. You cannot call KAOS tools "
             "in this turn, and if the user asks what tools you can use, say "
             "that no KAOS tools are enabled for this session."
@@ -198,17 +232,30 @@ def augment_instructions(
     tool_names = sorted({name for name in available_tool_names or () if name})
     if not tool_names:
         return (
-            f"{base_prompt}\n\n"
+            f"{preamble}{base_prompt}\n\n"
             "Tools are enabled for this session, but the backend did not "
             "register any KAOS tools."
         )
 
     catalog = "\n".join(f"- {name}" for name in tool_names)
+    # Worker prompt = date + voice + catalog. Nothing else.
+    #
+    # Behavior policy (which tools to use, when to search before
+    # answering, when to escalate) lives in the kaos-agents Signature
+    # decision points — `_TurnToolPolicySignature` docstring picks
+    # `kept_groups`, `_GoalCheckerSignature` docstring drives replan
+    # verdicts, and the AgenticLoop threads the critic's `next_action`
+    # to the next worker iteration as `thinking_note`. Free-text rules
+    # in this prompt would (a) duplicate, (b) drift from, and (c)
+    # potentially contradict those Signatures.
+    #
+    # See kaos-modules/docs/plans/thin-worker-prompt.md for the full
+    # rationale + the anti-goals checklist that blocks regrowing this
+    # function with hardcoded English behavior rules.
     return (
-        f"{base_prompt}\n\n"
+        f"{preamble}{base_prompt}\n\n"
         f"Tools are enabled for this session. Available KAOS tool names "
-        f"({len(tool_names)}):\n{catalog}\n\n"
-        "When the user asks what tools you can use, answer from this list."
+        f"({len(tool_names)}):\n{catalog}"
     )
 
 

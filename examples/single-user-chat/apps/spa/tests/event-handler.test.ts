@@ -59,6 +59,82 @@ describe("event-handler — wire-event coverage", () => {
     expect(msg?.content).toBe("Hello world.");
   });
 
+  // F.11.D regression. ChatCodec/XMLCodec-derived scratchpad tag
+  // closers (`[/response]`, `</response>`, etc.) that some
+  // instruction-tuned models hallucinate must NEVER reach the
+  // rendered assistant text. The reducer strips them before append.
+  // Pairs with kaos-agents' native JSONCodec switch in
+  // BaseAgent._simple_respond.
+  it("text_delta strips bracketed scratchpad-tag closers", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    // Realistic Haiku-style emission: prose body + a hallucinated
+    // [/response] closer at the tail.
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "ack[/response]",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("ack");
+  });
+
+  it("text_delta strips angle-bracket scratchpad-tag closers", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "the answer is 4</response>",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("the answer is 4");
+  });
+
+  it("text_delta does NOT eat literal text that resembles a path", () => {
+    // Conservative: only `\w+` slugs in brackets get stripped, so a
+    // path literal like `[/usr/local]` (contains `/`) is untouched.
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "the path is [/usr/local]",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("the path is [/usr/local]");
+  });
+
+  it("text_delta drops a fragment that becomes empty after stripping", () => {
+    // A delta that is JUST a scratchpad closer must not even mark the
+    // assistant message as updated — `applyEvent` returns state as-is.
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, { type: "text_delta", content: "[/budget]" });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("");
+  });
+
+  // B9 regression. Claude emits `<function_calls>[{...}, ...]</function_calls>`
+  // as TEXT when the tool binding is not using the native tool_use
+  // path — the whole block (opener + JSON body + closer) must be
+  // stripped, not just the trailing tag.
+  it("text_delta strips the entire <function_calls>...</function_calls> block", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content:
+        'I will compare both.\n<function_calls>\n[{"tool_name": "search", "arguments": {"q": "x"}}]\n</function_calls>\n\n## Comparison',
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("I will compare both.\n\n\n## Comparison");
+  });
+
+  it("text_delta survives a multi-line <function_calls> block with embedded JSON", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const messy =
+      'Step 1.\n<function_calls>\n[\n  {"tool_name": "kaos-content-search-document"},\n  {"tool_name": "kaos-pdf-extract-page-text"}\n]\n</function_calls>\nStep 2.';
+    const next = applyEvent(state, { type: "text_delta", content: messy });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).not.toContain("function_calls");
+    expect(msg?.content).not.toContain("tool_name");
+    expect(msg?.content).toContain("Step 1.");
+    expect(msg?.content).toContain("Step 2.");
+  });
+
   it("thinking_delta does not mutate visible content", () => {
     const { state } = seedWithPlaceholder();
     const next = applyEvent(state, { type: "thinking_delta", content: "internal." });

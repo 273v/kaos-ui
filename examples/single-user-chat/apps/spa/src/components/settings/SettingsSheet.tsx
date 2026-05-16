@@ -35,6 +35,14 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     meta.tool_set?.allowed_groups ?? [],
   );
   const [autoNarrow, setAutoNarrow] = useState<boolean>(meta.tool_set?.auto_narrow ?? true);
+  // M.6 — three new AgenticLoop toggles. Pulled from the canonical
+  // `meta.policy` shape; the legacy `meta.tool_set` only carries
+  // allowed_groups/denied_tools/auto_narrow.
+  const [autoElevate, setAutoElevate] = useState<boolean>(meta.policy?.auto_elevate ?? true);
+  const [autoLoop, setAutoLoop] = useState<boolean>(meta.policy?.auto_loop ?? true);
+  const [persona, setPersona] = useState<"research" | "drafting" | "forensics">(
+    meta.policy?.persona ?? "research",
+  );
 
   useEffect(() => {
     if (open) {
@@ -43,6 +51,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
       setSystemPrompt(meta.system_prompt);
       setAllowedGroups(meta.tool_set?.allowed_groups ?? []);
       setAutoNarrow(meta.tool_set?.auto_narrow ?? true);
+      setAutoElevate(meta.policy?.auto_elevate ?? true);
+      setAutoLoop(meta.policy?.auto_loop ?? true);
+      setPersona(meta.policy?.persona ?? "research");
     }
   }, [open, meta]);
 
@@ -138,13 +149,30 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     await patchToolSet.mutateAsync({
       allowed_groups: allowedGroups,
       auto_narrow: autoNarrow,
+      auto_elevate: autoElevate,
+      auto_loop: autoLoop,
+      persona,
     });
     onClose();
   };
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-foreground/10" onClick={onClose} aria-hidden />
+      {/*
+        Backdrop click-to-dismiss. A `<button>` (not `<div>`) so
+        keyboard users can Tab to it and press Enter / Space to
+        dismiss. `aria-label` matches the sheet's `aria-label` so a
+        screen reader reads "Close session settings" when the user
+        lands on the backdrop. Visually it's the same translucent
+        scrim — `appearance-none + cursor-default + focus-visible`
+        keeps it from looking like a button.
+      */}
+      <button
+        type="button"
+        aria-label="Close session settings"
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-foreground/10 cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+      />
       <aside
         ref={sheetRef}
         className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-background border-l border-border shadow-none overflow-y-auto"
@@ -298,6 +326,71 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                   </span>
                 </span>
               </label>
+
+              {/* M.6 — Auto-elevate. */}
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoElevate}
+                  onChange={(e) => setAutoElevate(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="flex-1">
+                  <span className="font-medium">Auto-elevate green-auto groups</span>
+                  <span className="block text-[11px] text-muted-foreground leading-snug">
+                    When the per-turn planner reports a tool group the agent
+                    wants but the ceiling doesn't include, silently widen the
+                    ceiling up to the soft ceiling. Off = the loop runs with
+                    only the current allowed groups.
+                  </span>
+                </span>
+              </label>
+
+              {/* M.6 — Auto-loop. */}
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoLoop}
+                  onChange={(e) => setAutoLoop(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="flex-1">
+                  <span className="font-medium">Multi-iteration agentic loop</span>
+                  <span className="block text-[11px] text-muted-foreground leading-snug">
+                    Re-plan and re-execute when the critic says the answer
+                    needs more work. Off = one ReAct pass per turn, no
+                    self-correction.
+                  </span>
+                </span>
+              </label>
+
+              {/* M.6 — Persona picker. */}
+              <div className="border-t border-border pt-3">
+                <label
+                  htmlFor="persona-picker"
+                  className="block text-[11px] text-muted-foreground mb-1"
+                >
+                  Persona
+                </label>
+                <select
+                  id="persona-picker"
+                  className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5"
+                  value={persona}
+                  onChange={(e) =>
+                    setPersona(e.target.value as "research" | "drafting" | "forensics")
+                  }
+                >
+                  <option value="research">Research</option>
+                  <option value="drafting">Drafting</option>
+                  <option value="forensics">Forensics</option>
+                </select>
+                <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+                  Threaded into the per-turn planner as session intent.
+                  Changing this here does NOT rewrite your tool ceiling — use
+                  the persona chips on the welcome page for a full preset
+                  swap.
+                </p>
+              </div>
             </div>
           </Field>
 

@@ -39,6 +39,7 @@ export {
   initialState,
   pushUserAndAssistantPlaceholder,
   markAborted,
+  clearCapabilityRequest,
 } from "./event-handler.js";
 
 export type { Transport, ApiError, KaosUIProviderProps } from "./transport.js";
@@ -68,3 +69,5 @@ export { extractCitations } from "./citations.js";
 
 export type { KaosQueryKey } from "./query-keys.js";
 export { kaosQueryKeys } from "./query-keys.js";
+
+export { stripScratchpadTags } from "./text-strip.js";

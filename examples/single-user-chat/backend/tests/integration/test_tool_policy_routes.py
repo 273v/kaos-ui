@@ -144,3 +144,101 @@ def test_patch_tool_set_404_for_unknown_session(client: TestClient) -> None:
         json={"allowed_groups": ["documents"]},
     )
     assert patch.status_code == 404
+
+
+# M.6 — auto_elevate / auto_loop / persona round trip through the
+# patch route. The pre-0.1.0a8 handler only carried the legacy
+# allowed_groups / denied_tools / auto_narrow trio, which silently
+# dropped the three AgenticLoop bits the SPA's PlanActChip needed.
+# These tests pin the new wiring.
+
+
+def test_patch_tool_set_auto_loop_round_trips(client: TestClient) -> None:
+    create = client.post(
+        "/v1/chat/sessions",
+        json={"model": "anthropic:claude-haiku-4-5", "tools_enabled": True},
+    )
+    sid = create.json()["id"]
+
+    # Sessions default to auto_loop=True. Flip it.
+    patch = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"auto_loop": False},
+    )
+    assert patch.status_code == 200
+    body = patch.json()
+    assert body["policy"]["auto_loop"] is False
+    # auto_elevate untouched.
+    assert body["policy"]["auto_elevate"] is True
+
+    # Re-fetching the meta carries the change.
+    meta = client.get(f"/v1/chat/sessions/{sid}/meta").json()
+    assert meta["policy"]["auto_loop"] is False
+
+
+def test_patch_tool_set_auto_elevate_round_trips(client: TestClient) -> None:
+    create = client.post(
+        "/v1/chat/sessions",
+        json={"model": "anthropic:claude-haiku-4-5", "tools_enabled": True},
+    )
+    sid = create.json()["id"]
+
+    patch = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"auto_elevate": False},
+    )
+    assert patch.status_code == 200
+    body = patch.json()
+    assert body["policy"]["auto_elevate"] is False
+    # auto_loop untouched.
+    assert body["policy"]["auto_loop"] is True
+
+
+def test_patch_tool_set_plan_act_pair_round_trips(client: TestClient) -> None:
+    """The PlanActChip's canonical write: both auto_loop AND
+    auto_elevate flipped together to flag Plan vs Act."""
+    create = client.post(
+        "/v1/chat/sessions",
+        json={"model": "anthropic:claude-haiku-4-5", "tools_enabled": True},
+    )
+    sid = create.json()["id"]
+
+    # Plan mode — both off.
+    patch = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"auto_loop": False, "auto_elevate": False},
+    )
+    assert patch.status_code == 200
+    body = patch.json()
+    assert body["policy"]["auto_loop"] is False
+    assert body["policy"]["auto_elevate"] is False
+
+    # Back to Act — both on.
+    patch = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"auto_loop": True, "auto_elevate": True},
+    )
+    body = patch.json()
+    assert body["policy"]["auto_loop"] is True
+    assert body["policy"]["auto_elevate"] is True
+
+
+def test_patch_tool_set_persona_round_trips(client: TestClient) -> None:
+    create = client.post(
+        "/v1/chat/sessions",
+        json={"model": "anthropic:claude-haiku-4-5", "tools_enabled": True},
+    )
+    sid = create.json()["id"]
+
+    patch = client.patch(
+        f"/v1/chat/sessions/{sid}/tool-set",
+        json={"persona": "forensics"},
+    )
+    assert patch.status_code == 200
+    body = patch.json()
+    assert body["policy"]["persona"] == "forensics"
+    # allowed_groups + soft_ceiling NOT rewritten — persona patch only
+    # touches the named field. The caller does a full preset swap via
+    # SessionStore.set_tool_preset (or by sending allowed_groups +
+    # soft_ceiling explicitly alongside).
+    assert "documents" in body["policy"]["allowed_groups"]

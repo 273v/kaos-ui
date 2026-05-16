@@ -7,6 +7,232 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a8] — 2026-05-16
+
+### Changed — Thin-worker-prompt refactor (M1 + M5 of `thin-worker-prompt.md`)
+
+The example backend's worker system prompt is now ~720 tokens (down
+from ~1,600), and **no document body is inlined into the prompt at
+any point**. Policy decisions (which tools to call, when to search
+before clarifying, when to escalate) now flow exclusively through
+the kaos-agents Signature decision points (`_TurnToolPolicySignature`
+docstring picks `kept_groups`; `_GoalCheckerSignature` returns
+verdicts and `next_action`; `AgenticLoop` threads the next-action
+as `thinking_note` to the next worker iteration). See the full
+plan at `kaos-modules/docs/plans/thin-worker-prompt.md`.
+
+**Removed from the worker prompt:**
+
+- The 400-token "Search-before-answer rule" block in
+  `kaos_ui.agents.augment_instructions` (B13 addition) — duplicated
+  the planner Signature's group-selection shortcuts in English.
+- The 150-token "Search-before-clarify rule" block in
+  `app.services.stream_proxy._instructions_with_corpus` (F.11.B) —
+  duplicated the critic Signature's "agent said 'I can't' →
+  needs_more_work" shortcut.
+- The 700-token tool-taxonomy + path-format tutorial in
+  `app.settings._DEFAULT_SYSTEM_PROMPT` — the tool catalog is
+  injected separately with descriptions; the model doesn't need a
+  prose tutorial of every group.
+- The F.11.A force-elevation block in `app.routers.chat` that
+  widened `SessionPolicy.allowed_groups` to include `documents`+`vfs`
+  whenever files were attached. The planner Signature's corpus-kinds
+  hint owns that decision — the router carries the policy through
+  unchanged.
+
+**`render_session_corpus_markdown` no longer inlines file bodies.**
+
+Pre-refactor, every uploaded file's full markdown serialization
+was dumped into the prompt under a `### filename` header, up to a
+40,000-char-per-file budget. A 20-file legal upload mix shipped
+~200K tokens of inert content into every turn, including replan
+iterations the agent didn't read it on. The new output is a
+metadata catalog per file: filename, size, content type, the two
+VFS paths (bytes + AST), parse status, and the cached one-line
+summary. Agents reach the body by calling
+`kaos-content-search-document` / `kaos-pdf-extract-page-text` /
+`kaos-content-corpus-narrow` with the VFS paths the metadata
+block exposed. Mirrors kelvin-agent's `Document.to_compact_dict()`
+pattern.
+
+The `per_file_budget_chars` kwarg on `render_session_corpus_markdown`
+is retained for back-compat with callers that pass it; it is no
+longer consulted.
+
+### Added — Token-budget contract test
+
+`tests/unit/test_worker_prompt_budget.py` (13 tests). Mechanical
+guard against the worker prompt regrowing 400 tokens of English
+behavior rules — the failure mode that produced the 2026-05-16
+dumpster fire. Asserts (a) the rendered prompt is ≤800 tokens
+steady state and ≤300 tokens tools-disabled, (b) nine specific
+forbidden substrings (hardcoded tool names, imperative behavior
+rules) never appear, (c) every tool name appears at most once
+(in the catalog). When a future contributor adds a rule to
+`augment_instructions`, one of these fires with a pointer to the
+right Signature instead.
+
+### Removed
+
+- `test_attached_files_force_documents_and_vfs_into_policy` in
+  `tests/integration/test_chat_agentic_loop.py` — the F.11.T
+  regression that locked in the F.11.A bypass. Replaced with
+  `test_chat_router_passes_policy_through_unchanged` which pins
+  the inverse contract: the router must not widen the policy.
+
+
+
+### Backend dependency bump — `kaos-agents>=0.1.0a5`
+
+The respond-handler root-cause fix for the `[/response]` scratchpad
+leak lives in **kaos-agents 0.1.0a5** (drops the ChatCodec override
+in `BaseAgent._simple_respond`, switches to native JSONCodec / JSON
+schema). The example backend's `pyproject.toml` floor moves from
+`>=0.1.0a4` to `>=0.1.0a5`. Until kaos-agents 0.1.0a5 publishes to
+PyPI, `[tool.uv.sources]` resolves it from the
+`https://github.com/273v/kaos-agents.git` tag `v0.1.0a5`. The
+override block should be removed once the PyPI wheel lands.
+
+### Fixed — B10: scratchpad tags leak in HISTORY hydration
+
+F.11.D's strip only ran on live `text_delta` SSE events. Historical
+messages loaded via `GET /v1/chat/sessions/{id}/messages` came back
+straight from session memory and rendered the raw `[/response]` /
+`<function_calls>{...}</function_calls>` artifacts that older
+kaos-agents persisted. Fix:
+
+- Hoisted the strip helper out of `event-handler.ts` into
+  `packages/kaos-ui-react/src/lib/text-strip.ts` and re-exported
+  from the `kaos-ui-react/lib` barrel as `stripScratchpadTags`.
+- The history mapper in `apps/spa/src/routes/_auth.sessions.$id.tsx`
+  now wraps assistant `content` through the same strip. User-typed
+  messages are NOT stripped (they're never the source of these
+  tokens).
+
+Sessions created against kaos-agents 0.1.0a5+ won't accumulate
+dirty bytes; this strip protects legacy transcripts.
+
+### Fixed — Bug bundle (B1, B2, B3, B6, B8, B9, B10 / F.11.A-D + T, M.6)
+
+### Added — M.6 SessionPolicy patch surface
+
+The chat router's `PATCH /v1/chat/sessions/{id}/tool-set` now
+accepts three additional fields — `auto_elevate`, `auto_loop`,
+`persona` — and routes them through `SessionStore.patch_policy`
+onto the live `SessionPolicyWire` instead of the legacy
+`SessionToolSetWire`. The `SettingsSheet` Tool Policy section
+grew three new controls (two checkboxes + a persona picker) so
+users can flip these from the right-side sheet.
+
+### Fixed — additional bugs
+
+**B6 — Plan/Act chip stuck on Act, never flips to Plan.** The
+chip detected mode from `meta.policy.auto_loop || auto_elevate`
+but wrote to `auto_narrow` (because pre-M.6 the SPA's
+`ToolSetUpdateBody` only modeled `auto_narrow`). Clicking Plan
+flipped a field the chip never read, so the chip silently wedged.
+The M.6 wire expansion lets PlanActChip write the correct fields;
+the chip now writes `auto_loop` AND `auto_elevate` together to
+flag mode transitions.
+(`apps/spa/src/components/settings/PlanActChip.tsx`,
+`apps/spa/src/lib/api-types.ts`,
+`backend/app/models.py`,
+`backend/app/routers/chat.py`)
+
+**B8 — Session title stays "Untitled" after first turn.** The
+backend auto-titler patches `SessionMeta.title` immediately from
+the user's first message, but the SPA's `useSession` query never
+got invalidated post-stream — the chat header and sidebar kept
+serving cached pre-turn meta forever. Same issue affected
+`message_count` (header showed "0 messages" even after a
+completed turn). The chat route now invalidates the session
+meta, message history, and sessions-list queries on the
+pending→idle transition.
+(`apps/spa/src/routes/_auth.sessions.$id.tsx`)
+
+**B9 — Raw `<function_calls>` text leaking into UI.** Anthropic
+Claude emits its function-calling syntax (`<function_calls>[...]`
+`</function_calls>`) as TEXT when tool binding falls off the
+native tool_use path — visible as a literal JSON array in the
+rendered assistant turn. Extended F.11.D's strip regex to drop
+the WHOLE block (opener + JSON body + closer), not just the
+trailing tag. The proper provider-side fix lives in
+kaos-llm-client / kaos-agents and is tracked separately; this
+strip prevents the visual cruft regardless.
+(`packages/kaos-ui-react/src/lib/event-handler.ts`)
+
+### Fixed — Bug bundle (B1, B2, B3 / F.11.A-D + T)
+
+**B1 — Composer "typing broken after first chat" hardening.** Could
+not reliably reproduce via Chrome DevTools MCP with real keyboard
+events; the most plausible root cause for the user's report was a
+window of `dist/chat/index.js` pre-transform errors during package
+rebuilds. Two real UX bugs in the same family did surface during the
+investigation and are fixed:
+
+- `SlashMenu` global keydown listener no longer intercepts Enter /
+  Tab / Esc unless the composer textarea is the active element. Means
+  pasting a literal `/path/to/file` and pressing Enter now sends the
+  message instead of triggering a skill insertion.
+  (`packages/kaos-ui-react/src/chat/SlashMenu.tsx`)
+- Esc inside the slash menu no longer wipes the entire composer
+  draft. Strips only the leading `/<query>` token and preserves
+  whatever the user wrote after.
+  (`apps/spa/src/routes/_auth.sessions.$id.tsx`)
+
+**B2 — `[/response]` scratchpad-tag leak.** Haiku 4.5 (and other
+instruction-tuned models) was emitting `[/response]` closers into
+the SPA when the agent's respond handler used `ChatCodec` for the
+single-output `RespondSignature`. Root-cause fix lives in
+kaos-agents (BaseAgent.\_simple\_respond now uses the default
+`JSONCodec` — native structured output via the provider's JSON-schema
+path — and strips any residual scratchpad-tag closers post-decode);
+UI-side belt-and-suspenders strips `[/\\w+]` / `</\\w+>` from
+`text_delta` content in the reducer so a future codec regression
+can't reach `Message` rendering.
+(`packages/kaos-ui-react/src/lib/event-handler.ts`)
+
+**B3 — Agent asks for clarification instead of searching the
+attached PDF.** Pre-existing failure mode where an ambiguous query
+("who's teaching 800?") against a session with an uploaded
+`course-descriptions.pdf` produced an "I need more context" reply
+instead of a `kaos-content-search-document` call. Fixed at two
+layers (F.11.A + F.11.B):
+
+- **F.11.A — Backend planner gate** in
+  `apps/single-user-chat/backend/app/routers/chat.py`. When the
+  per-turn `corpus_headlines` is non-empty, the chat router now
+  widens `SessionPolicy.allowed_groups` and `soft_ceiling` to
+  include `documents` and `vfs` before handing the policy to
+  `run_agentic_turn`. The planner's `ceiling_groups` input thus
+  always exposes the doc-search path when there are docs to search.
+- **F.11.B — Strengthened corpus directive** in
+  `apps/single-user-chat/backend/app/services/stream_proxy.py`.
+  The "Documents attached" block now carries an explicit
+  "search-before-clarify" rule directing the model to call
+  `kaos-content-search-document` / `kaos-pdf-extract-page-text`
+  with the user's literal query terms BEFORE asking a clarifying
+  question.
+- **F.11.T — Regression test** in
+  `tests/integration/test_chat_agentic_loop.py` —
+  `test_attached_files_force_documents_and_vfs_into_policy`:
+  narrows the session ceiling to a single non-doc group, attaches a
+  tiny PDF, sends a turn, and asserts the captured `policy.allowed_groups`
+  contains both `documents` and `vfs`.
+
+F.11.C (UI fallback pill) is deferred — A+B+T together should kill
+the failure live; C would only ship if a smoke pass shows
+regressions.
+
+### Changed — Memory: Structured-output-only policy
+
+Recorded a project-wide preference in agent memory: **always prefer
+native JSON-schema / structured output for kaos-llm-core
+Signatures**; never `ChatCodec` / `XMLCodec`. Modern Claude 4.x /
+GPT-5.x / Gemini 2.5 all support first-class structured output —
+text-marker codecs cause exactly the `[/field]` closer leakage this
+release fixes.
+
 ## [0.1.0a7] — 2026-05-16
 
 ### Added — Top-5-easiest features from the framework survey

@@ -11,6 +11,7 @@
 import type { ChatMessage, ToolCallSummary, TurnStatusKind } from "./chat-state.js";
 import { newId } from "./chat-state.js";
 import type { KaosAgentEvent, SpanEvent } from "./events.js";
+import { stripScratchpadTags } from "./text-strip.js";
 
 export interface TranscriptState {
   /** Ordered transcript shown in the conversation column. */
@@ -141,10 +142,12 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     case "text_delta": {
       const target = currentAssistant(state.messages);
       if (!target) return state;
+      const cleaned = stripScratchpadTags(event.content);
+      if (!cleaned) return state;
       return {
         ...state,
         messages: patchAssistant(state.messages, {
-          content: target.content + event.content,
+          content: target.content + cleaned,
         }),
       };
     }
@@ -521,4 +524,27 @@ export function markAborted(state: TranscriptState): TranscriptState {
       content: currentAssistant(state.messages)?.content || "[stopped]",
     }),
   };
+}
+
+/**
+ * Clear the `capability_request` snapshot on a specific message
+ * (so the CapabilityApproval card unmounts). Used by the host
+ * route's `onCapabilityDecide` after the user has either pinned,
+ * dismissed, or denied an elevation request. Idempotent — no-op
+ * if no matching message or the snapshot is already cleared.
+ */
+export function clearCapabilityRequest(
+  state: TranscriptState,
+  messageId: string,
+): TranscriptState {
+  let mutated = false;
+  const next = state.messages.map((m) => {
+    if (m.id !== messageId || !m.capability_request) return m;
+    mutated = true;
+    const { capability_request, ...rest } = m;
+    void capability_request;
+    return rest;
+  });
+  if (!mutated) return state;
+  return { ...state, messages: next };
 }

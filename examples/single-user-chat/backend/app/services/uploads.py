@@ -494,44 +494,42 @@ async def render_session_corpus_markdown(
     *,
     runtime: KaosRuntime,
     session_id: str,
-    per_file_budget_chars: int | None = None,
+    per_file_budget_chars: int | None = None,  # kept for back-compat — no longer used
 ) -> str:
-    """Build a single markdown block summarizing every ready-parsed file
-    in the session, suitable for inlining into the agent's system prompt.
+    """Render a metadata-only catalog of every file attached to the session.
 
-    Each file contributes up to ``per_file_budget_chars`` characters of
-    its serialized-markdown rendering. Files with a failed parse are
-    listed by name + size only. Returns an empty string when no files
-    exist.
+    **No file body is inlined.** Each file contributes a few lines:
+    filename, size, content type, the two VFS path arguments the
+    agent will use to read it (`bytes` for PDF/Office tools, `AST`
+    for kaos-content tools), parse status, and the cached one-line
+    summary (computed at upload time by ``maybe_compute_summary``).
 
-    This is the P2-2 'RAG-by-default' wire: kaos-agents 0.1.0a1's
-    MessageRequest doesn't accept a per-turn ``corpus`` parameter, and
-    the bridged kaos-pdf/office tools take filesystem paths (not VFS
-    paths), so the cleanest way to make uploads visible to the agent
-    is to inline a markdown rendering. A future kaos-agents version
-    that accepts corpus= in MessageRequest will let us pass the
-    parsed ASTs directly and replace this prompt-side path.
+    This mirrors kelvin-agent's `Document.to_compact_dict()` pattern
+    — the model sees enough to decide which file is relevant and
+    which tool to call, but the actual content stays out of the
+    prompt and is fetched on demand. For 1 KB of metadata per file,
+    we can list ~50 files in the prompt; the agent searches via
+    `kaos-content-corpus-narrow` / `kaos-content-search-document` /
+    `kaos-pdf-extract-page-text` for the rest.
+
+    Pre-2026-05-16 this function inlined `serialize_markdown(doc)`
+    up to a 40,000-char-per-file budget. A 20-file legal upload mix
+    pushed ~200K tokens of inert document body into every turn —
+    including replan iterations — even when the agent didn't read
+    any of them. The thin-worker-prompt refactor
+    (kaos-modules/docs/plans/thin-worker-prompt.md) deletes that
+    inlining path.
+
+    The ``per_file_budget_chars`` parameter is retained as a kwarg
+    for back-compat with callers that pass it; it is no longer used
+    because no body content is inlined.
     """
     metas = await list_session_files(runtime=runtime, session_id=session_id)
     if not metas:
         return ""
 
-    try:
-        from kaos_content import ContentDocument, serialize_markdown
-    except ImportError:
-        logger.warning("kaos_content not importable — skipping corpus rendering")
-        return ""
-
-    budget = (
-        per_file_budget_chars
-        if per_file_budget_chars is not None
-        else _resolve_per_file_prompt_budget()
-    )
     chunks: list[str] = []
     for meta in metas:
-        # The agent needs to know (a) what tool can read this file in
-        # full, (b) the exact path argument, and (c) that the inline
-        # content below is a truncated head — not the whole document.
         vfs_path = _vfs_path(session_id, meta.filename)
         ast_path = f"{vfs_path}.kaos.json"
 
@@ -541,52 +539,23 @@ async def render_session_corpus_markdown(
             + (f" · ~{meta.token_count} tokens" if meta.token_count else ""),
             f"- content_type: {meta.content_type or 'unknown'}",
             f"- VFS bytes: `{vfs_path}`",
-            f"- VFS AST (kaos-content): `{ast_path}`",
+            f"- VFS AST: `{ast_path}`",
         ]
         if meta.parse.status != "ready":
             header_lines.append(
                 f"- parse: FAILED ({meta.parse.error or 'unknown'}) — "
-                "raw bytes still readable via `kaos-core-vfs-read` at the VFS bytes path above."
+                "raw bytes still readable via `kaos-core-vfs-read` at the "
+                "VFS bytes path above."
             )
             chunks.append("\n".join(header_lines))
             continue
         header_lines.append("- parse: READY")
+        if meta.summary:
+            header_lines.append(f"- summary: {meta.summary}")
 
-        try:
-            ast_bytes = await runtime.vfs.read(ast_path)
-            doc = ContentDocument.model_validate_json(ast_bytes)
-            body = serialize_markdown(doc)
-        except Exception as exc:
-            logger.warning(
-                "could not render AST for %s: %s",
-                meta.filename,
-                exc,
-                extra={"session_id": session_id, "upload_filename": meta.filename},
-            )
-            chunks.append("\n".join([*header_lines, "_(AST sidecar unreadable)_"]))
-            continue
+        chunks.append("\n".join(header_lines))
 
-        truncated = len(body) > budget
-        if truncated:
-            body = body[:budget] + "\n\n…[head excerpt — more available via tools]"
-            logger.info(
-                "corpus inline truncated session=%s file=%s len=%d budget=%d",
-                session_id,
-                meta.filename,
-                len(body),
-                budget,
-                extra={"session_id": session_id, "upload_filename": meta.filename},
-            )
-            header_lines.append(
-                "- WARNING: only the first "
-                f"{budget // 1000}k chars are inlined below. For the rest, "
-                "call `kaos-content-search-document` (path = the AST path above) "
-                "or `kaos-pdf-extract-page-text` (path = the bytes path above)."
-            )
-
-        chunks.append("\n".join(header_lines) + "\n\n" + body)
-
-    return "\n\n---\n\n".join(chunks)
+    return "\n\n".join(chunks)
 
 
 class FileNotFoundError(UploadError):

@@ -6,7 +6,7 @@
 import { Button } from "@kaos-chat-example/ui/components/ui/button";
 import { Input } from "@kaos-chat-example/ui/components/ui/input";
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -135,10 +135,7 @@ function LoginRoute() {
           Generate one with{" "}
           <code className="text-foreground">head -c 32 /dev/urandom | base64</code> and set it as{" "}
           <code className="text-foreground">KAOS_AGENTS_API_API_TOKEN</code> in your{" "}
-          <Link to="/login" className="underline">
-            .env
-          </Link>
-          .
+          <code className="text-foreground">.env</code>.
         </p>
         <p className="mt-3 text-[11px] text-muted-foreground border-l-2 border-warn/40 pl-2">
           <strong className="text-foreground">Dev-mode auth.</strong> The token lands in your
