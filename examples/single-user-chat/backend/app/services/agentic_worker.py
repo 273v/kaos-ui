@@ -163,11 +163,11 @@ def make_worker(
                 tool_calls.append(payload)
             elif event_type == "turn_summary":
                 cost = payload.get("cost_usd")
-                if isinstance(cost, (int, float)):
+                if isinstance(cost, int | float):
                     turn_summary_cost_usd = float(cost)
             elif event_type == "usage_observed":
                 cost = payload.get("cost_usd")
-                if isinstance(cost, (int, float)):
+                if isinstance(cost, int | float):
                     usage_sum_cost_usd += float(cost)
 
         latency_ms = (time.monotonic() - t_start) * 1000.0

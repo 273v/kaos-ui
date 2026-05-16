@@ -222,8 +222,7 @@ def test_agent_never_gives_up_on_searchable_question(client) -> None:
     final_term = terminate_events[-1]
     final_reason = final_term.get("reason")
     assert final_reason not in ("stuck_no_progress", "user_interrupt"), (
-        f"Loop terminated for a 'gave up' reason: {final_reason!r}. "
-        f"Full term event: {final_term!r}"
+        f"Loop terminated for a 'gave up' reason: {final_reason!r}. Full term event: {final_term!r}"
     )
     assert final_reason in (
         "satisfied",
