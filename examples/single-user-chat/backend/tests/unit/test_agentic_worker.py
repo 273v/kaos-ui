@@ -1,0 +1,449 @@
+"""Tests for ``app.services.agentic_worker.make_worker``.
+
+The worker adapter wraps :func:`stream_chat` for the AgenticLoop's
+``WorkerCallable`` contract. These tests stub out :func:`stream_chat`
+so we exercise the adapter pure (no httpx, no asgi).
+
+Coverage:
+  - tool_set_override carries per-iteration allowed_groups
+  - tool_set_override carries the session's denied_tools floor
+  - tool_set_override forces ``auto_narrow=False`` (the loop already
+    narrowed; the proxy must not run the legacy planner again)
+  - iteration 1 leaves the system prompt untouched
+  - iteration >= 2 with thinking_note appends a critic-guidance block
+    to the system prompt
+  - text concatenation from ``text_delta.content``
+  - tool_calls_made collection from ``tool_call_summary``
+  - cost_usd from ``turn_summary``
+  - cost_usd fallback to summed ``usage_observed`` when no turn_summary
+  - events list preserves the SSE record shape verbatim
+  - malformed records (non-JSON data, unknown event types) are tolerated
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+import pytest
+
+from app.models import SessionMeta, SessionPolicyWire
+from app.services import agentic_worker, stream_proxy
+
+
+class _StreamChatStub:
+    """Replacement for ``stream_chat`` that records kwargs + replays records."""
+
+    def __init__(self, records: list[dict[str, str]]) -> None:
+        self._records = records
+        self.captured: dict[str, Any] = {}
+
+    def __call__(self, **kwargs: Any) -> AsyncIterator[dict[str, str]]:
+        self.captured.update(kwargs)
+        return self._iter()
+
+    async def _iter(self) -> AsyncIterator[dict[str, str]]:
+        for r in self._records:
+            yield r
+
+
+def _client() -> httpx.AsyncClient:
+    """A bare AsyncClient — the stub never actually calls it."""
+    return httpx.AsyncClient()
+
+
+def _meta(*, system_prompt: str = "Be helpful.") -> SessionMeta:
+    return SessionMeta(
+        id="01J1234567890123456789ABCD",
+        title="t",
+        model="anthropic:claude-haiku-4-5",
+        system_prompt=system_prompt,
+        policy=SessionPolicyWire.for_persona("research"),
+        created_at=datetime(2026, 5, 14, tzinfo=UTC),
+        last_message_at=None,
+        message_count=0,
+        archived=False,
+    )
+
+
+def _sse(event_type: str, **payload: Any) -> dict[str, str]:
+    """Build one SSE record in the wire shape stream_chat emits."""
+    body = {"type": event_type, **payload}
+    return {"event": event_type, "data": json.dumps(body)}
+
+
+def _stream_chat_stub(records: list[dict[str, str]]) -> _StreamChatStub:
+    """Return a callable stub for stream_chat that captures kwargs + replays records."""
+    return _StreamChatStub(records)
+
+
+async def test_iter1_uses_meta_system_prompt_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.001)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta(system_prompt="Be terse.")
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=["documents", "vfs"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    forwarded_meta: SessionMeta = fake.captured["meta"]
+    assert forwarded_meta.system_prompt == "Be terse."
+
+
+async def test_iter2_appends_thinking_note_to_system_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.001)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta(system_prompt="Base prompt.")
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=["documents"],
+        thinking_note="Try searching the corpus first.",
+        iteration=2,
+    )
+
+    forwarded_meta: SessionMeta = fake.captured["meta"]
+    assert forwarded_meta.system_prompt.startswith("Base prompt.")
+    assert "Replan guidance" in forwarded_meta.system_prompt
+    assert "Try searching the corpus first." in forwarded_meta.system_prompt
+
+
+async def test_iter2_with_empty_thinking_note_does_not_augment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty thinking_note means the critic produced no guidance — don't add a banner."""
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.0)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta(system_prompt="Untouched.")
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=2,
+    )
+
+    forwarded_meta: SessionMeta = fake.captured["meta"]
+    assert forwarded_meta.system_prompt == "Untouched."
+
+
+async def test_tool_set_override_carries_per_iter_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.0)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=["documents", "citations"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    override = fake.captured["tool_set_override"]
+    assert sorted(override.allowed_groups) == ["citations", "documents"]
+
+
+async def test_tool_set_override_pins_denied_tools_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.0)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=["documents"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    override = fake.captured["tool_set_override"]
+    # Default research persona deny-list bakes in the 4 self-recursive
+    # kaos-agents tools — they must survive into the per-iteration set.
+    assert "kaos-agent-chat" in override.denied_tools
+    assert "kaos-agent-plan" in override.denied_tools
+
+
+async def test_tool_set_override_disables_auto_narrow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The AgenticLoop already narrowed for this iteration — the
+    legacy turn_tool_policy planner in stream_proxy must NOT re-run.
+    """
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.0)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    await worker(
+        user_message="hi",
+        allowed_groups=["documents"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    override = fake.captured["tool_set_override"]
+    assert override.auto_narrow is False
+
+
+async def test_text_concatenation_from_text_deltas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        _sse("text_delta", content="Hello "),
+        _sse("text_delta", content="world"),
+        _sse("text_delta", content="!"),
+        _sse("turn_summary", cost_usd=0.002),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert result.text == "Hello world!"
+
+
+async def test_tool_calls_collected_from_summary_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        _sse("tool_call_summary", tool_call_id="a", tool_name="kaos-pdf-extract"),
+        _sse("tool_call_summary", tool_call_id="b", tool_name="kaos-content-search"),
+        _sse("turn_summary", cost_usd=0.005),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=["documents"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert len(result.tool_calls_made) == 2
+    assert {tc["tool_name"] for tc in result.tool_calls_made} == {
+        "kaos-pdf-extract",
+        "kaos-content-search",
+    }
+
+
+async def test_cost_prefers_turn_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    records = [
+        _sse("usage_observed", cost_usd=0.001),
+        _sse("usage_observed", cost_usd=0.002),
+        _sse("turn_summary", cost_usd=0.010),  # authoritative aggregate
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert result.cost_usd == pytest.approx(0.010)
+
+
+async def test_cost_falls_back_to_usage_sum_when_no_turn_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the upstream terminates early without a turn_summary (eg.
+    network drop), sum the usage_observed events instead of reporting 0.
+    """
+    records = [
+        _sse("usage_observed", cost_usd=0.003),
+        _sse("usage_observed", cost_usd=0.004),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert result.cost_usd == pytest.approx(0.007)
+
+
+async def test_events_list_preserves_wire_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    records = [
+        _sse("text_delta", content="hi"),
+        _sse("turn_summary", cost_usd=0.0),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+    )
+
+    # Verbatim — same dicts, same order. The orchestrator forwards
+    # these straight into the SSE stream so the wire shape is sacred.
+    assert result.events == records
+
+
+async def test_malformed_payloads_do_not_crash_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        {"event": "garbage", "data": "this is not json"},
+        {"event": "missing_data"},  # no 'data' key at all
+        _sse("text_delta", content="ok"),
+        _sse("turn_summary", cost_usd=0.001),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+    )
+
+    # Malformed events still ride through in `events` so the SSE
+    # consumer sees the full upstream trace; text + cost accounting
+    # just skips them.
+    assert result.text == "ok"
+    assert result.cost_usd == pytest.approx(0.001)
+    assert len(result.events) == 4
+
+
+async def test_worker_tolerates_extra_kwargs_from_future_loop_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward-compat — a newer AgenticLoop may pass more kwargs;
+    the worker accepts and ignores them.
+    """
+    fake = _stream_chat_stub([_sse("turn_summary", cost_usd=0.0)])
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    meta = _meta()
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=meta,
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=[],
+        thinking_note="",
+        iteration=1,
+        future_unknown_kwarg=object(),
+    )
+
+    assert result.text == ""

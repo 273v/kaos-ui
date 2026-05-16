@@ -39,7 +39,7 @@ from app.models import (
     ToolSetUpdateBody,
 )
 from app.persistence.sessions import SessionStore
-from app.services.stream_proxy import _bearer_from_env, stream_chat
+from app.services.stream_proxy import _bearer_from_env
 from app.settings import AppSettings
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_auth)])
@@ -105,6 +105,39 @@ def _derive_title(first_message: str, *, max_len: int = 60) -> str:
     if cutoff <= 0:
         cutoff = max_len
     return text[:cutoff].rstrip() + "…"
+
+
+def _to_sse_event(ev: object) -> dict[str, str] | None:
+    """Normalize an :func:`run_agentic_turn` yield into an SSE record.
+
+    The orchestrator yields a mix of typed KaosEvent objects (its own
+    AgenticLoop events) and raw SSE dicts forwarded verbatim from the
+    worker. Both must land in the response stream as ``{event, data}``
+    where ``data`` is a JSON string.
+
+    - **dict** — already SSE-shaped. Returned unchanged.
+    - **KaosEvent** — serialized via ``model_dump`` with the type
+      discriminator injected so the SPA's reducer can switch on
+      ``payload.type`` exactly as it does for the kaos-agents stream.
+
+    Returns None for any unknown shape so the caller can skip it
+    without breaking the stream.
+    """
+    if isinstance(ev, dict):
+        return ev  # type: ignore[return-value]
+    # Local import keeps the module-level dep graph minimal: chat.py
+    # is imported at FastAPI startup, KaosEvent only when a turn fires.
+    from kaos_agents.base.event import KaosEvent
+
+    if isinstance(ev, KaosEvent):
+        type_str = ev.event_type()
+        payload = ev.model_dump(mode="json")
+        # Inject the discriminator. KaosEvent stores `type` only as a
+        # ClassVar (not a field), so the dump omits it; the SPA wire
+        # contract puts ``type`` inside the payload dict.
+        payload["type"] = type_str
+        return {"event": type_str, "data": json.dumps(payload)}
+    return None
 
 
 def _validate_model_id(model_id: str) -> None:
@@ -345,54 +378,22 @@ async def send_message(
     else:
         available_tool_names = ()
 
-    # TR-6: when auto_narrow is on, run the TurnToolPolicy planner to
-    # narrow this turn's tool set within the ceiling. Result is a
-    # per-turn `tool_set_override` handed to stream_chat. Emitting the
-    # decision as an SSE event happens below (in event_generator) so
-    # the SPA can render a transparency badge.
-    from app.models import SessionToolSetWire
-    from app.services.turn_tool_policy import TurnToolPolicy, plan_turn_tool_policy
-
-    tool_policy_event: TurnToolPolicy | None = None
-    effective_tool_set: SessionToolSetWire | None = None
-    if meta.tools_enabled and meta.tool_set.auto_narrow:
-        # Build the planner inputs — corpus headlines + recent turns
-        # compressed to one line each so the planner sees enough to
-        # route without ballooning prompt cost.
-        if runtime is not None:
-            try:
-                from app.services.uploads import list_session_files
-
-                metas = await list_session_files(runtime=runtime, session_id=session_id)
-                corpus_headlines = "\n".join(
-                    f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
-                    for m in metas
-                )
-            except Exception:
-                corpus_headlines = ""
-        else:
-            corpus_headlines = ""
+    # AgenticLoop input: one-line corpus headlines so the planner sees
+    # enough to route without ballooning prompt cost. Always computed
+    # (the legacy `auto_narrow` gate is gone — the loop's per-iteration
+    # planner decides what to narrow).
+    corpus_headlines: str = ""
+    if runtime is not None:
         try:
-            tool_policy_event = await plan_turn_tool_policy(
-                user_message=body.message,
-                recent_turns="",  # TR-6 keeps history empty; TR-13 docs deeper context
-                corpus_headlines=corpus_headlines,
-                ceiling_groups=list(meta.tool_set.allowed_groups),
-                available_groups=list(meta.tool_set.allowed_groups),
-            )
-            # Intersect ceiling with planner choice — already done inside
-            # the planner, but compose a fresh SessionToolSetWire for the
-            # proxy that pins this turn's narrowed groups + keeps the
-            # session's denied_tools floor.
-            effective_tool_set = SessionToolSetWire(
-                allowed_groups=sorted(tool_policy_event.turn_groups),
-                denied_tools=list(meta.tool_set.denied_tools),
-                auto_narrow=False,  # already narrowed for this turn
+            from app.services.uploads import list_session_files
+
+            file_metas = await list_session_files(runtime=runtime, session_id=session_id)
+            corpus_headlines = "\n".join(
+                f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
+                for m in file_metas
             )
         except Exception:
-            logger.exception("turn-policy planner failed; using ceiling")
-            tool_policy_event = None
-            effective_tool_set = None
+            logger.exception("failed to render corpus headlines for session=%s", session_id)
 
     # First turn auto-derives a title from the user message so the
     # sidebar isn't a sea of "Untitled".
@@ -413,45 +414,58 @@ async def send_message(
     turn_index = meta.message_count // 2
 
     async def event_generator():
-        # TR-7 wire: emit ToolPolicyDecided before the first kaos-agents
-        # event so the SPA sees the narrowing decision before any tool
-        # call lands. Always emitted when the planner ran, even if it
-        # fell back to the ceiling — that itself is information.
-        if tool_policy_event is not None:
-            yield {
-                "event": "tool_policy_decided",
-                "data": json.dumps(
-                    {
-                        "type": "tool_policy_decided",
-                        "turn_groups": sorted(tool_policy_event.turn_groups),
-                        "ceiling_groups": list(meta.tool_set.allowed_groups),
-                        "reasoning": tool_policy_event.reasoning,
-                        "confidence": tool_policy_event.confidence,
-                        "fell_back_to_ceiling": tool_policy_event.fell_back_to_ceiling,
-                        "cost_usd": tool_policy_event.cost_usd,
-                        "latency_ms": tool_policy_event.latency_ms,
-                    }
-                ),
-            }
+        # AgenticLoop wire-up: drive plan → elevate → execute → check →
+        # replan via :func:`run_agentic_turn`. The orchestrator yields
+        # a mix of typed KaosEvent objects (its own 4 events:
+        # ToolPolicyElevated / CapabilityRequested / GoalChecked /
+        # LoopTerminated) and verbatim SSE dicts forwarded from the
+        # worker (text deltas, tool calls, usage, turn summary). Both
+        # shapes need to land in the SSE stream as ``{event, data}``.
+        from kaos_agents.patterns.agentic_loop import run_agentic_turn
+        from kaos_agents.registry import default_tool_group_registry
+
+        from app.services.agentic_worker import make_worker
+
+        session_policy = meta.policy.to_session_policy()
+        available_groups = sorted(default_tool_group_registry.list_names())
+        worker = make_worker(
+            client=upstream,
+            bearer_token=bearer,
+            meta=meta,
+            max_cost_usd=settings.turn_budget_usd,
+            available_tool_names=available_tool_names or None,
+            corpus_markdown=corpus_markdown,
+        )
+
         try:
-            async for evt in stream_chat(
-                client=upstream,
-                bearer_token=bearer,
-                meta=meta,
-                message=body.message,
-                max_cost_usd=settings.turn_budget_usd,
-                available_tool_names=available_tool_names,
-                corpus_markdown=corpus_markdown,
-                tool_set_override=effective_tool_set,
+            async for ev in run_agentic_turn(
+                user_message=body.message,
+                policy=session_policy,
+                worker=worker,
+                available_groups=available_groups,
+                session_id=session_id,
+                run_id=f"turn-{turn_index}",
+                # corpus_kinds: future magika-classified content-type
+                # labels for uploaded files (kaos-nlp-core P2-1d). Empty
+                # for now — planner gracefully handles missing values.
+                corpus_kinds=[],
+                session_intent=meta.policy.persona,
+                corpus_headlines=corpus_headlines,
+                # recent_turns: deferred to TR-13 (deeper context). The
+                # planner tolerates an empty string.
+                recent_turns="",
             ):
+                sse_event = _to_sse_event(ev)
+                if sse_event is None:
+                    continue
                 # Best-effort tap: parsing failures must not corrupt the
                 # stream. The recorder ignores events it doesn't know.
                 try:
-                    payload = json.loads(evt["data"]) if "data" in evt else None
-                    recorder.observe(evt.get("event", ""), payload)
+                    payload = json.loads(sse_event["data"]) if "data" in sse_event else None
+                    recorder.observe(sse_event.get("event", ""), payload)
                 except Exception:
                     pass
-                yield evt
+                yield sse_event
         finally:
             # Persist the sidecar BEFORE the title/touch work so a failure
             # in the LLM-titler doesn't lose tool-call history.

@@ -37,11 +37,18 @@ function makeSpan(subject: string, phase: string, attrs: Record<string, unknown>
 }
 
 describe("event-handler — wire-event coverage", () => {
-  it("covers all 16 event type strings (15 kaos-agents + 1 kaos-ui ext)", () => {
-    // 15 canonical kaos-agents wire events + 1 kaos-ui extension
-    // (tool_policy_decided, TR-7) — see events.ts header docstring.
-    expect(ALL_EVENT_TYPES.length).toBe(16);
+  it("covers all 20 event type strings (15 kaos-agents + 5 kaos-ui ext)", () => {
+    // 15 canonical kaos-agents wire events + 5 kaos-ui extensions:
+    //   1. tool_policy_decided (TR-7, legacy — kept one release)
+    //   2-5. AgenticLoop quartet (kaos-agents 0.1.0a4):
+    //      tool_policy_elevated, capability_requested,
+    //      goal_checked, loop_terminated.
+    expect(ALL_EVENT_TYPES.length).toBe(20);
     expect(ALL_EVENT_TYPES).toContain("tool_policy_decided");
+    expect(ALL_EVENT_TYPES).toContain("tool_policy_elevated");
+    expect(ALL_EVENT_TYPES).toContain("capability_requested");
+    expect(ALL_EVENT_TYPES).toContain("goal_checked");
+    expect(ALL_EVENT_TYPES).toContain("loop_terminated");
   });
 
   it("text_delta appends to the streaming assistant message", () => {
@@ -283,6 +290,141 @@ describe("event-handler — span cartesian", () => {
     const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
     expect(msg?.tool_policy?.fell_back_to_ceiling).toBe(true);
     expect(msg?.tool_policy?.confidence).toBe(0.4);
+  });
+
+  // ── AgenticLoop event quartet (kaos-agents 0.1.0a4) ────────────────
+
+  it("tool_policy_elevated appends to the in-flight message's elevations list", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "tool_policy_elevated",
+      elevated_groups: ["web"],
+      kept_groups: ["documents", "vfs", "web"],
+      previous_allowed: ["documents", "vfs"],
+      rationale: "User asked to search Federal Register.",
+      iteration: 1,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.elevations).toHaveLength(1);
+    expect(msg?.elevations?.[0]?.elevated_groups).toEqual(["web"]);
+    expect(msg?.elevations?.[0]?.rationale).toContain("Federal Register");
+  });
+
+  it("tool_policy_elevated accumulates across multiple iterations", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const after1 = applyEvent(state, {
+      type: "tool_policy_elevated",
+      elevated_groups: ["web"],
+      kept_groups: ["documents", "web"],
+      previous_allowed: ["documents"],
+      rationale: "iter 1",
+      iteration: 1,
+    });
+    const after2 = applyEvent(after1, {
+      type: "tool_policy_elevated",
+      elevated_groups: ["browser"],
+      kept_groups: ["documents", "web", "browser"],
+      previous_allowed: ["documents", "web"],
+      rationale: "iter 2",
+      iteration: 2,
+    });
+    const msg = after2.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.elevations).toHaveLength(2);
+    expect(msg?.elevations?.[1]?.iteration).toBe(2);
+  });
+
+  it("capability_requested attaches a pending request to the streaming message", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "capability_requested",
+      requested_groups: ["browser"],
+      justification: "Page needs JavaScript rendering.",
+      iteration: 2,
+      previous_allowed: ["documents", "web"],
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.capability_request?.requested_groups).toEqual(["browser"]);
+    expect(msg?.capability_request?.justification).toContain("JavaScript");
+    // The loop is still active — don't clear `pending`.
+    expect(next.pending).toBe(state.pending);
+  });
+
+  it("goal_checked records the Critic verdict", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "goal_checked",
+      kind: "satisfied",
+      rationale: "The answer addresses the question.",
+      next_action: "",
+      missing: "",
+      confidence: 0.92,
+      iteration: 1,
+      cost_usd: 0.001,
+      latency_ms: 120,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.goal_check?.kind).toBe("satisfied");
+    expect(msg?.goal_check?.confidence).toBe(0.92);
+  });
+
+  it("goal_checked overwrites on replan iterations (most recent wins)", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const after1 = applyEvent(state, {
+      type: "goal_checked",
+      kind: "needs_more_work",
+      rationale: "incomplete",
+      next_action: "Search the corpus first.",
+      missing: "",
+      confidence: 0.5,
+      iteration: 1,
+      cost_usd: 0.001,
+      latency_ms: 90,
+    });
+    const after2 = applyEvent(after1, {
+      type: "goal_checked",
+      kind: "satisfied",
+      rationale: "now complete",
+      next_action: "",
+      missing: "",
+      confidence: 0.95,
+      iteration: 2,
+      cost_usd: 0.001,
+      latency_ms: 110,
+    });
+    const msg = after2.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.goal_check?.kind).toBe("satisfied");
+    expect(msg?.goal_check?.iteration).toBe(2);
+  });
+
+  it("loop_terminated records the termination snapshot", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "loop_terminated",
+      reason: "satisfied",
+      iterations_used: 1,
+      elevations_used: 1,
+      cost_usd: 0.005,
+      wall_clock_ms: 1200,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.loop_termination?.reason).toBe("satisfied");
+    expect(msg?.loop_termination?.iterations_used).toBe(1);
+    expect(msg?.loop_termination?.elevations_used).toBe(1);
+  });
+
+  it("loop_terminated with max_iterations carries the warn-tier reason", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "loop_terminated",
+      reason: "max_iterations",
+      iterations_used: 3,
+      elevations_used: 2,
+      cost_usd: 0.02,
+      wall_clock_ms: 8000,
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.loop_termination?.reason).toBe("max_iterations");
+    expect(msg?.loop_termination?.iterations_used).toBe(3);
   });
 });
 

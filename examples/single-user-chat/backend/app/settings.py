@@ -101,17 +101,15 @@ class AppSettings(ModuleSettings):
     # richer titles on dense conversations, or to a local model.
     auto_title_model: str = "anthropic:claude-haiku-4-5"
     summarizer_model: str = "anthropic:claude-haiku-4-5"
-    # TR-5: model used by the per-turn TurnToolPolicy planner. Runs
-    # before EVERY tool-able turn so latency + cost matter — Haiku is
-    # the right default. Override to a smaller / local model for
-    # high-throughput deploys; override to Sonnet for harder routing
-    # (eg. when the catalog grows beyond ~6 groups).
-    turn_policy_model: str = "anthropic:claude-haiku-4-5"
-    # When the planner's self-rated confidence is below this, the
-    # router uses the full ceiling instead of the narrowed set.
-    # Refusing to narrow is always safe — false narrowing costs the
-    # user a wasted turn, false broadening costs a few cents.
-    turn_policy_confidence_threshold: float = 0.6
+    # AgenticLoop tuning. The loop's per-iteration planner +
+    # GoalChecker each run an LLM call; Haiku is the right default
+    # because both are tight-prompt classifiers running BEFORE each
+    # iteration (latency + cost matter). Override to Sonnet for
+    # harder routing (catalog growing beyond ~10 groups) or to a
+    # smaller / local model for high-throughput deploys. Set None
+    # to use the kaos-agents defaults baked into the Signatures.
+    agentic_planner_model: str | None = "anthropic:claude-haiku-4-5"
+    agentic_goal_check_model: str | None = "anthropic:claude-haiku-4-5"
     # Soft char-cap on the input the summarizer sends to the LLM.
     # This bounds ONLY the at-upload-time `summary` field — a 2-3
     # sentence "what kind of document is this?" snippet. It is NOT
