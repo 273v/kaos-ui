@@ -59,6 +59,55 @@ describe("event-handler — wire-event coverage", () => {
     expect(msg?.content).toBe("Hello world.");
   });
 
+  // F.11.D regression. ChatCodec/XMLCodec-derived scratchpad tag
+  // closers (`[/response]`, `</response>`, etc.) that some
+  // instruction-tuned models hallucinate must NEVER reach the
+  // rendered assistant text. The reducer strips them before append.
+  // Pairs with kaos-agents' native JSONCodec switch in
+  // BaseAgent._simple_respond.
+  it("text_delta strips bracketed scratchpad-tag closers", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    // Realistic Haiku-style emission: prose body + a hallucinated
+    // [/response] closer at the tail.
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "ack[/response]",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("ack");
+  });
+
+  it("text_delta strips angle-bracket scratchpad-tag closers", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "the answer is 4</response>",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("the answer is 4");
+  });
+
+  it("text_delta does NOT eat literal text that resembles a path", () => {
+    // Conservative: only `\w+` slugs in brackets get stripped, so a
+    // path literal like `[/usr/local]` (contains `/`) is untouched.
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content: "the path is [/usr/local]",
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("the path is [/usr/local]");
+  });
+
+  it("text_delta drops a fragment that becomes empty after stripping", () => {
+    // A delta that is JUST a scratchpad closer must not even mark the
+    // assistant message as updated — `applyEvent` returns state as-is.
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, { type: "text_delta", content: "[/budget]" });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("");
+  });
+
   it("thinking_delta does not mutate visible content", () => {
     const { state } = seedWithPlaceholder();
     const next = applyEvent(state, { type: "thinking_delta", content: "internal." });
