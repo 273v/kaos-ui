@@ -26,13 +26,16 @@ asks it to flush to a path.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from app.logging_setup import app_logger
 
 logger = app_logger("tool_call_recorder")
+
+
+ToolCallStatus = Literal["running", "done", "error"]
 
 
 class ToolCallRecord(BaseModel):
@@ -44,7 +47,7 @@ class ToolCallRecord(BaseModel):
 
     id: str
     name: str
-    status: str
+    status: ToolCallStatus
     args_preview: str | None = None
     result_preview: str | None = None
 

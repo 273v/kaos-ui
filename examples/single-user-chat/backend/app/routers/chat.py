@@ -13,7 +13,7 @@ Routes:
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from typing import Annotated, cast
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -124,7 +124,10 @@ def _to_sse_event(ev: object) -> dict[str, str] | None:
     without breaking the stream.
     """
     if isinstance(ev, dict):
-        return ev  # type: ignore[return-value]
+        # Already SSE-shaped {event, data}. ty narrows `dict` to
+        # `dict[Unknown, Unknown]` from `object`, so go through a
+        # checked cast to keep the public signature exact.
+        return cast("dict[str, str]", ev)
     # Local import keeps the module-level dep graph minimal: chat.py
     # is imported at FastAPI startup, KaosEvent only when a turn fires.
     from kaos_agents.base.event import KaosEvent
@@ -648,7 +651,7 @@ async def get_history(
                 HistoryToolCall(
                     id=r.id,
                     name=r.name,
-                    status=r.status,  # type: ignore[arg-type]
+                    status=r.status,
                     args_preview=r.args_preview,
                     result_preview=r.result_preview,
                 )

@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a4] — 2026-05-15
+
+### Fixed — Post-0.1.0a3 audit (7 findings)
+
+External audit on `v0.1.0a3` caught seven issues; this hotfix
+closes all of them with regression tests.
+
+- **(High) Generated `web:spa` production proxy was broken.** The
+  template `Caddyfile` used `handle_path /v1/*`, which strips `/v1`
+  before forwarding, so every `/v1/...` backend route 404'd behind
+  Caddy. Changed to `handle /v1/*` to match the working single-user
+  example.
+  (`kaos_ui/templates/web/spa/Caddyfile`)
+- **(High) Transcript leak on session switch mid-stream.** The
+  `useSendMessage` reset effect skipped abort/reset whenever a
+  stream was in flight, even when the user navigated to a different
+  session. Result: session A's stream + transcript bled into the
+  session B view. Fixed by tracking the last hydrated `sessionId`
+  in a ref — same-session refetches still no-op, but a session
+  change always tears down the old stream.
+  (`packages/kaos-ui-react/src/hooks/use-send-message.ts`)
+- **(High) CapabilityApproval card had no resume path.** The
+  reducer kept the turn `pending` on `capability_requested`, but
+  the SPA route rendered `<Message>` without an `onCapabilityDecide`
+  handler, so the approval buttons disabled themselves. Wired the
+  decide handler in the chat route + added `onPinElevationToSession`
+  so the "Pin to session" affordance on `<ElevationPill>` works
+  end-to-end. Decisions resolve through
+  `PATCH /v1/chat/sessions/:id/tool-set` for "Enable for session" /
+  "Pin to session"; the other three cleanly dismiss.
+  (`examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`)
+- **(Medium) Document downloads bypassed bearer auth.** The
+  `<DocumentExplorer>` component used a plain `<a href>` for the
+  Download icon, which doesn't attach `Authorization` headers, so
+  the request 401'd against the example's bearer-token middleware.
+  Added an `onDownload` prop that lets the host do an authenticated
+  fetch → blob → save flow; the legacy `getDownloadUrl` is
+  preserved for cookie-auth consumers and marked deprecated in the
+  JSDoc. The example route now uses `onDownload` with `apiFetch`.
+  (`packages/kaos-ui-react/src/chat/DocumentExplorer.tsx`,
+  `examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`)
+- **(Medium) `denied_tools` recursion floor could be lost.**
+  Creating a session with `tools_enabled=False` wrote
+  `denied_tools=[]`; a later `PATCH /tool-set` from the settings
+  sheet preserved the empty list. The four self-recursive
+  `kaos-agent-*` tools could re-enter the allow set when the user
+  flipped tools back on. Added `with_denied_floor()` to
+  `app.models` and called it from every persistence path that
+  writes a `SessionPolicyWire`. Three regression tests pin the
+  invariant.
+  (`examples/single-user-chat/backend/app/models.py`,
+  `examples/single-user-chat/backend/app/persistence/sessions.py`)
+- **(Medium) Template upload buffered full bodies before size check.**
+  `uploads.py.tmpl` called `await file.read()` before delegating
+  to `validate()` for the size cap. Caddy enforces the cap at the
+  proxy edge, but direct hits on uvicorn / dev / an alternate
+  proxy could exhaust memory. Refactored to a streamed chunk loop
+  that short-circuits at 256 KiB increments and returns 413 as
+  soon as the cap is exceeded. Updated the template's oversize
+  test accordingly.
+  (`kaos_ui/templates/web/spa/backend/app/routers/uploads.py.tmpl`,
+  `kaos_ui/templates/web/spa/backend/tests/test_uploads.py.tmpl`)
+- **(Medium) Backend `ty` gate had 16 stale diagnostics.** Cleaned
+  up `_to_sse_event`'s narrowed return type (`cast` rather than
+  blanket ignore), tightened `_effective_tool_set` to use
+  `SessionToolSetWire` instead of `object`, tagged
+  `summarize_session_title`'s `@llm_call` empty body, defensively
+  walked `hit.document` in `corpus_search`, typed
+  `ToolCallRecord.status` as the canonical three-way Literal, and
+  migrated three test fixtures off the legacy
+  `tools_enabled=` SessionMeta kwarg pattern onto
+  `policy=SessionPolicyWire.for_persona(...)`.
+
 ## [0.1.0a3] — 2026-05-15
 
 ### Added — AgenticLoop wire-up (kaos-agents 0.1.0a4)
@@ -264,7 +337,8 @@ First public alpha.
   is stable for the duration of the `0.1.x` line; experimental surfaces
   live under `kaos_ui.mcp.tools` and may evolve.
 
-[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a3...HEAD
+[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a4...HEAD
+[0.1.0a4]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a1

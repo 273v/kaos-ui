@@ -40,11 +40,15 @@ localhost {
 	}
 
 	# ───── /v1 → FastAPI backend ──────────────────────────────
-	handle_path /v1/* {
-		# rewrite /v1/foo → /v1/foo for the backend (no path strip).
-		# flush_interval -1 keeps SSE flowing chunk-by-chunk; Caddy
-		# auto-detects text/event-stream but the explicit setting is
-		# documented belt-and-suspenders (see Caddy issue #4247).
+	# `handle` (NOT `handle_path`) — Caddy's `handle_path` strips the
+	# matched prefix before forwarding, so /v1/foo would hit the backend
+	# at /foo and 404. The backend mounts every route under /v1, so we
+	# pass the path through untouched. (caught in post-0.1.0a3 audit.)
+	#
+	# flush_interval -1 keeps SSE flowing chunk-by-chunk; Caddy
+	# auto-detects text/event-stream but the explicit setting is
+	# documented belt-and-suspenders (see Caddy issue #4247).
+	handle /v1/* {
 		reverse_proxy backend:8000 {
 			flush_interval -1
 		}

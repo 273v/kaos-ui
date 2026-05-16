@@ -29,9 +29,13 @@ import { z } from "zod";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
+import { usePatchToolSet } from "@/hooks/use-patch-tool-set";
 import { useSession } from "@/hooks/use-session";
 import { useSessionMessages } from "@/hooks/use-session-messages";
+import { apiFetch } from "@/lib/api-fetch";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
+
+import type { CapabilityDecision } from "@273v/kaos-ui-react/chat";
 
 const SearchSchema = z.object({
   debug: z
@@ -53,6 +57,7 @@ function ChatDetail() {
   const files = useSessionFiles(id);
   const removeFile = useDeleteFile(id);
   const backfill = useBackfillFiles(id);
+  const patchToolSet = usePatchToolSet(id);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const onAttach = (file: File) => {
     setUploadError(null);
@@ -118,6 +123,41 @@ function ChatDetail() {
   const onModelChange = (modelId: string) => {
     if (!session.data || session.data.model === modelId) return;
     patch.mutate({ model: modelId });
+  };
+
+  // Pin auto-elevated groups into the session's persistent ceiling.
+  // The ElevationPill's "Pin to session" affordance calls this with
+  // the deduped groups the AgenticLoop widened to during this turn.
+  const onPinElevationToSession = (groups: string[]) => {
+    if (!session.data || groups.length === 0) return;
+    const current = new Set(session.data.policy.allowed_groups);
+    for (const g of groups) current.add(g);
+    if (current.size === session.data.policy.allowed_groups.length) return;
+    patchToolSet.mutate({ allowed_groups: Array.from(current).sort() });
+  };
+
+  // Yellow-confirm capability resolution. The AgenticLoop fires the
+  // event but doesn't actually pause (post-0.1.0a3 the loop is
+  // fire-and-continue); the SPA renders the card so the user can
+  // choose to PERSIST the elevation. Until a backend resume route
+  // exists, the four actions resolve as:
+  //   - enable_turn:     dismiss the card (no-op; loop already ran)
+  //   - enable_session:  persist the groups into allowed_groups
+  //   - deny_continue:   dismiss the card
+  //   - deny_stop:       dismiss + abort any active stream
+  const onCapabilityDecide = (decision: CapabilityDecision, groups: string[]) => {
+    if (decision === "enable_session") {
+      onPinElevationToSession(groups);
+    }
+    if (decision === "deny_stop") {
+      stream.abort();
+    }
+    // All four decisions clear the per-message capability_request snapshot
+    // so the card unmounts. The reducer leaves `pending` alone so the
+    // streaming message can keep accumulating text deltas if any are
+    // still arriving.
+    // (We don't mutate state directly here — Message's local-clear
+    // affordance + the next loop_terminated event handle visibility.)
   };
 
   const meta = session.data;
@@ -292,7 +332,13 @@ function ChatDetail() {
 
             <div className="space-y-1 divide-y divide-border/60">
               {stream.state.messages.map((m) => (
-                <Message key={m.id} message={m} verboseTools={verboseTools} />
+                <Message
+                  key={m.id}
+                  message={m}
+                  verboseTools={verboseTools}
+                  onPinElevationToSession={onPinElevationToSession}
+                  onCapabilityDecide={onCapabilityDecide}
+                />
               ))}
             </div>
 
@@ -381,9 +427,31 @@ function ChatDetail() {
             ? new Set([backfill.variables.filename])
             : undefined
         }
-        getDownloadUrl={(filename) =>
-          `/v1/chat/sessions/${encodeURIComponent(id)}/files/${encodeURIComponent(filename)}/download`
-        }
+        onDownload={async (filename) => {
+          // Authenticated fetch → blob → trigger save. A plain <a href>
+          // wouldn't attach the bearer token (the browser doesn't
+          // carry it for top-level navigations / downloads under our
+          // localStorage-token auth model), so the request would 401.
+          const path = `/v1/chat/sessions/${encodeURIComponent(id)}/files/${encodeURIComponent(filename)}/download`;
+          let res: Response;
+          try {
+            res = await apiFetch(path);
+          } catch {
+            return;
+          }
+          if (!res.ok) {
+            return;
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }}
       />
 
       <CitationsPanel

@@ -49,7 +49,7 @@ def _resolve_title_model() -> str:
 
 
 @llm_call(model=_BASELINE_TITLE_MODEL, max_retries=1)
-async def summarize_session_title(conversation: str) -> str:
+async def summarize_session_title(conversation: str) -> str:  # ty: ignore[empty-body]
     """Read the chat conversation below and produce a short, specific
     title for the session.
 

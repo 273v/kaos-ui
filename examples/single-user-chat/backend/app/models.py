@@ -26,6 +26,33 @@ Provider = Literal["anthropic", "openai", "google", "xai"]
 
 Persona = Literal["research", "drafting", "forensics"]
 
+# Recursion guard — these 4 tools let kaos-agents call itself, which
+# the AgenticLoop's auto-elevation could otherwise drag into the
+# allowed set (the `agents` group is yellow-confirm but accidental
+# elevation would still be bad). Pinned at persistence time so a
+# disabled-then-re-enabled session can never lose the floor.
+SELF_RECURSIVE_AGENT_TOOLS: frozenset[str] = frozenset(
+    {
+        "kaos-agent-chat",
+        "kaos-agent-plan",
+        "kaos-agent-findings",
+        "kaos-agent-corpus-filter",
+    }
+)
+
+
+def with_denied_floor(denied_tools: list[str]) -> list[str]:
+    """Return ``denied_tools`` with the self-recursive guard set merged in.
+
+    Idempotent + order-preserving for whatever the caller passed in;
+    the floor entries are appended (sorted) only when absent.
+    """
+    existing = set(denied_tools)
+    additions = sorted(SELF_RECURSIVE_AGENT_TOOLS - existing)
+    if not additions:
+        return list(denied_tools)
+    return list(denied_tools) + additions
+
 
 class SessionToolSetWire(BaseModel):
     """LEGACY — kept for back-compat with sessions persisted under the

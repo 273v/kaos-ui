@@ -32,10 +32,24 @@ interface Props {
   resummarizing?: ReadonlySet<string>;
   /**
    * Per-file: produce a download URL for the original bytes. When
-   * provided, every ready file gets a Download icon link. Returning
-   * `null` from `getDownloadUrl` hides the link for that file.
+   * provided, every ready file gets a Download icon link.
+   *
+   * **Deprecated in favor of `onDownload`.** A plain `<a href>` link
+   * doesn't carry an Authorization header, so this prop breaks under
+   * bearer-token auth (the request lands at the backend without
+   * credentials and 401s). Cookie-auth deploys still work. New code
+   * should pass `onDownload` which lets the host do an authenticated
+   * fetch + blob download.
    */
   getDownloadUrl?: (filename: string) => string | null;
+  /**
+   * Per-file: fire an authenticated download. The host fetches the
+   * file via its own `apiFetch` (which attaches Authorization / cookie
+   * credentials) and triggers a browser save. When `onDownload` is
+   * provided, the Download icon click calls it instead of dispatching
+   * the `<a href>`.
+   */
+  onDownload?: (filename: string) => void | Promise<void>;
 }
 
 function formatSize(bytes: number): string {
@@ -55,11 +69,13 @@ function FileCard({
   onResummarize,
   resummarizing,
   downloadUrl,
+  onDownload,
 }: {
   file: FileMeta;
   onResummarize?: (filename: string) => void;
   resummarizing?: boolean;
   downloadUrl?: string | null;
+  onDownload?: (filename: string) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const failed = file.parse.status === "failed";
@@ -100,7 +116,20 @@ function FileCard({
           </span>
         </button>
         <div className="flex items-center pr-2 gap-1">
-          {downloadUrl && (
+          {onDownload ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void onDownload(file.filename);
+              }}
+              title={`Download ${file.filename}`}
+              aria-label={`Download ${file.filename}`}
+              className="text-muted-foreground hover:text-foreground p-1"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          ) : downloadUrl ? (
             <a
               href={downloadUrl}
               download={file.filename}
@@ -110,7 +139,7 @@ function FileCard({
             >
               <Download className="h-3.5 w-3.5" />
             </a>
-          )}
+          ) : null}
           {onResummarize && !failed && (
             <button
               type="button"
@@ -167,6 +196,7 @@ export function DocumentExplorer({
   onResummarize,
   resummarizing,
   getDownloadUrl,
+  onDownload,
 }: Props) {
   if (!open) return null;
   const needsBackfill = files.some(
@@ -232,6 +262,7 @@ export function DocumentExplorer({
                 onResummarize={onResummarize}
                 resummarizing={resummarizing?.has(f.filename)}
                 downloadUrl={getDownloadUrl?.(f.filename)}
+                onDownload={onDownload}
               />
             ))}
           </ul>

@@ -133,7 +133,7 @@ def test_computed_tools_enabled_is_read_only() -> None:
     meta = SessionMeta.model_validate_json(json.dumps(raw))
 
     with pytest.raises((AttributeError, ValueError)):
-        meta.tools_enabled = False  # type: ignore[misc]
+        meta.tools_enabled = False  # type: ignore[misc]  # ty: ignore[invalid-assignment]
 
 
 def test_session_tool_set_wire_default_is_legacy_default_ceiling() -> None:
@@ -157,3 +157,90 @@ def test_session_tool_set_wire_block_all_shape() -> None:
     """The "tools disabled" shape: empty allowed_groups."""
     tool_set = SessionToolSetWire(allowed_groups=[])
     assert tool_set.is_blocking_all is True
+
+
+# ── deny-floor recursion guard (post-0.1.0a3 audit, P.5) ──────────────
+
+
+_SELF_RECURSIVE = {
+    "kaos-agent-chat",
+    "kaos-agent-plan",
+    "kaos-agent-findings",
+    "kaos-agent-corpus-filter",
+}
+
+
+async def test_create_disabled_session_keeps_deny_floor(tmp_path) -> None:
+    """A disabled-at-creation session must STILL carry the recursion
+    guard. The audit caught this dropping when ``tools_enabled=False``.
+
+    Recovery path: user enables tools later via the settings sheet —
+    the deny floor must already be there when ``allowed_groups`` widens.
+    """
+    from kaos_core.vfs import VFSConfig, VirtualFileSystem
+    from kaos_core.vfs.models import IsolationMode
+
+    from app.persistence.sessions import SessionStore
+
+    vfs = VirtualFileSystem(
+        config=VFSConfig(disk_base_path=tmp_path, isolation_mode=IsolationMode.GLOBAL),
+    )
+    store = SessionStore(vfs=vfs)
+    meta = await store.create(
+        title="t",
+        model="anthropic:claude-haiku-4-5",
+        system_prompt="be helpful",
+        tools_enabled=False,
+    )
+    assert _SELF_RECURSIVE.issubset(set(meta.policy.denied_tools))
+
+
+async def test_patch_with_empty_denied_tools_restores_floor(tmp_path) -> None:
+    """A PATCH that explicitly clears denied_tools (older SPA client,
+    direct API caller) must still leave the recursion guard in place.
+    """
+    from kaos_core.vfs import VFSConfig, VirtualFileSystem
+    from kaos_core.vfs.models import IsolationMode
+
+    from app.models import SessionToolSetWire
+    from app.persistence.sessions import SessionStore
+
+    vfs = VirtualFileSystem(
+        config=VFSConfig(disk_base_path=tmp_path, isolation_mode=IsolationMode.GLOBAL),
+    )
+    store = SessionStore(vfs=vfs)
+    meta = await store.create(
+        title="t",
+        model="anthropic:claude-haiku-4-5",
+        system_prompt="x",
+        tools_enabled=True,
+    )
+
+    # SPA-style narrowing patch that omits / clears denied_tools.
+    new_tool_set = SessionToolSetWire(
+        allowed_groups=["documents"], denied_tools=[], auto_narrow=True
+    )
+    patched = await store.patch(meta.id, tool_set=new_tool_set)
+    assert _SELF_RECURSIVE.issubset(set(patched.policy.denied_tools))
+
+
+async def test_tools_enabled_false_patch_keeps_floor(tmp_path) -> None:
+    """Legacy `tools_enabled=False` patch must NOT zero the guard set."""
+    from kaos_core.vfs import VFSConfig, VirtualFileSystem
+    from kaos_core.vfs.models import IsolationMode
+
+    from app.persistence.sessions import SessionStore
+
+    vfs = VirtualFileSystem(
+        config=VFSConfig(disk_base_path=tmp_path, isolation_mode=IsolationMode.GLOBAL),
+    )
+    store = SessionStore(vfs=vfs)
+    meta = await store.create(
+        title="t",
+        model="anthropic:claude-haiku-4-5",
+        system_prompt="x",
+        tools_enabled=True,
+    )
+    patched = await store.patch(meta.id, tools_enabled=False)
+    assert patched.policy.is_blocking_all is True
+    assert _SELF_RECURSIVE.issubset(set(patched.policy.denied_tools))
