@@ -133,17 +133,21 @@ export function Composer({
               }
             }}
             rows={1}
-            className="w-full resize-none min-h-[56px] max-h-[280px] pr-12 px-3 py-2 leading-relaxed rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            // Bigger min-height + body-size (15px) typography so the
+            // composer reads like a draft surface, not a settings
+            // input. 11rem max keeps it from eating the chat column
+            // before "Stop" / overflow scroll kick in.
+            className="w-full resize-none min-h-[72px] max-h-[280px] pr-14 px-3.5 py-2.5 text-[15px] leading-[1.55] rounded-lg border border-input bg-background placeholder:text-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
           />
           {showStop ? (
             <button
               type="button"
               onClick={onStop}
               aria-label="Stop generating"
-              className="absolute right-2 bottom-2 h-8 w-8 inline-flex items-center justify-center rounded-md bg-muted text-foreground hover:bg-muted/80 border border-border"
+              className="absolute right-2.5 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-md bg-muted text-foreground hover:bg-muted/80 border border-border transition-colors"
               title="Stop"
             >
-              <Square className="h-3 w-3" fill="currentColor" />
+              <Square className="h-3.5 w-3.5" fill="currentColor" />
             </button>
           ) : (
             <button
@@ -151,13 +155,13 @@ export function Composer({
               onClick={onSubmit}
               disabled={!canSend}
               aria-label="Send"
-              className="absolute right-2 bottom-2 h-8 w-8 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="absolute right-2.5 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
             >
               <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground text-center">{footnote}</p>
+        <p className="mt-2.5 text-[11px] text-foreground/45 text-center tabular-nums">{footnote}</p>
       </div>
     </div>
   );

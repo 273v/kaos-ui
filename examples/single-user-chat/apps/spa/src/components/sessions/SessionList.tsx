@@ -181,7 +181,7 @@ export function SessionList({ archived = false }: Props) {
         <div className="flex flex-col gap-1 px-2">
           {bucketize(items, Date.now()).map(({ bucket, items: rows }) => (
             <section key={bucket.id} aria-label={bucket.label}>
-              <h3 className="px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wide text-foreground/70">
+              <h3 className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-[0.08em] font-medium text-foreground/70">
                 {bucket.label}
               </h3>
               <ul className="flex flex-col gap-0.5">

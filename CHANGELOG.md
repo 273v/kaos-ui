@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a6] — 2026-05-16
+
+### Added — Typography + spacing + tabular polish (Round 2)
+
+This release focuses entirely on visual polish across the SPA. A
+research pass surveyed Linear, Notion, iA Writer, Bear, Pages, Word,
+Anthropic console, ChatGPT, Perplexity, Stripe Dashboard, and shadcn
+to land on a coherent type scale, spacing rhythm, and tabular
+primitive. The full audit is in
+`.screenshots/RESEARCH-typography.md`.
+
+**Type scale + density tokens.** Added explicit
+`--text-2xs` / `xs` / `sm` / `base` / `md` / `lg` / `xl` / `2xl` /
+`3xl` to `examples/single-user-chat/packages/ui/src/styles/globals.css`,
+each with its own paired `--text-*--line-height`. The load-bearing
+decision: **chat-body text anchors at 16px / 1.65** for reading-flow
+surfaces (matches Anthropic console + iA Writer + Bear baseline) while
+**UI chrome stays at 13px** (Linear / Notion sidebar baseline). Plus
+four named density tokens — `compact` / `default` / `comfortable` /
+`spacious` — for row-height consistency across data surfaces.
+
+**`<DataTable>` primitive** (`packages/kaos-ui-react/src/data/DataTable.tsx`).
+Generic tabular component for `kaos-tabular` summaries, document
+comparison grids, citation tables, and any rectangular data surface
+the agent exposes inside the chat. Features:
+
+- Three density tiers wired to the new density tokens.
+- Typed cells: `text` / `number` / `currency` / `percent` / `date` /
+  `code` / `badge` / `link` / `custom`, each with right alignment +
+  formatting + monospace pairing defaults.
+- Sticky header.
+- Sortable headers (uncontrolled by default; `sortBy` + `onSortChange`
+  for controlled mode).
+- Semantic `<table>` + `<caption>` + `scope` + `aria-sort` markup.
+- Hairline borders, no zebra fills — Linear / Stripe Dashboard register
+  rather than Material grid.
+
+Exported from `@273v/kaos-ui-react/chat` as
+`DataTable` + `Column` + `ColumnKind` + `DataTableDensity` +
+`DataTableProps`.
+
+**Markdown body polish.** `.kaos-md` in
+`packages/kaos-ui-react/src/theme/tokens.css` rewritten end-to-end:
+
+- 16 px / 1.65 body anchored on the new scale.
+- Heading rhythm tightened (smaller h1/h2/h3 sit *within* the message
+  block instead of shouting like blog headers).
+- Inline `code` gets a hairline border + subtle background.
+- `pre` code blocks get hairline-only treatment (no inverted dark
+  panel — research recommendation: keep code surface = panel surface
+  for the "serious document" register).
+- Blockquotes get a left rule, muted body, no italic.
+- Tables get hairline rules, header weight, generous padding.
+- Links carry a hairline underline that brightens on hover; underline
+  always present for a11y.
+- Adds `text-wrap: pretty` for better last-line orphan handling.
+
+**Component-level type & spacing fixes:**
+
+- Chat header gets a serif title (matches Welcome + Login hero) and
+  monospace model name in the subtitle.
+- Composer textarea bumped to 72 px min-height + 15 px body + 1.55
+  line-height + rounded-lg corners + a 36 px send button. Reads like
+  a draft surface, not a settings input.
+- Message component uses 24 px vertical padding (was 16 px), with the
+  YOU / ASSISTANT label set in 11 px tracked uppercase at 70 %
+  opacity. Assistant turns get the `.kaos-md` editorial body
+  treatment; user / tool / error turns stay at 15 px chrome.
+- Sidebar rows tightened to 32 px with a `before:` accent stripe on
+  the active row (matches UX-LANGUAGE.md §4.6).
+- Time-bucket headers (Today / Yesterday / …) bumped to 70 %
+  foreground at 10 px tracked uppercase — uniform with the message
+  role labels.
+
+### Fixed
+
+- a11y: chat-header subtitle had 3.99:1 contrast at
+  `text-foreground/55`; bumped to `/70` for 4.5:1+ AA compliance.
+- a11y: sidebar time-bucket header same regression — held at `/70`.
+
+### Verification
+
+- Lighthouse on the active chat surface: **100 / 100 / 100 / 100**
+  (a11y / best-practices / SEO / agentic). 36 audits passed, 0 failed.
+- Browser console: clean.
+- 96 SPA vitest, 118 root kaos-ui pytest — no regressions.
+
 ## [0.1.0a5] — 2026-05-16
 
 ### Added — UX overhaul (Round 1)
@@ -420,7 +507,8 @@ First public alpha.
   is stable for the duration of the `0.1.x` line; experimental surfaces
   live under `kaos_ui.mcp.tools` and may evolve.
 
-[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a5...HEAD
+[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a6...HEAD
+[0.1.0a6]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a3
