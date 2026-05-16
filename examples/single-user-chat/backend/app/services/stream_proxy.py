@@ -20,7 +20,7 @@ import httpx
 from kaos_ui.agents import NO_TOOLS_PATTERN, augment_instructions
 
 from app.logging_setup import app_logger
-from app.models import SessionMeta
+from app.models import SessionMeta, SessionToolSetWire
 
 logger = app_logger("stream_proxy")
 
@@ -34,14 +34,15 @@ def _bearer_from_env() -> str:
     return os.environ.get("KAOS_AGENTS_API_API_TOKEN", "")
 
 
-def _effective_tool_set(meta: SessionMeta, override: object | None) -> object:
+def _effective_tool_set(
+    meta: SessionMeta, override: SessionToolSetWire | None
+) -> SessionToolSetWire:
     """Return the tool-set the proxy should enforce for this turn.
 
-    When ``override`` is non-None (set by the TR-6 planner after a
-    successful TurnToolPolicy call), use it. Otherwise fall back to
-    ``meta.tool_set`` (the ceiling). Returns the underlying
-    ``SessionToolSetWire`` shape — the per-turn override and the
-    persistent ceiling share that type.
+    When ``override`` is non-None (set by the AgenticLoop's per-iteration
+    worker adapter), use it. Otherwise fall back to ``meta.tool_set``
+    (the legacy ceiling computed_field, derived from
+    ``meta.policy.allowed_groups`` + ``meta.policy.denied_tools``).
     """
     return override if override is not None else meta.tool_set
 
@@ -49,7 +50,7 @@ def _effective_tool_set(meta: SessionMeta, override: object | None) -> object:
 def _tool_patterns(
     meta: SessionMeta,
     available_tool_names: Sequence[str] | None = None,
-    tool_set_override: object | None = None,
+    tool_set_override: SessionToolSetWire | None = None,
 ) -> list[str]:
     """Resolve SessionMeta.tool_set into the explicit list of tool names
     the agent may invoke for this turn.
@@ -178,7 +179,7 @@ def _build_forward_body(
     *,
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
-    tool_set_override: object | None = None,
+    tool_set_override: SessionToolSetWire | None = None,
 ) -> dict[str, Any]:
     return {
         "message": message,
@@ -198,7 +199,7 @@ async def stream_chat(
     max_cost_usd: float,
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
-    tool_set_override: object | None = None,
+    tool_set_override: SessionToolSetWire | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Yield `{event, data}` records ready for `sse_starlette`.
 

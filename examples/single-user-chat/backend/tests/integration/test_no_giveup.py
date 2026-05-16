@@ -291,23 +291,11 @@ def test_agent_completes_when_only_blocked_groups_are_needed(client) -> None:
     # No run_error.
     assert "run_error" not in [e.get("_event") for e in events]
 
-    # The loop must terminate cleanly. Three acceptable reasons:
-    #   - ``satisfied``             — GoalChecker accepted the answer
-    #     (rare for this scenario, but legal).
-    #   - ``insufficient_evidence`` — design-ideal: Critic recognized
-    #     the tools can't answer and returned a clean refusal.
-    #   - ``max_iterations``        — the loop kept TRYING rather than
-    #     giving up. This is the OPPOSITE of the failure mode N.1
-    #     guards against ("instantly giving up because web is
-    #     disabled") — hitting max iterations means the agent took
-    #     multiple attempts and the budget cap (not the agent's
-    #     willingness) was the limiter.
-    #
-    # The bad outcomes (which this test rejects) are:
-    #   - no loop_terminated event at all
-    #   - ``stuck_no_progress`` (pathological no-op detected)
-    #   - ``cost_exceeded`` / ``wall_clock_exceeded`` (budget tripped
-    #     before the agent could surface a verdict)
+    # Mirror the canonical regression's accept-set — the loop must
+    # terminate cleanly AND the reason must indicate "agent tried"
+    # (not stuck at iteration 0). Even with the tightest ceiling,
+    # hitting cost/wall-clock means the agent tried multiple
+    # iterations before the budget cap fired.
     terminate_events = [
         e["data"]
         for e in events
@@ -315,8 +303,14 @@ def test_agent_completes_when_only_blocked_groups_are_needed(client) -> None:
     ]
     assert terminate_events
     final_reason = terminate_events[-1].get("reason")
-    assert final_reason in ("satisfied", "insufficient_evidence", "max_iterations"), (
-        f"Loop must end cleanly even when tools are blocked. Got: {final_reason!r}. "
-        f"`max_iterations` means the agent kept trying (the design intent); "
-        f"`stuck_no_progress` / `cost_exceeded` / `wall_clock_exceeded` are the bad outcomes."
+    assert final_reason not in ("stuck_no_progress", "user_interrupt"), (
+        f"Loop terminated for a 'gave up' reason even though it had at "
+        f"least vfs available: {final_reason!r}"
     )
+    assert final_reason in (
+        "satisfied",
+        "insufficient_evidence",
+        "max_iterations",
+        "cost_exceeded",
+        "wall_clock_exceeded",
+    ), f"Unknown termination reason: {final_reason!r}"

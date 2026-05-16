@@ -55,31 +55,40 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // value, not a stale closure. Without it, two rapid submits both see
   // state.pending=false at function-close time and both kick off SSE.
   const pendingRef = useRef(false);
+  // Last sessionId we hydrated against. Lets the reset effect tell
+  // "background history refetch for the same session" (don't reset
+  // mid-stream) apart from "user navigated to a different session"
+  // (MUST reset + abort even if a stream is in flight).
+  //
+  // Post-0.1.0a3 audit: skipping reset whenever `pending=true` leaked
+  // session A's stream + transcript into the session-B view when the
+  // user clicked another sidebar entry mid-stream.
+  const lastSessionIdRef = useRef<string | null>(null);
 
   // Reset + hydrate on session switch OR when prior-messages refresh.
   // We deliberately depend on both `sessionId` and `initialMessages`:
   // a session switch must always reset, AND an updated history-cache
   // result for the same session should hydrate.
   //
-  // FIX-9: skip the reset when an SSE stream is already in flight.
-  // The example refetches history on window focus, which would
-  // otherwise abort the live turn mid-stream when the user
-  // tabs away + back. We track the live state via pendingRef
-  // (which mirrors state.pending) so the effect can no-op cleanly.
+  // FIX-9: skip the reset when an SSE stream is already in flight FOR
+  // THE SAME SESSION. The example refetches history on window focus,
+  // which would otherwise abort the live turn mid-stream when the
+  // user tabs away + back. The session-change branch below ALWAYS
+  // tears down the stream — staying in lane on the OLD session would
+  // leak its transcript into the new one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is deliberately a dep — initialMessages reference may be cache-stable across a session switch, so we MUST also reset on id change.
   useEffect(() => {
-    if (pendingRef.current) {
-      // A stream is mid-flight. Don't tear it down just because the
-      // background history query refreshed. The next idle render
-      // (after the turn completes) will pick up any genuine
-      // initialMessages change via the followup setState below if
-      // we still need it.
+    const sessionChanged = lastSessionIdRef.current !== opts.sessionId;
+    if (pendingRef.current && !sessionChanged) {
+      // Same-session refetch while streaming — leave the SSE alone.
       return;
     }
+    // Session changed OR no stream in flight → tear down + hydrate.
     abortRef.current?.abort();
     setRawEvents([]);
     eventCounter.current = 0;
     pendingRef.current = false;
+    lastSessionIdRef.current = opts.sessionId;
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       setState({ ...initialState, messages: opts.initialMessages });
     } else {

@@ -22,7 +22,14 @@ from kaos_core.vfs import VFSConfig, VirtualFileSystem
 from kaos_core.vfs.models import IsolationMode
 
 from app.exceptions import SessionNotFoundError
-from app.models import Persona, SessionMeta, SessionPolicyWire, SessionSummary, SessionToolSetWire
+from app.models import (
+    Persona,
+    SessionMeta,
+    SessionPolicyWire,
+    SessionSummary,
+    SessionToolSetWire,
+    with_denied_floor,
+)
 
 _NS = "single-user-chat/sessions"
 _ARCHIVED_NS = "single-user-chat/archived"
@@ -105,10 +112,14 @@ class SessionStore:
         if tools_enabled:
             policy = SessionPolicyWire.for_persona("research")
         else:
+            # Block-all: drop the ceiling but KEEP the recursion-guard
+            # deny floor. A user who flips tools off then back on later
+            # via the settings sheet must never lose the kaos-agent-*
+            # exclusion.
             policy = SessionPolicyWire(
                 allowed_groups=[],
                 soft_ceiling=[],
-                denied_tools=[],
+                denied_tools=with_denied_floor([]),
                 persona="research",
             )
         meta = SessionMeta(
@@ -218,14 +229,19 @@ class SessionStore:
         #      policy update preserving the existing persona / soft_ceiling
         #   3. `tools_enabled` (bool) — legacy sugar; full-on or full-off
         if policy is not None:
-            updates["policy"] = policy
+            # Force the recursion-guard floor on any policy patch — the
+            # caller may have round-tripped through a SessionPolicyWire
+            # that lost it (older SPA client, manual API caller, etc).
+            updates["policy"] = policy.model_copy(
+                update={"denied_tools": with_denied_floor(policy.denied_tools)}
+            )
         elif tool_set is not None:
             # Preserve persona + soft_ceiling + loop knobs from the existing
             # meta — the caller only sent the ceiling fragment.
             updates["policy"] = meta.policy.model_copy(
                 update={
                     "allowed_groups": list(tool_set.allowed_groups),
-                    "denied_tools": list(tool_set.denied_tools),
+                    "denied_tools": with_denied_floor(list(tool_set.denied_tools)),
                     "auto_narrow": tool_set.auto_narrow,
                 }
             )
@@ -236,7 +252,7 @@ class SessionStore:
                 updates["policy"] = SessionPolicyWire(
                     allowed_groups=[],
                     soft_ceiling=[],
-                    denied_tools=[],
+                    denied_tools=with_denied_floor([]),
                     persona="research",
                 )
         if starred is not None:

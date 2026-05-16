@@ -10,8 +10,9 @@ on every turn and overwrite the user's heuristic titles.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
 
-from app.models import SessionMeta
+from app.models import SessionMeta, SessionPolicyWire
 from app.services.title import _should_retitle
 
 
@@ -27,11 +28,11 @@ def _meta(
         title="something",
         model="anthropic:claude-haiku-4-5",
         system_prompt="",
-        tools_enabled=True,
+        policy=SessionPolicyWire.for_persona("research"),
         created_at=datetime(2026, 5, 1, tzinfo=UTC),
         last_message_at=datetime(2026, 5, 14, tzinfo=UTC),
         message_count=message_count,
-        title_source=title_source,  # type: ignore[arg-type]
+        title_source=cast('Literal["manual", "auto"]', title_source),
         title_updated_at=title_updated_at,
     )
 

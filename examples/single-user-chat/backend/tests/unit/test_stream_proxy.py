@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from kaos_ui.agents import NO_TOOLS_PATTERN
 
-from app.models import SessionMeta
+from app.models import SessionMeta, SessionPolicyWire
 from app.services.stream_proxy import _build_forward_body
 
 pytestmark = pytest.mark.unit
@@ -15,12 +15,21 @@ pytestmark = pytest.mark.unit
 
 def _meta(*, tools_enabled: bool) -> SessionMeta:
     now = datetime.now(UTC)
+    if tools_enabled:
+        policy = SessionPolicyWire.for_persona("research")
+    else:
+        policy = SessionPolicyWire(
+            allowed_groups=[],
+            soft_ceiling=[],
+            denied_tools=[],
+            persona="research",
+        )
     return SessionMeta(
         id="s1",
         title="Test",
         model="anthropic:claude-haiku-4-5",
         system_prompt="Base instructions.",
-        tools_enabled=tools_enabled,
+        policy=policy,
         created_at=now,
         last_message_at=now,
         message_count=0,

@@ -47,5 +47,8 @@ def test_upload_rejects_oversize(client, monkeypatch) -> None:
         "/v1/uploads",
         files={"file": ("big.txt", b"x" * 17, "text/plain")},
     )
-    assert response.status_code == 400
-    assert "too large" in response.json()["detail"]["message"]
+    # Post-streaming-fix: the router short-circuits at the first
+    # chunk past the cap and raises 413 (the canonical "payload too
+    # large" status) before the body is fully buffered.
+    assert response.status_code == 413
+    assert "exceeded" in response.json()["detail"]["what"]

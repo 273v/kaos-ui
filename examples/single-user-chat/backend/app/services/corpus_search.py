@@ -55,11 +55,11 @@ async def search_session_corpus(
     # Lazy imports — keep the routing layer importable when the NLP
     # extras aren't on the path.
     try:
-        from kaos_content import (  # ty: ignore[unresolved-import]
+        from kaos_content import (
             ContentDocument,
             serialize_markdown,
         )
-        from kaos_nlp_core.search import (  # ty: ignore[unresolved-import]
+        from kaos_nlp_core.search import (
             DocumentCollection,
             Searcher,
         )
@@ -126,13 +126,17 @@ async def search_session_corpus(
 
     out: list[CorpusSearchHit] = []
     for hit in hits:
-        meta = hit.document.metadata if hasattr(hit, "document") else {}
+        # `hit.document` is a kaos-nlp-core Document; ty can't follow
+        # the lazy-imported type so go through `getattr` defensively.
+        document = getattr(hit, "document", None)
+        meta_obj = getattr(document, "metadata", {}) or {}
+        text_obj = getattr(document, "text", "") or ""
         out.append(
             CorpusSearchHit(
-                filename=str(meta.get("filename", "?")),
+                filename=str(meta_obj.get("filename", "?")),
                 score=float(hit.score),
-                snippet=hit.document.text[:300] if hasattr(hit, "document") else "",
-                char_offset=int(meta.get("char_offset", 0)),
+                snippet=text_obj[:300],
+                char_offset=int(meta_obj.get("char_offset", 0)),
             )
         )
     return out

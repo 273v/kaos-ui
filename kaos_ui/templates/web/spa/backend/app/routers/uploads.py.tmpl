@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import BaseModel
-
 from app.deps import get_settings
 from app.exceptions import UploadError
 from app.services import uploads as upload_service
 from app.settings import AppSettings
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 
 router = APIRouter(tags=["uploads"])
 
@@ -22,16 +21,44 @@ class UploadResponse(BaseModel):
     size_bytes: int
 
 
+# Streamed-read chunk size. Big enough to amortize per-chunk overhead,
+# small enough that a malicious sender pushing past the cap is caught
+# within a few chunks even on the largest configured limit.
+_UPLOAD_CHUNK_BYTES = 256 * 1024  # 256 KiB
+
+
 @router.post("", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_route(
     settings: Annotated[AppSettings, Depends(get_settings)],
     file: Annotated[UploadFile, File()],
 ) -> UploadResponse:
-    # FastAPI streams large bodies via SpooledTemporaryFile; .read()
-    # buffers fully so the magic-byte check sees the head. For very
-    # large uploads this is intentionally O(N) — the size guard above
-    # bounds the damage.
-    payload = await file.read()
+    # Stream the upload chunk-by-chunk and short-circuit as soon as the
+    # accumulated size exceeds the cap. Caddy enforces the same limit
+    # at the proxy edge, but a direct hit on uvicorn / dev / an
+    # alternate proxy bypasses that — without this loop the whole
+    # body would be buffered into RAM before any size check runs.
+    max_bytes = settings.max_upload_bytes
+    parts: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            # 413 — the canonical "payload too large" outcome. Don't
+            # keep reading; drain whatever's still in flight via close.
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "what": (f"Upload exceeded {max_bytes} bytes (read {total} before aborting)."),
+                    "how_to_fix": ("Shrink the file or raise APP_MAX_UPLOAD_BYTES."),
+                    "alternative": "Split the file and upload the parts.",
+                },
+            )
+        parts.append(chunk)
+    payload = b"".join(parts)
     filename = file.filename or "unknown"
     try:
         result = upload_service.store(filename, payload, settings)

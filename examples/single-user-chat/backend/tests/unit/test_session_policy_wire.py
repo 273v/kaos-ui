@@ -146,4 +146,4 @@ def test_loop_budget_constraints_rejected() -> None:
 def test_persona_field_is_typed_literal() -> None:
     """Persona is the three-way Literal — invalid values get rejected."""
     with pytest.raises(ValidationError):
-        SessionPolicyWire(persona="invalid-persona")  # type: ignore[arg-type]
+        SessionPolicyWire(persona="invalid-persona")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
