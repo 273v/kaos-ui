@@ -256,19 +256,24 @@ function ChatDetail() {
   //   - enable_session:  persist the groups into allowed_groups
   //   - deny_continue:   dismiss the card
   //   - deny_stop:       dismiss + abort any active stream
-  const onCapabilityDecide = (decision: CapabilityDecision, groups: string[]) => {
+  const onCapabilityDecide = (
+    decision: CapabilityDecision,
+    groups: string[],
+    messageId: string,
+  ) => {
     if (decision === "enable_session") {
       onPinElevationToSession(groups);
     }
     if (decision === "deny_stop") {
       stream.abort();
     }
-    // All four decisions clear the per-message capability_request snapshot
-    // so the card unmounts. The reducer leaves `pending` alone so the
-    // streaming message can keep accumulating text deltas if any are
-    // still arriving.
-    // (We don't mutate state directly here — Message's local-clear
-    // affordance + the next loop_terminated event handle visibility.)
+    // All four decisions clear the per-message capability_request
+    // snapshot so the card unmounts. Pre-0.1.0a8 this comment
+    // claimed the card relied on `loop_terminated` for visibility,
+    // but that event arrives long after the user's choice — leaving
+    // the card mounted in the meantime. `clearCapability` flips it
+    // off the millisecond the user clicks.
+    stream.clearCapability(messageId);
   };
 
   const meta = session.data;
@@ -298,46 +303,17 @@ function ChatDetail() {
             )}
           </div>
 
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setExportOpen((v) => !v)}
-              disabled={!meta || stream.state.messages.length === 0}
-              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
-              title="Export transcript"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export
-            </button>
-            {exportOpen && meta && (
-              <div
-                role="menu"
-                className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm"
-                onMouseLeave={() => setExportOpen(false)}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadMarkdown({ meta, messages: stream.state.messages });
-                    setExportOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
-                >
-                  Download Markdown
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadJSON({ meta, messages: stream.state.messages });
-                    setExportOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-muted"
-                >
-                  Download JSON
-                </button>
-              </div>
-            )}
-          </div>
+          <ExportMenu
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            disabled={!meta || stream.state.messages.length === 0}
+            onDownloadMarkdown={() => {
+              if (meta) downloadMarkdown({ meta, messages: stream.state.messages });
+            }}
+            onDownloadJSON={() => {
+              if (meta) downloadJSON({ meta, messages: stream.state.messages });
+            }}
+          />
 
           <button
             type="button"
@@ -429,7 +405,7 @@ function ChatDetail() {
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-4xl px-6 py-8" role="log" aria-live="polite">
+          <div className="mx-auto max-w-3xl px-6 py-8" role="log" aria-live="polite">
             {stream.state.banners.length > 0 && (
               <div className="mb-4 space-y-2">
                 {stream.state.banners.map((b) => (
@@ -625,6 +601,93 @@ function ChatDetail() {
         pending={citations.pending}
         error={citations.error}
       />
+    </div>
+  );
+}
+
+/**
+ * Chat-header Export menu. Keyboard-accessible dropdown with two
+ * actions (Markdown / JSON). Mirrors the dismiss pattern from
+ * PlanActChip — Escape + click-outside close the menu, focus
+ * returns to the trigger after pick. Proper menu / menuitem ARIA
+ * roles so screen-reader users see this as a real menu.
+ */
+function ExportMenu(props: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  disabled: boolean;
+  onDownloadMarkdown: () => void;
+  onDownloadJSON: () => void;
+}) {
+  const { open, onOpenChange, disabled, onDownloadMarkdown, onDownloadJSON } = props;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) onOpenChange(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onOpenChange(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40"
+        title="Export transcript"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Export transcript"
+          className="absolute right-0 top-9 z-10 bg-card border border-border rounded-md min-w-[180px] py-1 text-sm shadow-md"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onDownloadMarkdown();
+              onOpenChange(false);
+            }}
+            className="w-full text-left px-3 py-1.5 hover:bg-muted focus:bg-muted focus:outline-none"
+          >
+            Download Markdown
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onDownloadJSON();
+              onOpenChange(false);
+            }}
+            className="w-full text-left px-3 py-1.5 hover:bg-muted focus:bg-muted focus:outline-none"
+          >
+            Download JSON
+          </button>
+        </div>
+      )}
     </div>
   );
 }

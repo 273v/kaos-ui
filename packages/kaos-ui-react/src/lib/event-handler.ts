@@ -525,3 +525,26 @@ export function markAborted(state: TranscriptState): TranscriptState {
     }),
   };
 }
+
+/**
+ * Clear the `capability_request` snapshot on a specific message
+ * (so the CapabilityApproval card unmounts). Used by the host
+ * route's `onCapabilityDecide` after the user has either pinned,
+ * dismissed, or denied an elevation request. Idempotent — no-op
+ * if no matching message or the snapshot is already cleared.
+ */
+export function clearCapabilityRequest(
+  state: TranscriptState,
+  messageId: string,
+): TranscriptState {
+  let mutated = false;
+  const next = state.messages.map((m) => {
+    if (m.id !== messageId || !m.capability_request) return m;
+    mutated = true;
+    const { capability_request, ...rest } = m;
+    void capability_request;
+    return rest;
+  });
+  if (!mutated) return state;
+  return { ...state, messages: next };
+}

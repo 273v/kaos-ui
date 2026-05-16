@@ -39,6 +39,7 @@ export {
   initialState,
   pushUserAndAssistantPlaceholder,
   markAborted,
+  clearCapabilityRequest,
 } from "./event-handler.js";
 
 export type { Transport, ApiError, KaosUIProviderProps } from "./transport.js";

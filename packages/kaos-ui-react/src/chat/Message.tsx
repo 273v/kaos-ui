@@ -43,10 +43,17 @@ interface Props {
   onPinElevationToSession?(groups: string[]): void;
   /**
    * Wired to the host's resume handler for yellow-confirm capability
-   * pauses. Called with the user's decision + the groups the loop
-   * requested. When omitted, the approval card renders disabled.
+   * pauses. Called with the user's decision, the groups the loop
+   * requested, and the id of the message that carries the
+   * capability_request snapshot (so the host can clear it via
+   * `useSendMessage().clearCapability(messageId)`). When omitted,
+   * the approval card renders disabled.
    */
-  onCapabilityDecide?(decision: CapabilityDecision, groups: string[]): void;
+  onCapabilityDecide?(
+    decision: CapabilityDecision,
+    groups: string[],
+    messageId: string,
+  ): void;
 }
 
 export function Message({
@@ -158,7 +165,11 @@ export function Message({
       {isAssistant && message.capability_request && (
         <CapabilityApproval
           request={message.capability_request}
-          onDecide={onCapabilityDecide}
+          onDecide={
+            onCapabilityDecide
+              ? (decision, groups) => onCapabilityDecide(decision, groups, message.id)
+              : undefined
+          }
         />
       )}
 

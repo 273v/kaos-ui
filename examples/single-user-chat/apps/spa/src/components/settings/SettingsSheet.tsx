@@ -158,7 +158,21 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-foreground/10" onClick={onClose} aria-hidden />
+      {/*
+        Backdrop click-to-dismiss. A `<button>` (not `<div>`) so
+        keyboard users can Tab to it and press Enter / Space to
+        dismiss. `aria-label` matches the sheet's `aria-label` so a
+        screen reader reads "Close session settings" when the user
+        lands on the backdrop. Visually it's the same translucent
+        scrim — `appearance-none + cursor-default + focus-visible`
+        keeps it from looking like a button.
+      */}
+      <button
+        type="button"
+        aria-label="Close session settings"
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-foreground/10 cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+      />
       <aside
         ref={sheetRef}
         className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-background border-l border-border shadow-none overflow-y-auto"

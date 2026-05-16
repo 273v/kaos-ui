@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type TranscriptState,
   applyEvent,
+  clearCapabilityRequest,
   initialState,
   markAborted,
   pushUserAndAssistantPlaceholder,
@@ -40,6 +41,14 @@ export interface UseSendMessageResult {
   state: TranscriptState;
   send: (message: string) => Promise<void>;
   abort: () => void;
+  /**
+   * Clear the `capability_request` snapshot on a specific message
+   * so its CapabilityApproval card unmounts. Called by the host
+   * route's `onCapabilityDecide` after the user resolves an
+   * elevation prompt (enable_turn / enable_session / deny_continue /
+   * deny_stop).
+   */
+  clearCapability: (messageId: string) => void;
   rawEvents: DebugEvent[];
 }
 
@@ -156,5 +165,9 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
     abortRef.current?.abort();
   }, []);
 
-  return { state, send, abort, rawEvents };
+  const clearCapability = useCallback((messageId: string) => {
+    setState((prev) => clearCapabilityRequest(prev, messageId));
+  }, []);
+
+  return { state, send, abort, clearCapability, rawEvents };
 }
