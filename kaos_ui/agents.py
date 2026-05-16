@@ -4,7 +4,7 @@ Promotes the workarounds the `single-user-chat` example carried into
 reusable helpers, so every kaos-agents-on-FastAPI app doesn't have to
 re-invent them.
 
-The workarounds compensate for three known kaos-agents 0.1.0a1
+The workarounds compensate for two known kaos-agents 0.1.0a1
 defaults that bit us during the chat-app build:
 
 - ``create_app(runtime=None)`` defaults to an **in-memory** VFS (silent
@@ -16,10 +16,16 @@ defaults that bit us during the chat-app build:
   :func:`install_tool_bridge_runtime_patch` idempotently patches
   ``kaos_agents.actions.tool_bridge.bridge_runtime_tools`` to thread
   ``KaosContext.create(runtime=runtime)`` when one isn't supplied.
-- The agent isn't told which tools it can call. :func:`augment_instructions`
-  takes a session's base system prompt + a tool-name catalog and
-  returns the prompt the agent should actually see, so the model
-  doesn't have to discover its toolset by trial-and-error.
+
+:func:`augment_instructions` prepends the date preamble (Claude-class
+models confidently hallucinate the year otherwise) and a
+tools-disabled directive when applicable. It no longer inlines a
+tool catalog — kaos-agents 0.1.0a5+ routes bridged tools through
+kaos-llm-core's ReAct, which passes them to the LLM via the
+provider's native tool-use API (``tools=``), so the catalog reaches
+the model regardless of whether it appears in the system prompt.
+See ``kaos-modules/docs/plans/thin-worker-prompt.md`` §4.5 (M5)
+for the verification trail.
 
 See `examples/single-user-chat/docs/UPSTREAM-NOTES.md` for the matching
 upstream tickets.
@@ -28,7 +34,6 @@ upstream tickets.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -75,8 +80,9 @@ def build_chat_runtime(
         ``(runtime, tool_names)``. ``runtime`` is a disk-backed
         ``KaosRuntime`` ready to pass to ``create_agent_app(runtime=...)``.
         ``tool_names`` is the sorted tuple of all registered tool names —
-        callers thread it into :func:`augment_instructions` so the
-        agent knows what it can call.
+        used by callers to compose tool-pattern globs for
+        ``MessageRequest.tools`` and by :func:`register_kaos_tool_groups`
+        for the SessionToolSet partition.
     """
     if install_bridge_patch:
         install_tool_bridge_runtime_patch()
@@ -198,23 +204,35 @@ def augment_instructions(
     *,
     base_prompt: str,
     tools_enabled: bool,
-    available_tool_names: Sequence[str] | None = None,
 ) -> str:
     """Build the ``MessageRequest.instructions`` string for a turn.
 
-    kaos-agents 0.1.0a1 doesn't inject the tool catalog into the
-    system prompt automatically. Without that, the LLM denies having
-    tools even when they're properly bridged. We patch around it by
-    prepending the catalog ourselves. We also prepend today's date
-    (Claude-class models confidently hallucinate the year otherwise).
+    Composition: ``_date_preamble()`` + ``base_prompt`` + (when tools
+    are disabled) a single refusal directive. The tool catalog is NOT
+    inlined here — kaos-agents 0.1.0a5+ routes bridged tools through
+    kaos-llm-core's ReAct, which hands them to the LLM via the
+    provider's native tool-use API (``tools=``). The model sees tool
+    names and descriptions in the wire payload regardless of whether
+    they appear in the system prompt, so inlining a catalog block is
+    redundant overhead.
+
+    Worker prompt = date + voice. Behavior policy (which tools to
+    use, when to search, when to escalate) lives in the kaos-agents
+    Signature decision points — ``_TurnToolPolicySignature`` docstring
+    picks ``kept_groups``, ``_GoalCheckerSignature`` docstring drives
+    replan verdicts, and the AgenticLoop threads the critic's
+    ``next_action`` to the next worker iteration as ``thinking_note``.
+    Free-text rules in this prompt would (a) duplicate, (b) drift
+    from, and (c) potentially contradict those Signatures.
+
+    See ``kaos-modules/docs/plans/thin-worker-prompt.md`` for the full
+    rationale + the anti-goals checklist that blocks regrowing this
+    function with hardcoded English behavior rules.
 
     Args:
         base_prompt: The user-facing system prompt from session
             metadata.
         tools_enabled: Whether tools should be available this turn.
-        available_tool_names: Names of tools that will be bridged
-            (must match what the proxy sends in ``tools``). Ignored
-            when ``tools_enabled`` is False.
 
     Returns:
         A composed system prompt ready to thread into
@@ -228,35 +246,7 @@ def augment_instructions(
             "in this turn, and if the user asks what tools you can use, say "
             "that no KAOS tools are enabled for this session."
         )
-
-    tool_names = sorted({name for name in available_tool_names or () if name})
-    if not tool_names:
-        return (
-            f"{preamble}{base_prompt}\n\n"
-            "Tools are enabled for this session, but the backend did not "
-            "register any KAOS tools."
-        )
-
-    catalog = "\n".join(f"- {name}" for name in tool_names)
-    # Worker prompt = date + voice + catalog. Nothing else.
-    #
-    # Behavior policy (which tools to use, when to search before
-    # answering, when to escalate) lives in the kaos-agents Signature
-    # decision points — `_TurnToolPolicySignature` docstring picks
-    # `kept_groups`, `_GoalCheckerSignature` docstring drives replan
-    # verdicts, and the AgenticLoop threads the critic's `next_action`
-    # to the next worker iteration as `thinking_note`. Free-text rules
-    # in this prompt would (a) duplicate, (b) drift from, and (c)
-    # potentially contradict those Signatures.
-    #
-    # See kaos-modules/docs/plans/thin-worker-prompt.md for the full
-    # rationale + the anti-goals checklist that blocks regrowing this
-    # function with hardcoded English behavior rules.
-    return (
-        f"{preamble}{base_prompt}\n\n"
-        f"Tools are enabled for this session. Available KAOS tool names "
-        f"({len(tool_names)}):\n{catalog}"
-    )
+    return f"{preamble}{base_prompt}"
 
 
 # ── tool-group registration ────────────────────────────────────────

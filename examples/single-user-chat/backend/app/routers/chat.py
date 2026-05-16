@@ -393,10 +393,11 @@ async def send_message(
     available_tool_names: tuple[str, ...]
     if meta.tools_enabled and runtime is not None:
         # Names of every tool currently registered. The proxy applies
-        # the SessionToolSet filter (TR-2) to this list; we also pass
-        # it through to `augment_instructions` so the system prompt
-        # tells the agent what's available. The TR-6 planner narrows
-        # this further below.
+        # the SessionToolSet filter (TR-2) to this list before sending
+        # it as the wire-level `tools=` glob list; kaos-agents-serve
+        # bridges those into kaos-llm-core Tool objects whose
+        # definitions reach the LLM via the provider's native
+        # tool-use API. The TR-6 planner narrows this further below.
         available_tool_names = tuple(sorted(runtime.tools.list_tools()))
     else:
         available_tool_names = ()

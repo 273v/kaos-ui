@@ -144,21 +144,21 @@ def _group_globs(allowed_groups: Sequence[str]) -> list[str]:
 
 def _instructions_with_corpus(
     meta: SessionMeta,
-    available_tool_names: Sequence[str] | None,
     corpus_markdown: str,
 ) -> str:
-    """Compose the per-turn system prompt: base + tool catalog + corpus block.
+    """Compose the per-turn system prompt: date preamble + base + corpus block.
 
-    Tool catalog comes from kaos_ui.agents.augment_instructions. When
+    The tool catalog is NOT inlined into the system prompt — kaos-agents
+    0.1.0a5+ delivers it to the LLM via the provider's native tool-use
+    API (see ``kaos_ui.agents.augment_instructions``). When
     ``corpus_markdown`` is non-empty, we append a "Documents attached"
-    section after the catalog so the agent sees the file contents
-    directly (P2-2: inline corpus because kaos-agents 0.1.0a1's
-    MessageRequest has no per-turn corpus= field).
+    section so the agent sees per-file metadata (filename, size, VFS
+    paths, cached summary) and reads bodies via ``kaos-content-*`` /
+    ``kaos-pdf-*`` tools using the VFS paths in that block.
     """
     base = augment_instructions(
         base_prompt=meta.system_prompt,
         tools_enabled=meta.tools_enabled,
-        available_tool_names=available_tool_names,
     )
     if not corpus_markdown:
         return base
@@ -187,7 +187,7 @@ def _build_forward_body(
     return {
         "message": message,
         "model": meta.model,
-        "instructions": _instructions_with_corpus(meta, available_tool_names, corpus_markdown),
+        "instructions": _instructions_with_corpus(meta, corpus_markdown),
         "tools": _tool_patterns(meta, available_tool_names, tool_set_override),
         "max_cost_usd": max_cost_usd,
     }
