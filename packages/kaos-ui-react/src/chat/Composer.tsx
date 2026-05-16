@@ -63,8 +63,17 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 280)}px`;
   }, [value]);
 
-  const canSend = value.trim().length > 0 && !pending;
+  // ``uploading`` is plumbed in for the paperclip spinner; also block
+  // Send so the user can't fire a turn while an attachment is still in
+  // flight (otherwise the agent answers "I don't see any uploaded
+  // file" right after the user dropped one in).
+  const canSend = value.trim().length > 0 && !pending && !uploading;
   const showStop = pending && onStop != null;
+  const sendTitle = uploading
+    ? "Waiting for upload to finish…"
+    : pending
+      ? "Stop generating"
+      : "Send (Enter)";
 
   return (
     <div className="border-t border-border bg-background">
@@ -158,6 +167,7 @@ export function Composer({
               onClick={onSubmit}
               disabled={!canSend}
               aria-label="Send"
+              title={sendTitle}
               className="absolute right-2.5 bottom-2.5 h-10 w-10 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
             >
               <ArrowUp className="h-4 w-4" />
