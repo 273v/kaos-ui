@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a3] — 2026-05-15
+
+### Added — AgenticLoop wire-up (kaos-agents 0.1.0a4)
+
+The single-user-chat example now drives every turn through the
+`run_agentic_turn` orchestrator. The user-visible win: **the agent no
+longer "gives up" because a relevant tool group (e.g. web) is missing
+from `allowed_groups`** — the per-iteration planner detects the gap,
+the loop auto-elevates green-auto groups within the session's
+`soft_ceiling`, and the turn resumes with the right tools. The
+canonical regression test
+[`test_agent_never_gives_up_on_searchable_question`](./examples/single-user-chat/backend/tests/integration/test_no_giveup.py)
+pins this behavior against live `claude-haiku-4-5`.
+
+- **`SessionPolicyWire`** (`backend/app/models.py`) — new wire shape
+  carrying the two-tier ceiling (`allowed_groups` + `soft_ceiling`),
+  the three-way persona preset (`research` / `drafting` /
+  `forensics`), and three independent loop limiters
+  (`max_loop_iterations` / `max_loop_cost_usd` /
+  `max_loop_wall_clock_seconds`). Round-trips through the canonical
+  `kaos_agents.types.SessionPolicy` via `to_session_policy()`.
+- **Three-state SessionMeta migration** — sidecars persisted under
+  the legacy `tools_enabled: bool`, the TR-3
+  `tool_set: SessionToolSetWire`, or the new
+  `policy: SessionPolicyWire` shape all hydrate into the canonical
+  policy. The `tool_set` field survives as a `@computed_field`
+  derived from the policy for SPA back-compat.
+- **`agentic_worker.make_worker`**
+  (`backend/app/services/agentic_worker.py`) — adapter wrapping the
+  existing `stream_chat` SSE pump into the
+  `WorkerCallable` shape `run_agentic_turn` expects. Captures the
+  per-turn invariants (httpx client, bearer, meta, budget, catalog,
+  corpus) and exposes the per-iteration knobs (`user_message`,
+  `allowed_groups`, `thinking_note`, `iteration`). The replan
+  `thinking_note` is threaded into the system prompt on iteration
+  2+ — NOT as a fake user message — preserving transcript hygiene.
+- **Rewired `POST /v1/chat/sessions/{id}/messages`**
+  (`backend/app/routers/chat.py`) — every turn now flows through
+  `run_agentic_turn(policy, worker, available_groups, ...)`.
+  Typed `KaosEvent` objects from the loop (`ToolPolicyElevated`,
+  `CapabilityRequested`, `GoalChecked`, `LoopTerminated`) are
+  serialized with the `type` discriminator injected; worker SSE
+  dicts pass through verbatim.
+- **Four new SSE wire types** in `kaos-ui-react`
+  (`packages/kaos-ui-react/src/lib/events.ts`):
+  - `tool_policy_elevated` — audit trail of green-auto elevation
+  - `capability_requested` — yellow-confirm pause for user approval
+  - `goal_checked` — Critic's three-way verdict (satisfied /
+    needs_more_work / insufficient_evidence)
+  - `loop_terminated` — always the last event; carries the
+    termination reason (7 cases)
+- **Four new React components** (`packages/kaos-ui-react/src/chat/`):
+  - `<GoalCheckBadge>` — green/amber/gray Critic-verdict pill with
+    expandable rationale + per-call cost / latency
+  - `<ElevationPill>` — chip-by-chip "Auto-enabled X" badge with
+    inline "Pin to session" affordance
+  - `<CapabilityApproval>` — inline 4-action card for yellow-confirm
+    pauses (Enable turn / Enable session / Deny+continue / Deny+stop)
+  - `<LoopTerminatedBanner>` — per-reason terminal banner (silent on
+    `satisfied`; info on `insufficient_evidence`; warn on the rest)
+- **Backend test coverage:** +33 unit tests + 7 chat-router
+  integration tests + 2 live LLM regression tests covering the
+  AgenticLoop end-to-end (145 total backend tests passing).
+- **SPA test coverage:** +7 vitest reducer tests for the new event
+  types (96 total SPA vitest tests passing).
+- **Dropped:** legacy `app/services/turn_tool_policy.py` and its
+  unit + live integration tests — superseded by the canonical
+  `kaos_agents.planning.policy.plan_turn_tool_policy` running
+  inside the loop.
+
+### Changed
+
+- **Default session ceiling widened to the 8-group research persona.**
+  Pre-AgenticLoop sessions opened with `{documents, citations, vfs}`
+  (web opt-in). New sessions open with the research soft-ceiling
+  (`{web, browser, netinfra, documents, citations, vfs, forensics,
+  retrieval}`) — the per-iteration planner narrows from this set
+  per-turn, so users no longer need to manually opt in to every
+  group up front.
+- **Removed `turn_policy_model` / `turn_policy_confidence_threshold`**
+  AppSettings; replaced by `agentic_planner_model` /
+  `agentic_goal_check_model` for the loop's planner + Critic
+  Signatures (`backend/app/settings.py`).
+
 ## [0.1.0a2] — 2026-05-15
 
 ### Fixed
@@ -180,5 +264,7 @@ First public alpha.
   is stable for the duration of the `0.1.x` line; experimental surfaces
   live under `kaos_ui.mcp.tools` and may evolve.
 
-[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a1...HEAD
+[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a3...HEAD
+[0.1.0a3]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a3
+[0.1.0a2]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a1

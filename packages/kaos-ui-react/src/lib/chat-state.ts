@@ -33,6 +33,69 @@ export interface ToolPolicySnapshot {
   latency_ms: number;
 }
 
+/**
+ * AgenticLoop auto-elevation snapshot.
+ *
+ * Populated when the loop emitted at least one `tool_policy_elevated`
+ * event during this turn. Drives the inline "Auto-enabled X" badge
+ * + "Pin to session" affordance.
+ */
+export interface ElevationSnapshot {
+  elevated_groups: string[];
+  kept_groups: string[];
+  previous_allowed: string[];
+  rationale: string;
+  iteration: number;
+}
+
+/**
+ * Critic verdict snapshot (drives GoalCheckBadge color).
+ */
+export interface GoalCheckSnapshot {
+  kind: "satisfied" | "needs_more_work" | "insufficient_evidence";
+  rationale: string;
+  next_action: string;
+  missing: string;
+  confidence: number;
+  iteration: number;
+  cost_usd: number;
+  latency_ms: number;
+}
+
+/**
+ * AgenticLoop termination snapshot — always set on the assistant
+ * message after a turn completes. The SPA renders a terminal banner
+ * for non-"satisfied" reasons.
+ */
+export interface LoopTerminationSnapshot {
+  reason:
+    | "satisfied"
+    | "insufficient_evidence"
+    | "max_iterations"
+    | "cost_exceeded"
+    | "wall_clock_exceeded"
+    | "stuck_no_progress"
+    | "user_interrupt";
+  iterations_used: number;
+  elevations_used: number;
+  cost_usd: number;
+  wall_clock_ms: number;
+}
+
+/**
+ * Yellow-confirm capability request — pending user approval.
+ *
+ * When present on a ChatMessage, the SPA renders the CapabilityApproval
+ * inline card with four actions. The component is responsible for
+ * clearing this field after the user decides.
+ */
+export interface CapabilityRequestSnapshot {
+  requested_groups: string[];
+  justification: string;
+  iteration: number;
+  previous_allowed: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -64,6 +127,27 @@ export interface ChatMessage {
    * (kaos-ui example extension, TR-7).
    */
   tool_policy?: ToolPolicySnapshot;
+  /**
+   * AgenticLoop auto-elevations applied during this turn (kaos-agents
+   * 0.1.0a4). Each entry corresponds to one `tool_policy_elevated`
+   * event — multiple iterations can each elevate.
+   */
+  elevations?: ElevationSnapshot[];
+  /**
+   * Last Critic verdict from this turn. The most recent
+   * `goal_checked` wins (replan iterations overwrite).
+   */
+  goal_check?: GoalCheckSnapshot;
+  /**
+   * Set when the loop terminates. The SPA renders a LoopTerminatedBanner
+   * for any non-"satisfied" reason.
+   */
+  loop_termination?: LoopTerminationSnapshot;
+  /**
+   * Pending capability request awaiting user approval. Cleared by the
+   * CapabilityApproval card after the user clicks.
+   */
+  capability_request?: CapabilityRequestSnapshot;
 }
 
 export type TurnStatusKind =

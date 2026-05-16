@@ -87,6 +87,14 @@ def test_forward_body_falls_back_to_group_globs_without_catalog() -> None:
     """When no available_tool_names is supplied, the proxy can't
     enumerate the catalog. It falls back to group-prefix globs so the
     ceiling is still applied (bridge-side fnmatch enforces from there).
+
+    Note: post-AgenticLoop the default ceiling is the research persona's
+    8-group set ({web, browser, netinfra, documents, citations, vfs,
+    forensics, retrieval}). Only the groups present in
+    ``_GROUP_GLOBS`` contribute fallback globs — unmapped groups
+    (browser, netinfra, forensics, retrieval) are no-ops on this path
+    because the real enforcement runs through the AgenticLoop +
+    bridge fnmatch.
     """
     body = _build_forward_body(
         _meta(tools_enabled=True),
@@ -95,8 +103,10 @@ def test_forward_body_falls_back_to_group_globs_without_catalog() -> None:
         # No available_tool_names → fallback path.
     )
 
-    # Default ceiling is documents+citations+vfs, which expands to:
+    # Research-persona default ceiling expands to the mapped subset of
+    # _GROUP_GLOBS (web + documents + citations + vfs).
     expected_prefixes = {
+        "kaos-source-*",
         "kaos-pdf-*",
         "kaos-office-parse-*",
         "kaos-content-*",

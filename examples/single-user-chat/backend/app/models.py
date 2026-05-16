@@ -11,9 +11,12 @@ See docs/ARCHITECTURE.md § 3.3 for the design.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, Field, computed_field, model_validator
+
+if TYPE_CHECKING:
+    from kaos_agents.types import SessionPolicy as _SessionPolicy
 
 Provider = Literal["anthropic", "openai", "google", "xai"]
 
@@ -21,25 +24,19 @@ Provider = Literal["anthropic", "openai", "google", "xai"]
 # ── tool policy (TR-3) ────────────────────────────────────────────────
 
 
+Persona = Literal["research", "drafting", "forensics"]
+
+
 class SessionToolSetWire(BaseModel):
-    """Per-session tool allow / deny policy — wire shape for SessionMeta.
+    """LEGACY — kept for back-compat with sessions persisted under the
+    pre-AgenticLoop shape (TR-3 / kaos-agents 0.1.0a2).
 
-    Round-trips through :class:`kaos_agents.types.SessionToolSet` via
-    :meth:`to_session_tool_set`. JSON-friendly: lists instead of
-    frozensets, ``default_factory`` for the "block everything except
-    explicitly allowed groups" default.
-
-    Semantics (resolves at proxy time, applied in
-    :func:`kaos_agents.context.filter_tools`):
-
-    1. ``allowed_groups`` empty → all groups pass the allow check.
-    2. ``allowed_groups`` non-empty → tool's group must be in this set
-       (groups from :data:`default_tool_group_registry`).
-    3. ``denied_tools`` always wins — tools listed here are blocked
-       even when their group is allowed.
-    4. ``auto_narrow`` controls whether the per-turn TurnToolPolicy
-       planner runs (TR-5). When false, the ceiling above is the
-       effective tool set every turn.
+    New code should use :class:`SessionPolicyWire`, which carries the
+    same ceiling + denied_tools + auto_narrow PLUS the AgenticLoop's
+    two-tier ceiling (soft_ceiling) + elevation policy + loop budget.
+    The migration validator on :class:`SessionMeta` rewrites old
+    `tool_set` payloads into the new `policy` shape on load — no live
+    callers should hit this class directly.
     """
 
     allowed_groups: list[str] = Field(
@@ -73,6 +70,257 @@ class SessionToolSetWire(BaseModel):
         return not self.allowed_groups
 
 
+class SessionPolicyWire(BaseModel):
+    """Per-session two-tier policy — wire shape for SessionMeta.
+
+    Successor to :class:`SessionToolSetWire`. Round-trips through
+    :class:`kaos_agents.types.SessionPolicy` via
+    :meth:`to_session_policy`. Carries:
+
+    - **`allowed_groups`** — current working set of tool groups (the
+      ceiling).
+    - **`soft_ceiling`** — maximum the AgenticLoop may auto-elevate
+      `allowed_groups` to. Set at session creation by the persona
+      chip + immutable for the session.
+    - **`denied_tools`** — explicit deny list. Wins over every allow.
+    - **`persona`** — the named preset for this session
+      (`"research"` / `"drafting"` / `"forensics"`). Threaded into
+      the per-turn TurnToolPolicy Signature as `session_intent`.
+    - **`auto_narrow`** + **`auto_elevate`** + **`auto_loop`** —
+      three independent toggles for the AgenticLoop behaviors.
+    - **`max_loop_iterations`** + **`max_loop_cost_usd`** +
+      **`max_loop_wall_clock_seconds`** — three independent loop
+      limiters (per Pydantic AI usage_limits best practice).
+    """
+
+    allowed_groups: list[str] = Field(
+        default_factory=lambda: sorted(
+            [
+                "web",
+                "browser",
+                "netinfra",
+                "documents",
+                "citations",
+                "vfs",
+                "forensics",
+                "retrieval",
+            ]
+        ),
+        description=(
+            "Tool group names currently allowed. The AgenticLoop may "
+            "auto-elevate this toward `soft_ceiling` mid-turn when the "
+            "per-turn planner reports `dropped_groups`. Mirrors the "
+            "research persona's initial allowed_groups (== soft_ceiling)."
+        ),
+    )
+    soft_ceiling: list[str] = Field(
+        default_factory=lambda: sorted(
+            [
+                "web",
+                "browser",
+                "netinfra",
+                "documents",
+                "citations",
+                "vfs",
+                "forensics",
+                "retrieval",
+            ]
+        ),
+        description=(
+            "Maximum the AgenticLoop may elevate `allowed_groups` to "
+            "without explicit user consent. Set by persona at session "
+            "creation; user can override via SettingsSheet."
+        ),
+    )
+    denied_tools: list[str] = Field(
+        default_factory=lambda: sorted(
+            [
+                "kaos-agent-chat",
+                "kaos-agent-plan",
+                "kaos-agent-findings",
+                "kaos-agent-corpus-filter",
+            ]
+        ),
+        description=(
+            "Tool names always blocked. Inherits the 4 self-recursive "
+            "kaos-agents tools by default so accidental opt-in to the "
+            "`agents` group doesn't trigger infinite recursion."
+        ),
+    )
+    persona: Persona = Field(
+        default="research",
+        description=(
+            "Named preset (research / drafting / forensics). Drives "
+            "the soft_ceiling default + threaded into the per-turn "
+            "planner's `session_intent` Signature input."
+        ),
+    )
+    auto_narrow: bool = Field(
+        default=True,
+        description=(
+            "Per-turn TurnToolPolicy planner toggle. When True, the "
+            "AgenticLoop narrows the ceiling to just the groups this "
+            "message needs."
+        ),
+    )
+    auto_elevate: bool = Field(
+        default=True,
+        description=(
+            "Master toggle for auto-elevation. When True, the "
+            "AgenticLoop consults elevation_policy to decide whether "
+            "to silently elevate (green-auto), pause for approval "
+            "(yellow-confirm), or refuse (red-blocked) when the "
+            "planner wants groups outside `allowed_groups`."
+        ),
+    )
+    auto_loop: bool = Field(
+        default=True,
+        description=(
+            "Multi-iteration loop toggle. When True, the AgenticLoop "
+            "runs plan → execute → goal-check → replan up to "
+            "max_loop_iterations. When False, the loop runs exactly "
+            "one ReAct iteration (pre-loop behavior)."
+        ),
+    )
+    max_loop_iterations: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Hard cap on iterations per turn. Default 3 covers the "
+            "vast majority of replan scenarios; tighten for cost "
+            "savings, loosen for deep-research workflows."
+        ),
+    )
+    max_loop_cost_usd: float = Field(
+        default=0.25,
+        gt=0.0,
+        le=10.0,
+        description=(
+            "Hard cap on cumulative LLM cost per turn (planner + "
+            "critic + worker). Default $0.25; increase for "
+            "Sonnet-class drafting workflows."
+        ),
+    )
+    max_loop_wall_clock_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        le=600.0,
+        description=(
+            "Hard cap on wall-clock time per turn. Defense in depth "
+            "against a hung provider call the cost cap wouldn't catch."
+        ),
+    )
+
+    @property
+    def is_blocking_all(self) -> bool:
+        """True when the ceiling allows no tools."""
+        return not self.allowed_groups
+
+    def to_session_policy(self) -> _SessionPolicy:
+        """Round-trip into the kaos-agents value type for AgenticLoop consumption."""
+        # Local import: kaos-agents is heavy; only load when actually building a policy.
+        from kaos_agents.types import SessionPolicy
+
+        return SessionPolicy(
+            allowed_groups=frozenset(self.allowed_groups),
+            soft_ceiling=frozenset(self.soft_ceiling),
+            denied_tools=frozenset(self.denied_tools),
+            auto_narrow=self.auto_narrow,
+            auto_elevate=self.auto_elevate,
+            auto_loop=self.auto_loop,
+            max_loop_iterations=self.max_loop_iterations,
+            max_loop_cost_usd=self.max_loop_cost_usd,
+            max_loop_wall_clock_seconds=self.max_loop_wall_clock_seconds,
+        )
+
+    @classmethod
+    def from_session_policy(cls, policy: _SessionPolicy) -> SessionPolicyWire:
+        """Inverse of :meth:`to_session_policy`."""
+        return cls(
+            allowed_groups=sorted(policy.allowed_groups),
+            soft_ceiling=sorted(policy.soft_ceiling),
+            denied_tools=sorted(policy.denied_tools),
+            auto_narrow=policy.auto_narrow,
+            auto_elevate=policy.auto_elevate,
+            auto_loop=policy.auto_loop,
+            max_loop_iterations=policy.max_loop_iterations,
+            max_loop_cost_usd=policy.max_loop_cost_usd,
+            max_loop_wall_clock_seconds=policy.max_loop_wall_clock_seconds,
+        )
+
+    @classmethod
+    def for_persona(cls, persona: Persona) -> SessionPolicyWire:
+        """Build a policy for a named persona preset.
+
+        Delegates to :meth:`kaos_agents.types.SessionPolicy.for_persona`
+        so the soft_ceiling defaults stay in sync with the kaos-agents
+        canonical definition.
+        """
+        from kaos_agents.types import SessionPolicy
+
+        policy = SessionPolicy.for_persona(persona)
+        wire = cls.from_session_policy(policy)
+        return wire.model_copy(update={"persona": persona})
+
+
+# ── AgenticLoop SSE event payloads ────────────────────────────────────
+
+
+class ToolPolicyElevatedWire(BaseModel):
+    """SSE wire shape for :class:`kaos_agents.events.ToolPolicyElevated`."""
+
+    type: Literal["tool_policy_elevated"] = "tool_policy_elevated"
+    elevated_groups: list[str]
+    kept_groups: list[str]
+    previous_allowed: list[str]
+    rationale: str
+    iteration: int
+
+
+class CapabilityRequestedWire(BaseModel):
+    """SSE wire shape for :class:`kaos_agents.events.CapabilityRequested`."""
+
+    type: Literal["capability_requested"] = "capability_requested"
+    requested_groups: list[str]
+    justification: str
+    iteration: int
+    previous_allowed: list[str]
+
+
+class GoalCheckedWire(BaseModel):
+    """SSE wire shape for :class:`kaos_agents.events.GoalChecked`."""
+
+    type: Literal["goal_checked"] = "goal_checked"
+    kind: Literal["satisfied", "needs_more_work", "insufficient_evidence"]
+    rationale: str
+    next_action: str = ""
+    missing: str = ""
+    confidence: float = 0.0
+    iteration: int
+    cost_usd: float
+    latency_ms: float
+
+
+class LoopTerminatedWire(BaseModel):
+    """SSE wire shape for :class:`kaos_agents.events.LoopTerminated`."""
+
+    type: Literal["loop_terminated"] = "loop_terminated"
+    reason: Literal[
+        "satisfied",
+        "insufficient_evidence",
+        "max_iterations",
+        "cost_exceeded",
+        "wall_clock_exceeded",
+        "stuck_no_progress",
+        "user_interrupt",
+    ]
+    iterations_used: int
+    elevations_used: int
+    cost_usd: float
+    wall_clock_ms: float
+
+
 class ModelEntry(BaseModel):
     """One row of the model picker catalog."""
 
@@ -91,19 +339,27 @@ class SessionMeta(BaseModel):
     """Our metadata sidecar for a kaos-agents session.
 
     Stored at `.kaos-vfs/single-user-chat/sessions/{id}/meta.json`.
+
+    Tool-policy field history (three-state migration):
+      1. Pre-TR-3: legacy bool `tools_enabled` only.
+      2. TR-3 / kaos-agents 0.1.0a2: `tool_set: SessionToolSetWire`.
+      3. AgenticLoop / kaos-agents 0.1.0a4 (current):
+         `policy: SessionPolicyWire`.
+
+    The `_migrate_tool_policy` validator hydrates from any of the
+    three shapes; `tool_set` survives as a computed_field for SPA
+    back-compat until the frontend cuts over.
     """
 
     id: str = Field(description="ULID, shared with the kaos-agents session_id")
     title: str
     model: str
     system_prompt: str
-    # TR-3: tool_set is the source of truth for what the agent can call.
-    # `tools_enabled` (below) is a derived view kept for one release so
-    # the SPA can migrate without a flag day. Older meta sidecars that
-    # only carry tools_enabled hydrate into the default ceiling
-    # (documents+citations+vfs) — see `_migrate_tool_set` in
-    # services/sessions.py.
-    tool_set: SessionToolSetWire = Field(default_factory=SessionToolSetWire)
+    # AgenticLoop source of truth — see SessionPolicyWire for the full
+    # shape. The previous `tool_set: SessionToolSetWire` is preserved
+    # as a computed_field below so SPA clients on the old schema keep
+    # working through the cutover window.
+    policy: SessionPolicyWire = Field(default_factory=SessionPolicyWire)
     created_at: datetime
     last_message_at: datetime | None = None
     message_count: int = 0
@@ -120,44 +376,102 @@ class SessionMeta(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def tools_enabled(self) -> bool:
-        """Backward-compat derived view: True when ANY group is allowed.
+    def tool_set(self) -> SessionToolSetWire:
+        """Back-compat view: derive the old SessionToolSetWire shape.
 
-        The SPA's existing "Enable read-only tools" checkbox reads
-        this field. Until the SettingsSheet migrates to per-category
-        toggles (TR-8), `tools_enabled=False` maps to "block all" and
-        `tools_enabled=True` maps to "default ceiling".
+        SPA clients on the pre-AgenticLoop schema read this field. The
+        derived shape preserves the old (allowed_groups + denied_tools
+        + auto_narrow) triple from the new policy. Will be dropped one
+        release after the SPA cuts over to reading `policy` directly.
         """
-        return not self.tool_set.is_blocking_all
+        return SessionToolSetWire(
+            allowed_groups=self.policy.allowed_groups,
+            denied_tools=self.policy.denied_tools,
+            auto_narrow=self.policy.auto_narrow,
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tools_enabled(self) -> bool:
+        """Backward-compat derived view: True when ANY group is allowed."""
+        return not self.policy.is_blocking_all
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_legacy_tools_enabled(cls, data: object) -> object:
-        """Hydrate ``tool_set`` from a legacy ``tools_enabled`` bool.
+    def _migrate_tool_policy(cls, data: object) -> object:
+        """Hydrate `policy` from any of the three historic shapes.
 
-        Old meta sidecars only carried ``tools_enabled: bool``. Without
-        this migration, those files would silently lose the toggle on
-        load (the bool would be discarded; ``tool_set`` would default
-        to the standard ceiling regardless of what the user had
-        chosen). Run only when ``tool_set`` is absent AND
-        ``tools_enabled`` is present so live data isn't double-mapped.
+        - **State 3 (current)**: `policy: SessionPolicyWire` present →
+          drop any stale `tool_set` / `tools_enabled` keys so the
+          computed_fields are authoritative.
+        - **State 2 (TR-3 / 0.1.0a2)**: `tool_set: SessionToolSetWire`
+          → upgrade to `policy` with the soft_ceiling defaulted to
+          the research persona (preserves user's narrowed
+          `allowed_groups` + carries the new loop knobs).
+        - **State 1 (pre-TR-3)**: only `tools_enabled: bool` → if
+          False, block everything; if True (or absent), default
+          research persona.
+
+        Live data is never double-mapped: we mutate `data` in place
+        and remove the stale keys.
         """
         if not isinstance(data, dict):
             return data
-        if "tool_set" in data:
-            # New shape — drop any stale tools_enabled key so the
-            # computed_field is authoritative.
-            data.pop("tools_enabled", None)
-            return data
-        legacy = data.pop("tools_enabled", None)
-        if legacy is False:
-            data["tool_set"] = {
-                "allowed_groups": [],
-                "denied_tools": [],
-                "auto_narrow": True,
+        # ty narrows `dict` from `object` to `dict[Unknown, Unknown]`
+        # and then refuses heterogeneous str→Any assignments because
+        # `dict` is invariant in its type parameters. Re-bind through
+        # an explicit cast so the rest of the function works against
+        # `dict[str, object]`.
+        d = cast("dict[str, object]", data)
+
+        # State 3 — already on the new shape.
+        if "policy" in d:
+            d.pop("tool_set", None)
+            d.pop("tools_enabled", None)
+            return d
+
+        # State 2 — upgrade SessionToolSetWire → SessionPolicyWire.
+        if d.get("tool_set"):
+            raw_old = d.pop("tool_set")
+            old = cast("dict[str, object]", raw_old) if isinstance(raw_old, dict) else {}
+            raw_allowed = old.get("allowed_groups", [])
+            allowed = list(raw_allowed) if isinstance(raw_allowed, list) else []
+            raw_denied = old.get("denied_tools", [])
+            denied = list(raw_denied) if isinstance(raw_denied, list) else []
+            auto_narrow = bool(old.get("auto_narrow", True))
+            # Default to research persona soft_ceiling on upgrade
+            # (matches the v2 plan: research is the 80% default).
+            from kaos_agents.types.session_policy import RESEARCH_SOFT_CEILING
+
+            d["policy"] = {
+                "allowed_groups": allowed,
+                "soft_ceiling": sorted(RESEARCH_SOFT_CEILING),
+                "denied_tools": denied,
+                "persona": "research",
+                "auto_narrow": auto_narrow,
+                "auto_elevate": True,
+                "auto_loop": True,
+                "max_loop_iterations": 3,
+                "max_loop_cost_usd": 0.25,
+                "max_loop_wall_clock_seconds": 60.0,
             }
-        # legacy True or None → default ceiling (the field default).
-        return data
+            d.pop("tools_enabled", None)
+            return d
+
+        # State 1 — legacy bool. False = block-all, True/missing = default.
+        legacy = d.pop("tools_enabled", None)
+        if legacy is False:
+            d["policy"] = {
+                "allowed_groups": [],
+                "soft_ceiling": [],
+                "denied_tools": [],
+                "persona": "research",
+                "auto_narrow": True,
+                "auto_elevate": True,
+                "auto_loop": True,
+            }
+        # legacy True or None → default research persona (field default).
+        return d
 
 
 class SessionSummary(BaseModel):

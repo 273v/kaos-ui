@@ -22,7 +22,7 @@ from kaos_core.vfs import VFSConfig, VirtualFileSystem
 from kaos_core.vfs.models import IsolationMode
 
 from app.exceptions import SessionNotFoundError
-from app.models import SessionMeta, SessionSummary, SessionToolSetWire
+from app.models import Persona, SessionMeta, SessionPolicyWire, SessionSummary, SessionToolSetWire
 
 _NS = "single-user-chat/sessions"
 _ARCHIVED_NS = "single-user-chat/archived"
@@ -99,17 +99,24 @@ class SessionStore:
         via :meth:`patch` after creation.
         """
         sid = session_id or new_session_id()
-        # Translate the boolean knob into the new ceiling-based shape.
+        # Translate the legacy boolean knob into the new SessionPolicyWire.
+        # `tools_enabled=True` → research persona default (8 groups);
+        # `tools_enabled=False` → ceiling collapsed to empty.
         if tools_enabled:
-            tool_set = SessionToolSetWire()  # default ceiling
+            policy = SessionPolicyWire.for_persona("research")
         else:
-            tool_set = SessionToolSetWire(allowed_groups=[], denied_tools=[], auto_narrow=True)
+            policy = SessionPolicyWire(
+                allowed_groups=[],
+                soft_ceiling=[],
+                denied_tools=[],
+                persona="research",
+            )
         meta = SessionMeta(
             id=sid,
             title=title,
             model=model,
             system_prompt=system_prompt,
-            tool_set=tool_set,
+            policy=policy,
             created_at=_now(),
             last_message_at=None,
             message_count=0,
@@ -186,6 +193,7 @@ class SessionStore:
         system_prompt: str | None = None,
         tools_enabled: bool | None = None,
         tool_set: SessionToolSetWire | None = None,
+        policy: SessionPolicyWire | None = None,
         starred: bool | None = None,
         title_source: str | None = None,
         title_updated_at: datetime | None = None,
@@ -203,17 +211,33 @@ class SessionStore:
             updates["model"] = model
         if system_prompt is not None:
             updates["system_prompt"] = system_prompt
-        # TR-3: tool_set is the source of truth. A bool tools_enabled
-        # patch is back-compat sugar — translate to a tool_set update.
-        # When both are supplied, tool_set wins (explicit beats sugar).
-        if tool_set is not None:
-            updates["tool_set"] = tool_set
+        # Three accepted shapes for the tool-policy patch, in
+        # decreasing-explicit priority:
+        #   1. `policy` (SessionPolicyWire) — the canonical AgenticLoop shape
+        #   2. `tool_set` (SessionToolSetWire) — back-compat; rewritten as a
+        #      policy update preserving the existing persona / soft_ceiling
+        #   3. `tools_enabled` (bool) — legacy sugar; full-on or full-off
+        if policy is not None:
+            updates["policy"] = policy
+        elif tool_set is not None:
+            # Preserve persona + soft_ceiling + loop knobs from the existing
+            # meta — the caller only sent the ceiling fragment.
+            updates["policy"] = meta.policy.model_copy(
+                update={
+                    "allowed_groups": list(tool_set.allowed_groups),
+                    "denied_tools": list(tool_set.denied_tools),
+                    "auto_narrow": tool_set.auto_narrow,
+                }
+            )
         elif tools_enabled is not None:
             if tools_enabled:
-                updates["tool_set"] = SessionToolSetWire()  # default ceiling
+                updates["policy"] = SessionPolicyWire.for_persona("research")
             else:
-                updates["tool_set"] = SessionToolSetWire(
-                    allowed_groups=[], denied_tools=[], auto_narrow=True
+                updates["policy"] = SessionPolicyWire(
+                    allowed_groups=[],
+                    soft_ceiling=[],
+                    denied_tools=[],
+                    persona="research",
                 )
         if starred is not None:
             updates["starred"] = starred
@@ -224,6 +248,15 @@ class SessionStore:
         new_meta = meta.model_copy(update=updates)
         await self._write_meta(new_meta)
         return new_meta
+
+    async def set_tool_preset(self, session_id: str, preset_name: Persona) -> SessionMeta:
+        """Apply a named persona preset to a session.
+
+        Convenience method the SPA's persona-chip row calls. Resets
+        both `allowed_groups` AND `soft_ceiling` to the persona's
+        defaults (per `kaos_agents.types.session_policy.SessionPolicy.for_persona`).
+        """
+        return await self.patch(session_id, policy=SessionPolicyWire.for_persona(preset_name))
 
     async def touch(
         self,

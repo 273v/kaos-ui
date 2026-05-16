@@ -11,28 +11,39 @@ requires-python = ">=3.13,<3.15"
 license = { text = "LicenseRef-Proprietary" }
 
 dependencies = [
-    # FIX-14..16 + FIX-18 release coordination (2026-05-15):
-    # All KAOS tool-schema fixes ship from PyPI in these floors. The
-    # `[tool.uv.sources]` block at the bottom keeps kaos-ui itself
-    # local-only until kaos-ui 0.1.0a2 ships with TR-1 + P1-5.
-    "kaos-agents>=0.1.0a2,<0.2",
+    # AgenticLoop wire-up release coordination (2026-05-16): the
+    # AgenticLoop + SessionPolicy + GoalChecker primitives shipped
+    # in kaos-agents 0.1.0a4. The 5 PR-1 catalog-expansion floors
+    # ship the per-tool tags (`forensics`, `browser`, `netinfra`,
+    # `retrieval`) that the derive_group classifier reads. kaos-ui
+    # 0.1.0a2 ships TR-1 / P1-5, so the local-path override is
+    # dropped — every kaos-* dep now resolves to PyPI.
+    "kaos-agents>=0.1.0a4,<0.2",
     "kaos-core>=0.1.0a7,<0.2",
-    "kaos-ui>=0.1.0a1,<0.2",
-    # NOT transitive from kaos-agents 0.1.0a2 — declare explicitly.
-    "kaos-llm-core>=0.1.0a7,<0.2",
+    "kaos-ui>=0.1.0a2,<0.2",
+    # NOT transitive from kaos-agents — declare explicitly.
+    "kaos-llm-core>=0.1.0a9,<0.2",
     "kaos-llm-client>=0.1.0a3,<0.2",
     # Optional content/extraction tools — only invoked when a session
     # has tools_enabled=True. kaos_ui.agents.build_chat_runtime
     # registers these conditionally via contextlib.suppress(ImportError).
     "kaos-content[markdown]>=0.1.0a7,<0.2",
-    "kaos-pdf>=0.1.0a3,<0.2",
-    "kaos-office>=0.1.0a3,<0.2",
+    "kaos-pdf>=0.1.0a4,<0.2",
+    "kaos-office>=0.1.0a4,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
     "kaos-citations>=0.1.0a2,<0.2",
     # P2-1b: source discovery + materialization. Federal Register / eCFR /
     # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
-    # parsers. Registers 30 read-only tools (`kaos-source-*`).
-    "kaos-source>=0.1.0a4,<0.2",
+    # parsers. 30 tools; offline parsers carry tags=["forensics"] for
+    # the SessionPolicy derivation.
+    "kaos-source>=0.1.0a6,<0.2",
+    # P2-1c: web fetch + browser (Playwright) + netinfra (DNS / WHOIS /
+    # TLS / TCP / UDP). 45 tools; browser tagged ["browser"], netinfra
+    # tagged ["netinfra"] for the SessionPolicy derivation.
+    "kaos-web>=0.1.0a4,<0.2",
+    # P2-1d: kaos-nlp-core content_type classifier — magic-byte
+    # detection feeds the AgenticLoop's corpus_kinds Signature input.
+    "kaos-nlp-core>=0.1.0a7,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",
@@ -59,13 +70,12 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
-# Dev-local KAOS source override. kaos-core/pdf/office/content/source/
-# tabular/graph/agents are pinned to their PyPI releases above (FIX-18
-# coordination, 2026-05-15). The kaos-ui override stays in place until
-# kaos-ui 0.1.0a2 ships with TR-1 (`register_kaos_tool_groups`) +
-# P1-5 (`kaos_ui.uploads` module) — see FIX-18j in the project tracker.
-[tool.uv.sources]
-kaos-ui = { path = "../../..", editable = true }
+# All kaos-* deps resolve to PyPI as of 2026-05-16. The previous
+# kaos-ui local-path override was dropped after kaos-ui 0.1.0a2 + the
+# AgenticLoop wire-up (kaos-agents 0.1.0a4) shipped.
+# [tool.uv.sources]
+# (intentionally empty — re-introduce only for short-lived dev pins
+# against a local checkout, never on main.)
 
 [tool.pytest.ini_options]
 minversion = "8.0"

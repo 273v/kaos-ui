@@ -14,3 +14,9 @@ export { DocumentExplorer } from "./DocumentExplorer.js";
 export { ModelPicker } from "./ModelPicker.js";
 export type { ModelEntry } from "./ModelPicker.js";
 export { ToolPolicyBadge } from "./ToolPolicyBadge.js";
+// AgenticLoop UI surface (kaos-agents 0.1.0a4):
+export { GoalCheckBadge } from "./GoalCheckBadge.js";
+export { ElevationPill } from "./ElevationPill.js";
+export { CapabilityApproval } from "./CapabilityApproval.js";
+export type { CapabilityDecision } from "./CapabilityApproval.js";
+export { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";

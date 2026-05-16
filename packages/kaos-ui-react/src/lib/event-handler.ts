@@ -383,6 +383,86 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
       };
     }
 
+    case "tool_policy_elevated": {
+      // AgenticLoop auto-elevation. Append to the in-flight assistant
+      // message's `elevations` list — multiple iterations can each
+      // elevate (the SPA's <ElevationPill> chips off the most recent).
+      const target = currentAssistant(state.messages);
+      const existing = target?.elevations ?? [];
+      return {
+        ...state,
+        messages: patchAssistant(state.messages, {
+          elevations: [
+            ...existing,
+            {
+              elevated_groups: event.elevated_groups,
+              kept_groups: event.kept_groups,
+              previous_allowed: event.previous_allowed,
+              rationale: event.rationale,
+              iteration: event.iteration,
+            },
+          ],
+        }),
+      };
+    }
+
+    case "capability_requested": {
+      // Yellow-confirm pause. The loop has emitted this event AND is
+      // about to wait for the user. The SPA renders the inline
+      // CapabilityApproval card from this snapshot.
+      return {
+        ...state,
+        // Don't drop `pending` — the loop is still active, just waiting
+        // for the user's click before resuming.
+        messages: patchAssistant(state.messages, {
+          capability_request: {
+            requested_groups: event.requested_groups,
+            justification: event.justification,
+            iteration: event.iteration,
+            previous_allowed: event.previous_allowed,
+          },
+        }),
+      };
+    }
+
+    case "goal_checked": {
+      // Critic's verdict. Drives the GoalCheckBadge color. We overwrite
+      // — the most recent verdict wins (replan loops emit multiple).
+      return {
+        ...state,
+        messages: patchAssistant(state.messages, {
+          goal_check: {
+            kind: event.kind,
+            rationale: event.rationale,
+            next_action: event.next_action,
+            missing: event.missing,
+            confidence: event.confidence,
+            iteration: event.iteration,
+            cost_usd: event.cost_usd,
+            latency_ms: event.latency_ms,
+          },
+        }),
+      };
+    }
+
+    case "loop_terminated": {
+      // Always the LAST event of an agentic turn. The SPA renders the
+      // LoopTerminatedBanner for any non-"satisfied" reason; the
+      // streaming-message finalization happens via turn_summary.
+      return {
+        ...state,
+        messages: patchAssistant(state.messages, {
+          loop_termination: {
+            reason: event.reason,
+            iterations_used: event.iterations_used,
+            elevations_used: event.elevations_used,
+            cost_usd: event.cost_usd,
+            wall_clock_ms: event.wall_clock_ms,
+          },
+        }),
+      };
+    }
+
     default: {
       // Compile-time exhaustiveness: if a new event class lands and
       // we forget to handle it, this never-narrowing assignment fails

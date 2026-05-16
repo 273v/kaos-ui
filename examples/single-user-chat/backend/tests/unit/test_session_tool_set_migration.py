@@ -1,13 +1,19 @@
-"""TR-3 — SessionMeta migrates legacy ``tools_enabled`` to ``tool_set``.
+"""SessionMeta back-compat migration over three historic shapes.
 
-Old meta sidecars on disk only carry the boolean. Loading must
-re-shape them into the new ``SessionToolSetWire``:
-  - tools_enabled=False -> ceiling blocks everything (allowed_groups=[]).
-  - tools_enabled=True / missing -> default ceiling.
+Historic on-disk shapes (oldest → newest):
 
-The derived ``tools_enabled`` computed_field on the model must remain
-truthful (mirror ``not tool_set.is_blocking_all``) for back-compat
-with the SPA's existing checkbox.
+1. Pre-TR-3: ``tools_enabled: bool`` only.
+2. TR-3 (kaos-agents 0.1.0a2): ``tool_set: SessionToolSetWire``.
+3. AgenticLoop (kaos-agents 0.1.0a4): ``policy: SessionPolicyWire``.
+
+Loading must re-shape any of the above into the canonical
+``policy: SessionPolicyWire`` while keeping the derived
+``tool_set`` computed_field and the bool ``tools_enabled`` view
+in sync for SPA clients that haven't cut over yet.
+
+State 1 (legacy bool) mapping:
+  - ``tools_enabled=False`` -> ceiling blocks everything (allowed_groups=[]).
+  - ``tools_enabled=True`` / missing -> research persona default.
 """
 
 from __future__ import annotations
@@ -47,13 +53,28 @@ def test_legacy_tools_enabled_false_maps_to_blocked_ceiling() -> None:
     assert meta.tools_enabled is False
 
 
+_RESEARCH_DEFAULT_GROUPS = {
+    "web",
+    "browser",
+    "netinfra",
+    "documents",
+    "citations",
+    "vfs",
+    "forensics",
+    "retrieval",
+}
+
+
 def test_legacy_tools_enabled_true_maps_to_default_ceiling() -> None:
     raw = _base_meta_dict()
     raw["tools_enabled"] = True
     meta = SessionMeta.model_validate_json(json.dumps(raw))
 
-    # Default ceiling is documents+citations+vfs — web opt-in.
-    assert set(meta.tool_set.allowed_groups) == {"documents", "citations", "vfs"}
+    # New default ceiling = research persona's allowed_groups (8 groups).
+    # The pre-AgenticLoop default (documents+citations+vfs) was widened
+    # so that the loop has room to auto-narrow per-turn instead of
+    # forcing the user to opt in to every group up front.
+    assert set(meta.tool_set.allowed_groups) == _RESEARCH_DEFAULT_GROUPS
     assert meta.tool_set.is_blocking_all is False
     assert meta.tools_enabled is True
 
@@ -62,7 +83,7 @@ def test_legacy_missing_tools_enabled_uses_default_ceiling() -> None:
     raw = _base_meta_dict()  # neither tool_set nor tools_enabled
     meta = SessionMeta.model_validate_json(json.dumps(raw))
 
-    assert set(meta.tool_set.allowed_groups) == {"documents", "citations", "vfs"}
+    assert set(meta.tool_set.allowed_groups) == _RESEARCH_DEFAULT_GROUPS
     assert meta.tools_enabled is True
 
 
@@ -115,8 +136,16 @@ def test_computed_tools_enabled_is_read_only() -> None:
         meta.tools_enabled = False  # type: ignore[misc]
 
 
-def test_session_tool_set_wire_default_is_default_ceiling() -> None:
-    """The default for the field, not for the migration."""
+def test_session_tool_set_wire_default_is_legacy_default_ceiling() -> None:
+    """The legacy SessionToolSetWire field default — pre-AgenticLoop shape.
+
+    SessionToolSetWire is now LEGACY; new sessions persist
+    SessionPolicyWire directly. The class survives only so the
+    SPA back-compat `tool_set` computed_field on SessionMeta has
+    something to return. Its own default keeps the original
+    documents+citations+vfs trio (web opt-in) so existing tests +
+    SPA flows that construct one directly behave unchanged.
+    """
     tool_set = SessionToolSetWire()
     assert set(tool_set.allowed_groups) == {"documents", "citations", "vfs"}
     assert tool_set.denied_tools == []

@@ -15,6 +15,10 @@ import { useMemo } from "react";
 
 import type { ChatMessage } from "../lib/chat-state.js";
 import { renderMarkdown } from "../lib/markdown.js";
+import { CapabilityApproval, type CapabilityDecision } from "./CapabilityApproval.js";
+import { ElevationPill } from "./ElevationPill.js";
+import { GoalCheckBadge } from "./GoalCheckBadge.js";
+import { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
 import { ToolPolicyBadge } from "./ToolPolicyBadge.js";
 import { UsageChip } from "./UsageChip.js";
@@ -29,9 +33,27 @@ interface Props {
    * `verboseTools` prop — typically wired to a header toggle.
    */
   verboseTools?: boolean;
+  /**
+   * Wired to the host's "Pin to session" handler — typically a
+   * PATCH /v1/chat/sessions/{id}/tool-set that adds the elevated
+   * groups to the session's persistent ceiling. When omitted, the
+   * elevation pill is read-only.
+   */
+  onPinElevationToSession?(groups: string[]): void;
+  /**
+   * Wired to the host's resume handler for yellow-confirm capability
+   * pauses. Called with the user's decision + the groups the loop
+   * requested. When omitted, the approval card renders disabled.
+   */
+  onCapabilityDecide?(decision: CapabilityDecision, groups: string[]): void;
 }
 
-export function Message({ message, verboseTools = false }: Props) {
+export function Message({
+  message,
+  verboseTools = false,
+  onPinElevationToSession,
+  onCapabilityDecide,
+}: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
   const isTool = message.role === "tool";
@@ -59,6 +81,13 @@ export function Message({ message, verboseTools = false }: Props) {
 
       {isAssistant && message.tool_policy && (
         <ToolPolicyBadge policy={message.tool_policy} />
+      )}
+
+      {isAssistant && message.elevations && message.elevations.length > 0 && (
+        <ElevationPill
+          elevations={message.elevations}
+          onPinToSession={onPinElevationToSession}
+        />
       )}
 
       <div
@@ -98,6 +127,21 @@ export function Message({ message, verboseTools = false }: Props) {
             />
           ))}
         </div>
+      )}
+
+      {isAssistant && message.capability_request && (
+        <CapabilityApproval
+          request={message.capability_request}
+          onDecide={onCapabilityDecide}
+        />
+      )}
+
+      {isAssistant && message.goal_check && (
+        <GoalCheckBadge goal={message.goal_check} />
+      )}
+
+      {isAssistant && message.loop_termination && (
+        <LoopTerminatedBanner termination={message.loop_termination} />
       )}
 
       {isAssistant && !message.streaming && (
