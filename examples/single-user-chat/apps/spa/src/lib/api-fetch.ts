@@ -12,11 +12,35 @@
 
 import { loadToken } from "@/auth/storage";
 
-export interface ApiError {
-  status: number;
-  what: string;
-  how_to_fix?: string;
-  alternative_tool?: string | null;
+/**
+ * Wire error from the FastAPI surface.
+ *
+ * Extends ``Error`` so callers using
+ * ``mutation.error instanceof Error ? error.message : "fallback"`` (the
+ * default React-Query + shadcn-toast pattern) get the server's ``what``
+ * detail instead of falling through to a generic placeholder. Field
+ * shape is preserved so callers that read ``.status`` / ``.what`` /
+ * ``.how_to_fix`` directly still work.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly what: string;
+  readonly how_to_fix?: string;
+  readonly alternative_tool?: string | null;
+
+  constructor(init: {
+    status: number;
+    what: string;
+    how_to_fix?: string;
+    alternative_tool?: string | null;
+  }) {
+    super(init.what);
+    this.name = "ApiError";
+    this.status = init.status;
+    this.what = init.what;
+    this.how_to_fix = init.how_to_fix;
+    this.alternative_tool = init.alternative_tool ?? null;
+  }
 }
 
 export async function apiFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
@@ -45,12 +69,12 @@ export async function apiJson<T>(input: string | URL, init: RequestInit = {}): P
       body.what ??
       (typeof body.detail === "string" ? body.detail : null) ??
       `HTTP ${response.status}`;
-    throw {
+    throw new ApiError({
       status: response.status,
       what,
       how_to_fix: body.how_to_fix,
       alternative_tool: body.alternative_tool ?? null,
-    } satisfies ApiError;
+    });
   }
   return response.json() as Promise<T>;
 }

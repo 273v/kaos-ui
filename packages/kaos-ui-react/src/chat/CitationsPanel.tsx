@@ -5,7 +5,7 @@
  * owned by the host — this component is presentational.
  */
 
-import { Loader2, Quote, X } from "lucide-react";
+import { ExternalLink, Loader2, Quote, X } from "lucide-react";
 
 import type { Citation } from "../lib/citations.js";
 
@@ -104,22 +104,40 @@ export function CitationsPanel({
               <span className="ml-1 tabular-nums">({groups.get(kind)?.length ?? 0})</span>
             </h3>
             <ul className="space-y-2">
-              {(groups.get(kind) ?? []).map((c) => (
-                <li
-                  key={c.cite_id}
-                  className="rounded-md border border-border bg-background px-2.5 py-1.5"
-                >
-                  <p className="text-xs font-medium break-words">{c.normalized || c.raw}</p>
-                  {c.normalized && c.normalized !== c.raw && (
-                    <p className="text-[11px] text-muted-foreground italic mt-0.5 break-words">
-                      "{c.raw}"
-                    </p>
-                  )}
-                  {c.pin_cite && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5">at {c.pin_cite}</p>
-                  )}
-                </li>
-              ))}
+              {(groups.get(kind) ?? []).map((c) => {
+                const headline = c.normalized || c.raw;
+                return (
+                  <li
+                    key={c.cite_id}
+                    className="rounded-md border border-border bg-background px-2.5 py-1.5"
+                  >
+                    {c.source_uri ? (
+                      <a
+                        href={c.source_uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium break-words inline-flex items-baseline gap-1 text-foreground hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                      >
+                        <span>{headline}</span>
+                        <ExternalLink
+                          aria-hidden="true"
+                          className="h-3 w-3 shrink-0 translate-y-px text-muted-foreground"
+                        />
+                      </a>
+                    ) : (
+                      <p className="text-xs font-medium break-words">{headline}</p>
+                    )}
+                    {c.normalized && c.normalized !== c.raw && (
+                      <p className="text-[11px] text-muted-foreground italic mt-0.5 break-words">
+                        "{c.raw}"
+                      </p>
+                    )}
+                    {c.pin_cite && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5">at {c.pin_cite}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ))}

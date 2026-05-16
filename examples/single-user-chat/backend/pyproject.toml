@@ -77,12 +77,16 @@ packages = ["app"]
 # kaos-ui local-path override was dropped after kaos-ui 0.1.0a2 + the
 # AgenticLoop wire-up (kaos-agents 0.1.0a4) shipped.
 #
-# Temporary git pin (2026-05-16): kaos-agents 0.1.0a5 is tagged on
-# GitHub (v0.1.0a5) but not yet published to PyPI. Once `twine upload`
-# lands the wheel, drop this `tool.uv.sources` block and re-run
-# `uv lock` so the project goes back to a pure-PyPI resolution.
+# Temporary git pin (2026-05-16): tracking the
+# `feat/signature-evals-thin-prompt` branch on kaos-agents so the
+# planner + critic Signatures carry the M2 docstring rules
+# (corpus-attached lookup-beyond-corpus + confident-hallucination /
+# clarification-when-docs-attached shortcuts) ahead of the upstream
+# merge of PR #25 (gated on @jillbomm two-owner CODEOWNERS review).
+# Once #25 merges and a kaos-agents 0.1.0a6+ release is cut, drop
+# this `tool.uv.sources` block and re-run `uv lock`.
 [tool.uv.sources]
-kaos-agents = { git = "https://github.com/273v/kaos-agents.git", tag = "v0.1.0a5" }
+kaos-agents = { git = "https://github.com/273v/kaos-agents.git", branch = "feat/signature-evals-thin-prompt" }
 # Local editable install for kaos-ui so changes to
 # `kaos_ui.agents.augment_instructions` (system-prompt composition,
 # date preamble, search-before-answer rule) reach the running

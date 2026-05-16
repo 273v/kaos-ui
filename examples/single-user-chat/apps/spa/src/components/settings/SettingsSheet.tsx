@@ -31,9 +31,7 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
   // TR-8: tool policy edit buffer. Tracks the ceiling (set of group
   // ids the user wants enabled) + auto_narrow toggle. The bool
   // tools_enabled view is derived from `allowedGroups.length > 0`.
-  const [allowedGroups, setAllowedGroups] = useState<string[]>(
-    meta.tool_set?.allowed_groups ?? [],
-  );
+  const [allowedGroups, setAllowedGroups] = useState<string[]>(meta.tool_set?.allowed_groups ?? []);
   const [autoNarrow, setAutoNarrow] = useState<boolean>(meta.tool_set?.auto_narrow ?? true);
   // M.6 — three new AgenticLoop toggles. Pulled from the canonical
   // `meta.policy` shape; the legacy `meta.tool_set` only carries
@@ -141,19 +139,42 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     // Two independent PATCHes. Tool policy lives on a separate route
     // so an unknown-group validation error doesn't roll back legitimate
     // edits to title / model / prompt.
-    await patch.mutateAsync({
-      title,
-      model,
-      system_prompt: systemPrompt,
-    });
-    await patchToolSet.mutateAsync({
-      allowed_groups: allowedGroups,
-      auto_narrow: autoNarrow,
-      auto_elevate: autoElevate,
-      auto_loop: autoLoop,
-      persona,
-    });
-    onClose();
+    //
+    // We intersect ``allowedGroups`` with the runtime-registered category
+    // IDs (from ``/v1/chat/categories``) before sending. Without that,
+    // the persona soft-ceiling can leak phantom group names like
+    // ``browser`` / ``forensics`` / ``netinfra`` / ``retrieval`` into
+    // ``allowed_groups`` — those groups aren't registered on this
+    // runtime, the backend 422s, and the user sees a generic
+    // "Save failed." with no way to recover.
+    const registeredGroupIds = new Set((categories.data?.categories ?? []).map((c) => c.id));
+    const filteredAllowedGroups = registeredGroupIds.size
+      ? allowedGroups.filter((g) => registeredGroupIds.has(g))
+      : allowedGroups;
+
+    // Wrap both mutations so React-Query surfaces the error via
+    // ``patch.error`` / ``patchToolSet.error`` and the inline
+    // ``ApiError.message`` block below shows the server's ``what``
+    // detail — but the outer promise resolves so the click handler
+    // doesn't log ``Uncaught (in promise)``.
+    try {
+      await patch.mutateAsync({
+        title,
+        model,
+        system_prompt: systemPrompt,
+      });
+      await patchToolSet.mutateAsync({
+        allowed_groups: filteredAllowedGroups,
+        auto_narrow: autoNarrow,
+        auto_elevate: autoElevate,
+        auto_loop: autoLoop,
+        persona,
+      });
+      onClose();
+    } catch {
+      // Already exposed via ``patch.error`` / ``patchToolSet.error``.
+      // The dialog stays open so the user can fix and retry.
+    }
   };
 
   return (
@@ -319,10 +340,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                 <span className="flex-1">
                   <span className="font-medium">Auto-narrow tools per turn</span>
                   <span className="block text-[11px] text-muted-foreground leading-snug">
-                    Runs a small Haiku planner before each turn that picks the
-                    smallest set of categories within your ceiling. Falls back to
-                    the full ceiling when uncertain — narrowing is never a
-                    security gate.
+                    Runs a small Haiku planner before each turn that picks the smallest set of
+                    categories within your ceiling. Falls back to the full ceiling when uncertain —
+                    narrowing is never a security gate.
                   </span>
                 </span>
               </label>
@@ -338,10 +358,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                 <span className="flex-1">
                   <span className="font-medium">Auto-elevate green-auto groups</span>
                   <span className="block text-[11px] text-muted-foreground leading-snug">
-                    When the per-turn planner reports a tool group the agent
-                    wants but the ceiling doesn't include, silently widen the
-                    ceiling up to the soft ceiling. Off = the loop runs with
-                    only the current allowed groups.
+                    When the per-turn planner reports a tool group the agent wants but the ceiling
+                    doesn't include, silently widen the ceiling up to the soft ceiling. Off = the
+                    loop runs with only the current allowed groups.
                   </span>
                 </span>
               </label>
@@ -357,9 +376,8 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                 <span className="flex-1">
                   <span className="font-medium">Multi-iteration agentic loop</span>
                   <span className="block text-[11px] text-muted-foreground leading-snug">
-                    Re-plan and re-execute when the critic says the answer
-                    needs more work. Off = one ReAct pass per turn, no
-                    self-correction.
+                    Re-plan and re-execute when the critic says the answer needs more work. Off =
+                    one ReAct pass per turn, no self-correction.
                   </span>
                 </span>
               </label>
@@ -385,10 +403,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                   <option value="forensics">Forensics</option>
                 </select>
                 <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
-                  Threaded into the per-turn planner as session intent.
-                  Changing this here does NOT rewrite your tool ceiling — use
-                  the persona chips on the welcome page for a full preset
-                  swap.
+                  Threaded into the per-turn planner as session intent. Changing this here does NOT
+                  rewrite your tool ceiling — use the persona chips on the welcome page for a full
+                  preset swap.
                 </p>
               </div>
             </div>
@@ -405,11 +422,15 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
           )}
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <Button variant="ghost" onClick={onClose} disabled={patch.isPending}>
+            <Button
+              variant="ghost"
+              onClick={onClose}
+              disabled={patch.isPending || patchToolSet.isPending}
+            >
               Cancel
             </Button>
-            <Button onClick={onSave} disabled={patch.isPending}>
-              {patch.isPending ? "Saving…" : "Save"}
+            <Button onClick={onSave} disabled={patch.isPending || patchToolSet.isPending}>
+              {patch.isPending || patchToolSet.isPending ? "Saving…" : "Save"}
             </Button>
           </div>
         </div>

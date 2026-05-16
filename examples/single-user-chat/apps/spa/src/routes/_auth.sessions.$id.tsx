@@ -1,6 +1,7 @@
 // Chat detail route. Wires the streaming hook + composer + transcript +
 // settings sheet + per-session model override.
 
+import type { CapabilityDecision } from "@273v/kaos-ui-react/chat";
 import {
   CitationsPanel,
   Composer,
@@ -8,8 +9,8 @@ import {
   DropZone,
   FileChips,
   Message,
-  SlashMenu,
   type Skill,
+  SlashMenu,
   TurnStatus,
 } from "@273v/kaos-ui-react/chat";
 import { RunInspector } from "@273v/kaos-ui-react/debug";
@@ -28,7 +29,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
-
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
 import { PlanActChip } from "@/components/settings/PlanActChip";
 import { SettingsSheet } from "@/components/settings/SettingsSheet";
@@ -40,8 +40,6 @@ import { apiFetch } from "@/lib/api-fetch";
 import { queryKeys } from "@/lib/query-keys";
 import { BUILTIN_SKILLS } from "@/lib/skills";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
-
-import type { CapabilityDecision } from "@273v/kaos-ui-react/chat";
 
 const SearchSchema = z.object({
   debug: z
@@ -113,11 +111,7 @@ function ChatDetail() {
       if (cur.role === "user") {
         let lastDupIdx = i;
         let j = i + 2;
-        while (
-          j < raw.length &&
-          raw[j]?.role === "user" &&
-          raw[j]?.content === cur.content
-        ) {
+        while (j < raw.length && raw[j]?.role === "user" && raw[j]?.content === cur.content) {
           lastDupIdx = j;
           j += 2;
         }
@@ -173,7 +167,7 @@ function ChatDetail() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [search.prefill, navigateRoute]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
@@ -191,14 +185,28 @@ function ChatDetail() {
   // the chat header or the sidebar until the user reloads or
   // switches sessions and back. Trigger fires on the pending
   // true→false edge.
+  //
+  // UX-A1: also re-invalidate ~1.2s later. The title generator runs
+  // as a fire-and-forget background task on the backend; on the first
+  // turn it can complete AFTER the SSE stream's terminal event, so
+  // the synchronous invalidation we fire on `pending: true→false`
+  // refetches /meta before the title is written and the header
+  // re-snaps to "Untitled" until the user submits a 2nd turn. The
+  // delayed re-invalidation catches that race.
   const wasPendingRef = useRef(false);
   useEffect(() => {
     if (wasPendingRef.current && !stream.state.pending) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
-      void queryClient.invalidateQueries({
-        queryKey: [...queryKeys.session(id), "history"],
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      const invalidate = () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+        void queryClient.invalidateQueries({
+          queryKey: [...queryKeys.session(id), "history"],
+        });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      };
+      invalidate();
+      const t = setTimeout(invalidate, 1200);
+      wasPendingRef.current = stream.state.pending;
+      return () => clearTimeout(t);
     }
     wasPendingRef.current = stream.state.pending;
   }, [stream.state.pending, id, queryClient]);
@@ -232,12 +240,20 @@ function ChatDetail() {
         // so persona requires a follow-up release.
       });
     }
-    // Re-focus the composer + drop the caret at the end. The next
-    // tick lets React commit the new value first.
+    // Re-focus the composer. If the prefill carries a ``{placeholder}``
+    // token, SELECT the first one so the user types over it directly —
+    // pre-fix the user could hit Enter and send a literal ``{topic}``
+    // to the LLM. Falls back to caret-at-end when no placeholder.
+    // The documented ``{cursor}`` marker is honored as a placeholder
+    // alias (same behavior).
     setTimeout(() => {
       const ta = document.getElementById("composer-message");
-      if (ta instanceof HTMLTextAreaElement) {
-        ta.focus();
+      if (!(ta instanceof HTMLTextAreaElement)) return;
+      ta.focus();
+      const match = /\{[a-z_][a-z0-9_]*\}/i.exec(ta.value);
+      if (match) {
+        ta.setSelectionRange(match.index, match.index + match[0].length);
+      } else {
         ta.setSelectionRange(ta.value.length, ta.value.length);
       }
     }, 0);
@@ -265,16 +281,9 @@ function ChatDetail() {
   // and focus the chat. The passage is truncated at 600 chars so
   // the composer textarea stays scannable; the full passage is
   // implied by the citation.
-  const onAskAboutSelection = ({
-    filename,
-    passage,
-  }: {
-    filename: string;
-    passage: string;
-  }) => {
+  const onAskAboutSelection = ({ filename, passage }: { filename: string; passage: string }) => {
     const MAX_PASSAGE = 600;
-    const trimmed =
-      passage.length > MAX_PASSAGE ? `${passage.slice(0, MAX_PASSAGE)}…` : passage;
+    const trimmed = passage.length > MAX_PASSAGE ? `${passage.slice(0, MAX_PASSAGE)}…` : passage;
     const composed = `About this passage from \`${filename}\`:\n\n> ${trimmed.replace(/\n/g, "\n> ")}\n\n`;
     setInput(composed);
     // Defer focus so React commits the textarea value first.
@@ -317,6 +326,29 @@ function ChatDetail() {
   };
 
   const meta = session.data;
+
+  // Auto-scroll the transcript on every text delta — but only when the
+  // user is already within ~80px of the bottom (mirrors the EventsLog
+  // pattern in `packages/kaos-ui-react/src/debug/EventsLog.tsx`). Keeps
+  // long streaming answers in view without yanking the user back when
+  // they've scrolled up to read earlier turns.
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const transcriptSignal = useMemo(
+    () =>
+      stream.state.messages.reduce(
+        (acc, m) => acc + (typeof m.content === "string" ? m.content.length : 0),
+        0,
+      ),
+    [stream.state.messages],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: transcriptSignal is the autoscroll trigger; we don't read it inside.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [transcriptSignal]);
+
   return (
     <div className="flex h-full">
       <div className="flex flex-1 min-w-0 flex-col">
@@ -389,11 +421,7 @@ function ChatDetail() {
             // (WCAG 2.5.3 Label in Name) — Lighthouse flagged this
             // when the count badge "4" appeared but the aria-label
             // didn't reference it.
-            aria-label={
-              citations.total > 0
-                ? `Citations (${citations.total})`
-                : "Citations"
-            }
+            aria-label={citations.total > 0 ? `Citations (${citations.total})` : "Citations"}
             aria-pressed={citationsOpen}
           >
             <Quote className="h-3.5 w-3.5" />
@@ -444,7 +472,7 @@ function ChatDetail() {
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto">
+        <div ref={transcriptRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl px-6 py-8" role="log" aria-live="polite">
             {stream.state.banners.length > 0 && (
               <div className="mb-4 space-y-2">
