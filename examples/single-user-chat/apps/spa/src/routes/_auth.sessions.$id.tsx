@@ -23,9 +23,10 @@ import {
   useUploadFile,
 } from "@273v/kaos-ui-react/hooks";
 import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
@@ -36,6 +37,7 @@ import { usePatchToolSet } from "@/hooks/use-patch-tool-set";
 import { useSession } from "@/hooks/use-session";
 import { useSessionMessages } from "@/hooks/use-session-messages";
 import { apiFetch } from "@/lib/api-fetch";
+import { queryKeys } from "@/lib/query-keys";
 import { BUILTIN_SKILLS } from "@/lib/skills";
 import { downloadJSON, downloadMarkdown } from "@/lib/transcript";
 
@@ -59,6 +61,7 @@ export const Route = createFileRoute("/_auth/sessions/$id")({
 
 function ChatDetail() {
   const { id } = Route.useParams();
+  const queryClient = useQueryClient();
   const session = useSession(id);
   const history = useSessionMessages(id);
   const patch = usePatchMeta(id);
@@ -134,6 +137,25 @@ function ChatDetail() {
   // stays on across reloads + new sessions. Keyed under a stable
   // string so a future "global UI prefs" page can introspect it.
   const [verboseTools, setVerboseTools] = useLocalStorage("kaos:verbose-tools", false);
+
+  // B8 — refresh the session meta + message-history + sidebar list
+  // when a turn finishes streaming. Without this, the immediate-
+  // heuristic title patch the backend writes on the first turn
+  // (and the message_count bump on every turn) doesn't surface in
+  // the chat header or the sidebar until the user reloads or
+  // switches sessions and back. Trigger fires on the pending
+  // true→false edge.
+  const wasPendingRef = useRef(false);
+  useEffect(() => {
+    if (wasPendingRef.current && !stream.state.pending) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.session(id), "history"],
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    }
+    wasPendingRef.current = stream.state.pending;
+  }, [stream.state.pending, id, queryClient]);
 
   const onSubmit = () => {
     const text = input.trim();

@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0a8] — 2026-05-16
 
+### Fixed — Bug bundle (B1, B2, B3, B6, B8, B9 / F.11.A-D + T, M.6)
+
+### Added — M.6 SessionPolicy patch surface
+
+The chat router's `PATCH /v1/chat/sessions/{id}/tool-set` now
+accepts three additional fields — `auto_elevate`, `auto_loop`,
+`persona` — and routes them through `SessionStore.patch_policy`
+onto the live `SessionPolicyWire` instead of the legacy
+`SessionToolSetWire`. The `SettingsSheet` Tool Policy section
+grew three new controls (two checkboxes + a persona picker) so
+users can flip these from the right-side sheet.
+
+### Fixed — additional bugs
+
+**B6 — Plan/Act chip stuck on Act, never flips to Plan.** The
+chip detected mode from `meta.policy.auto_loop || auto_elevate`
+but wrote to `auto_narrow` (because pre-M.6 the SPA's
+`ToolSetUpdateBody` only modeled `auto_narrow`). Clicking Plan
+flipped a field the chip never read, so the chip silently wedged.
+The M.6 wire expansion lets PlanActChip write the correct fields;
+the chip now writes `auto_loop` AND `auto_elevate` together to
+flag mode transitions.
+(`apps/spa/src/components/settings/PlanActChip.tsx`,
+`apps/spa/src/lib/api-types.ts`,
+`backend/app/models.py`,
+`backend/app/routers/chat.py`)
+
+**B8 — Session title stays "Untitled" after first turn.** The
+backend auto-titler patches `SessionMeta.title` immediately from
+the user's first message, but the SPA's `useSession` query never
+got invalidated post-stream — the chat header and sidebar kept
+serving cached pre-turn meta forever. Same issue affected
+`message_count` (header showed "0 messages" even after a
+completed turn). The chat route now invalidates the session
+meta, message history, and sessions-list queries on the
+pending→idle transition.
+(`apps/spa/src/routes/_auth.sessions.$id.tsx`)
+
+**B9 — Raw `<function_calls>` text leaking into UI.** Anthropic
+Claude emits its function-calling syntax (`<function_calls>[...]`
+`</function_calls>`) as TEXT when tool binding falls off the
+native tool_use path — visible as a literal JSON array in the
+rendered assistant turn. Extended F.11.D's strip regex to drop
+the WHOLE block (opener + JSON body + closer), not just the
+trailing tag. The proper provider-side fix lives in
+kaos-llm-client / kaos-agents and is tracked separately; this
+strip prevents the visual cruft regardless.
+(`packages/kaos-ui-react/src/lib/event-handler.ts`)
+
 ### Fixed — Bug bundle (B1, B2, B3 / F.11.A-D + T)
 
 **B1 — Composer "typing broken after first chat" hardening.** Could

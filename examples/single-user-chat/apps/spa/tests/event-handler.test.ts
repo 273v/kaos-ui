@@ -108,6 +108,33 @@ describe("event-handler — wire-event coverage", () => {
     expect(msg?.content).toBe("");
   });
 
+  // B9 regression. Claude emits `<function_calls>[{...}, ...]</function_calls>`
+  // as TEXT when the tool binding is not using the native tool_use
+  // path — the whole block (opener + JSON body + closer) must be
+  // stripped, not just the trailing tag.
+  it("text_delta strips the entire <function_calls>...</function_calls> block", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "text_delta",
+      content:
+        'I will compare both.\n<function_calls>\n[{"tool_name": "search", "arguments": {"q": "x"}}]\n</function_calls>\n\n## Comparison',
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).toBe("I will compare both.\n\n\n## Comparison");
+  });
+
+  it("text_delta survives a multi-line <function_calls> block with embedded JSON", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const messy =
+      'Step 1.\n<function_calls>\n[\n  {"tool_name": "kaos-content-search-document"},\n  {"tool_name": "kaos-pdf-extract-page-text"}\n]\n</function_calls>\nStep 2.';
+    const next = applyEvent(state, { type: "text_delta", content: messy });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.content).not.toContain("function_calls");
+    expect(msg?.content).not.toContain("tool_name");
+    expect(msg?.content).toContain("Step 1.");
+    expect(msg?.content).toContain("Step 2.");
+  });
+
   it("thinking_delta does not mutate visible content", () => {
     const { state } = seedWithPlaceholder();
     const next = applyEvent(state, { type: "thinking_delta", content: "internal." });
