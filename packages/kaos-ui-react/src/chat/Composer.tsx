@@ -73,10 +73,13 @@ export function Composer({
           {leftChips}
           <input
             ref={fileInputRef}
+            id="composer-attach"
+            name="composer-attach"
             type="file"
             accept={accept}
             multiple
             hidden
+            aria-label="Attach files to message"
             onChange={(e) => {
               const files = e.target.files;
               if (!files || !onAttach) return;
@@ -113,6 +116,9 @@ export function Composer({
         <div className="relative">
           <textarea
             ref={taRef}
+            id="composer-message"
+            name="composer-message"
+            aria-label="Message"
             value={value}
             placeholder={placeholder}
             onChange={(e) => onChange(e.target.value)}

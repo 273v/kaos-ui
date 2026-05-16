@@ -42,3 +42,4 @@ Thumbs.db
 # Scaffolder outputs from local testing
 /demo-*/
 /test-scaffold-*/
+.screenshots/

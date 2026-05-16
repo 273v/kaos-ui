@@ -157,7 +157,7 @@ export function SessionListItem({ session, active }: Props) {
             >
               <span className="truncate flex-1">{session.title || "Untitled"}</span>
               {session.message_count > 0 && (
-                <span className="shrink-0 inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-full bg-muted-foreground/15 text-[10px] tabular-nums text-muted-foreground">
+                <span className="shrink-0 inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-full bg-muted-foreground/20 text-[10px] tabular-nums text-foreground/80">
                   {session.message_count}
                 </span>
               )}

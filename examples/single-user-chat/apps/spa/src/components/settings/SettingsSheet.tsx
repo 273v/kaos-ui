@@ -89,27 +89,15 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!open) return null;
-
-  const onSave = async () => {
-    // Two independent PATCHes. Tool policy lives on a separate route
-    // so an unknown-group validation error doesn't roll back legitimate
-    // edits to title / model / prompt.
-    await patch.mutateAsync({
-      title,
-      model,
-      system_prompt: systemPrompt,
-    });
-    await patchToolSet.mutateAsync({
-      allowed_groups: allowedGroups,
-      auto_narrow: autoNarrow,
-    });
-    onClose();
-  };
-
   // Preset shortcuts. Picking a preset writes to allowedGroups; the
   // grid reflects. "Custom" emerges automatically when the grid
   // doesn't match any preset.
+  //
+  // NOTE: these two useMemo calls MUST run on every render, regardless
+  // of `open`, because the previous early-return below them caused the
+  // hook order to change between closed → open transitions ("Rendered
+  // more hooks than during the previous render"). Keep the early
+  // return BELOW all hook calls.
   const PRESETS: { id: string; label: string; groups: string[] }[] = useMemo(
     () => [
       { id: "none", label: "None", groups: [] },
@@ -135,6 +123,24 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
     }
     return "custom";
   }, [allowedGroups, PRESETS]);
+
+  if (!open) return null;
+
+  const onSave = async () => {
+    // Two independent PATCHes. Tool policy lives on a separate route
+    // so an unknown-group validation error doesn't roll back legitimate
+    // edits to title / model / prompt.
+    await patch.mutateAsync({
+      title,
+      model,
+      system_prompt: systemPrompt,
+    });
+    await patchToolSet.mutateAsync({
+      allowed_groups: allowedGroups,
+      auto_narrow: autoNarrow,
+    });
+    onClose();
+  };
 
   return (
     <>

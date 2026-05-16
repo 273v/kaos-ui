@@ -449,16 +449,16 @@ wheels = [
 
 [[package]]
 name = "kaos-ui"
-version = "0.1.0a2"
+version = "0.1.0a4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-core" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/fc/68ed532d71fc41441cf48ebb6087a4350fd44a0bd8ad220d6cb4bd3ea6f0/kaos_ui-0.1.0a2.tar.gz", hash = "sha256:b52562257877ab4aeedf32056b58f0d85e98b1bbf65eb1432da61bacd3417eb8", size = 148003, upload-time = "2026-05-15T16:46:51.13Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/83/99bbbc332ee251b6dafb8bf3b5b074fe38d162aff275268d792d37c07507/kaos_ui-0.1.0a4.tar.gz", hash = "sha256:196bff03a10ee18a15a03557da15ed48e48941c53cb4dda253540a609a4f5199", size = 151916, upload-time = "2026-05-16T02:34:34.079Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/af/90e8b4c5e72214e3a03c7134bc5fd4d01d6b95303bddfeae1c62c6a3f1e7/kaos_ui-0.1.0a2-py3-none-any.whl", hash = "sha256:2fe699fbf0325204d68eadc8cfd57822dbae9740b8bb374cb779c515fd1f313c", size = 195754, upload-time = "2026-05-15T16:46:48.937Z" },
+    { url = "https://files.pythonhosted.org/packages/18/a0/4361d77de89f6bc97b1c3df0cb3eadff2fda1b124980777ed4597fa0e99f/kaos_ui-0.1.0a4-py3-none-any.whl", hash = "sha256:8bfc72b69d2db468c7f7cafda613c975c59032d25564fdc8731590969fc5f316", size = 196514, upload-time = "2026-05-16T02:34:32.163Z" },
 ]
 
 [[package]]
