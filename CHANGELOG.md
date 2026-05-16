@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Drop redundant tool catalog from worker prompt (M5 of `thin-worker-prompt.md`)
+
+`kaos_ui.agents.augment_instructions` no longer inlines a tool-name
+catalog into the system prompt. The catalog reaches the LLM via the
+provider's native tool-use API: kaos-agents 0.1.0a5+ bridges
+KaosTools into kaos-llm-core Tool objects, ReAct passes their
+definitions as the `tools=` parameter to `chat_async`
+(`kaos_llm_core/programs/react.py:725`), and modern Claude / GPT /
+Gemini surfaces those tools to the model independently of the system
+prompt.
+
+Net effect: the steady-state worker prompt drops from ~720 tokens
+(M1 baseline) to ~105 tokens — date preamble plus session voice
+only. The tools-disabled refusal directive is preserved.
+
+### Removed (BREAKING)
+
+- `kaos_ui.agents.augment_instructions(available_tool_names=...)` —
+  the parameter is gone. Callers that imported it should drop the
+  argument; the helper no longer needs the catalog.
+- `app.services.stream_proxy._instructions_with_corpus` no longer
+  accepts `available_tool_names`. Public callers continue to thread
+  the catalog through `_build_forward_body` / `stream_chat` because
+  it is still used for `_tool_patterns` (SessionToolSet filtering at
+  the wire layer).
+
+### Verified
+
+- `kaos-llm-core/programs/react.py:723-728` — tools handed to the
+  provider via the native `tools=` parameter and `ToolChoice(type=
+  "auto")`, not via inline text.
+- `kaos_ui/agents.py` worker prompt budget tightened to ≤300 tokens
+  in `tests/unit/test_worker_prompt_budget.py`.
+
 ## [0.1.0a8] — 2026-05-16
 
 ### Changed — Thin-worker-prompt refactor (M1 + M5 of `thin-worker-prompt.md`)

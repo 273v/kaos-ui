@@ -33,28 +33,36 @@ from kaos_ui.agents import (  # noqa: E402 — depends on the skip above
 
 
 def test_augment_instructions_when_tools_disabled() -> None:
-    out = augment_instructions(
-        base_prompt="Be terse.", tools_enabled=False, available_tool_names=None
-    )
+    out = augment_instructions(base_prompt="Be terse.", tools_enabled=False)
     assert "Tools are disabled" in out
     assert "Be terse." in out
 
 
-def test_augment_instructions_when_tools_enabled_but_empty() -> None:
-    out = augment_instructions(base_prompt="Be terse.", tools_enabled=True)
-    assert "did not register any KAOS tools" in out
+def test_augment_instructions_when_tools_enabled_returns_date_plus_base() -> None:
+    """Tools-enabled path returns date preamble + base only.
 
-
-def test_augment_instructions_lists_available_tools() -> None:
-    out = augment_instructions(
-        base_prompt="Be helpful.",
-        tools_enabled=True,
-        available_tool_names=("kaos-pdf-parse", "kaos-core-vfs-list"),
-    )
+    The tool catalog is delivered to the LLM via the provider's native
+    tool-use API (kaos-agents 0.1.0a5+ ReAct path), so inlining it
+    into the system prompt is redundant. See
+    ``kaos-modules/docs/plans/thin-worker-prompt.md`` §4.5 (M5).
+    """
+    out = augment_instructions(base_prompt="Be helpful.", tools_enabled=True)
     assert "Be helpful." in out
-    assert "Available KAOS tool names (2)" in out
-    assert "- kaos-pdf-parse" in out
-    assert "- kaos-core-vfs-list" in out
+    assert "## TODAY IS" in out
+    # No catalog block, no enabled-tools sentinel — the provider's
+    # native tools= surface is the source of truth.
+    assert "Available KAOS tool names" not in out
+    assert "did not register any KAOS tools" not in out
+
+
+def test_augment_instructions_does_not_inline_tool_names() -> None:
+    """Tool names must not appear anywhere in the rendered prompt.
+
+    Regression guard against re-introducing the catalog block.
+    """
+    out = augment_instructions(base_prompt="Be helpful.", tools_enabled=True)
+    for name in ("kaos-pdf-parse", "kaos-core-vfs-list", "kaos-source-fetch-url"):
+        assert name not in out
 
 
 def test_no_tools_pattern_is_unmatchable_glob() -> None:

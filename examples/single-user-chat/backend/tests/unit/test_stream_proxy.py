@@ -86,10 +86,13 @@ def test_forward_body_enables_tools_with_session_tool_set_filter() -> None:
     assert set(body["tools"]) == {"kaos-pdf-search-document", "kaos-core-list-tools"}
     assert "kaos-tabular-query" not in body["tools"]
     assert "*" not in body["tools"]
-    # The system prompt still names every tool in the catalog (the
-    # available_tool_names argument is the un-filtered list — the
-    # filtering happens at the wire layer).
-    assert "Available KAOS tool names (3)" in body["instructions"]
+    # The system prompt MUST NOT enumerate tool names — under M5 the
+    # native tool-use API delivers the catalog, and the prompt carries
+    # only date + voice. Tool names appearing here would mean someone
+    # re-inlined the catalog block.
+    assert "Available KAOS tool names" not in body["instructions"]
+    assert "kaos-pdf-search-document" not in body["instructions"]
+    assert "kaos-core-list-tools" not in body["instructions"]
 
 
 def test_forward_body_falls_back_to_group_globs_without_catalog() -> None:
