@@ -11,6 +11,7 @@
  * once `tokens` / `cost_usd` are populated.
  */
 
+import { Loader2 } from "lucide-react";
 import { useMemo } from "react";
 
 import type { ChatMessage } from "../lib/chat-state.js";
@@ -74,29 +75,24 @@ export function Message({
     return null;
   }, [isAssistant, message.content]);
 
-  // Slightly more vertical room per turn — 24px above / 24px below
-  // beats the previous 16/16 for a reading-flow feel without
-  // burning vertical real-estate on short replies.
+  // Subtle role-differentiated chrome (kaos-ui 0.1.0a8). Iterated
+  // after a "too close / unpolished" pass:
+  //   - User turns: tint-only soft inset (`bg-muted/45`), generous
+  //     rounded corners, edge-padded to the transcript column.
+  //     No border, no shadow — just a faint warm panel.
+  //   - Assistant turns: completely flat. No rail, no card. The
+  //     agent IS the page speaking; visual hierarchy comes from
+  //     the bg-tinted user card preceding it.
+  //   - Tool / error turns keep their destructive accent.
   //
-  // Subtle role-differentiated chrome (kaos-ui 0.1.0a8):
-  //   - User turns get a soft inset card — `bg-muted/40` tint,
-  //     rounded, with a hairline border and a faint shadow. Reads
-  //     as "the question I asked," visually elevated off the page.
-  //   - Assistant turns stay flat — the agent IS the page speaking.
-  //     A 2px accent-tinted left border ties the answer back to
-  //     the system voice without making it a heavy card.
-  //   - Tool / error turns keep their existing destructive accent.
-  //
-  // Aimed at the ChatGPT / Claude reading rhythm: question floats,
-  // answer flows. Tokens chosen from the existing theme so dark
-  // mode and high-contrast users inherit consistent behavior.
+  // Reduces the two-rail clutter the previous version had — the
+  // user card and assistant left-rail were drawing competing
+  // vertical lines a few pixels apart, which read as noise.
   const articleClass = isError
     ? "py-6 border-l-2 border-destructive pl-4"
     : isUser
-      ? "my-3 rounded-lg border border-border/60 bg-muted/40 px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
-      : isAssistant
-        ? "py-6 pl-4 border-l-2 border-accent/30"
-        : "py-6";
+      ? "my-4 rounded-xl bg-muted/45 px-5 py-4"
+      : "py-6";
 
   return (
     <article
@@ -153,10 +149,23 @@ export function Message({
           // target=_blank rel=noopener.
           // biome-ignore lint/security/noDangerouslySetInnerHtml: rendered HTML is sanitized in lib/markdown.ts (html:false + validateLink whitelist).
           <div dangerouslySetInnerHTML={{ __html: rendered }} />
+        ) : isAssistant && message.streaming && !message.content ? (
+          // Mid-turn with no prose yet — the agent is either thinking
+          // or running tool calls. Without this placeholder the user
+          // sees a bare role label + a tiny cursor block and can't
+          // tell anything's happening. Prominent spinner + label
+          // tells them the turn is in flight; the tool-call cards
+          // below this body update live as each call returns.
+          <div className="flex items-center gap-2 text-sm text-foreground/60 italic">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {message.tool_calls && message.tool_calls.length > 0
+              ? `Calling ${message.tool_calls.length} tool${message.tool_calls.length === 1 ? "" : "s"}…`
+              : "Working…"}
+          </div>
         ) : (
           message.content || (message.streaming ? "" : <em className="opacity-60">(empty)</em>)
         )}
-        {message.streaming && (
+        {message.streaming && message.content && (
           <span
             aria-hidden
             className="ml-0.5 inline-block w-[1ch] -mb-0.5 animate-pulse text-accent"

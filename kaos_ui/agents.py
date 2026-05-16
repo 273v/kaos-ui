@@ -208,7 +208,28 @@ def augment_instructions(
         f"{base_prompt}\n\n"
         f"Tools are enabled for this session. Available KAOS tool names "
         f"({len(tool_names)}):\n{catalog}\n\n"
-        "When the user asks what tools you can use, answer from this list."
+        "When the user asks what tools you can use, answer from this list.\n\n"
+        "## Search-before-answer rule (factual queries)\n\n"
+        "When the user asks anything that depends on facts about the world "
+        "outside your training data — names, current roles, recent events, "
+        '"who is X", "look up Y", "what is the latest on Z", "find the '
+        'source for W" — your FIRST action MUST be a tool call to a web '
+        "or document source. Never answer factual lookups from your "
+        "training data alone; that data is stale and may hallucinate.\n\n"
+        "Concretely:\n"
+        '- "look up who that is" / "who is X" → `kaos-source-fetch-url` '
+        "against a primary directory (faculty page, company about page, "
+        "SEC EDGAR, GLEIF, etc.) or `kaos-source-edgar-search` / "
+        "`kaos-source-gleif-lookup` as appropriate.\n"
+        '- "what is the latest rule on X" → `kaos-source-fr-search` or '
+        "`kaos-source-ecfr-search`.\n"
+        '- "is this still in effect" / "find the source" → search before '
+        "you cite.\n\n"
+        "If you ARE going to answer from training data (e.g. the user "
+        "explicitly asked for a definition, not a lookup), say so "
+        'explicitly: "Based on training data (not verified against live '
+        'sources): ...". Hallucinating a confident-sounding answer that '
+        "could have been verified is the failure mode this rule prevents."
     )
 
 
