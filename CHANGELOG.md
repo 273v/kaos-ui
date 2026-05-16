@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a9] — 2026-05-16
+
+Rolls up both M1 and M5 of `kaos-modules/docs/plans/thin-worker-prompt.md`
+into a single tagged release. (Version `0.1.0a8` lived briefly on `main`
+in the interim — `_version.py` was bumped when M1 merged, but no
+`v0.1.0a8` tag was ever cut. The 0.1.0a9 tag is the first artifact in
+this series to reach PyPI; the 0.1.0a8 changelog section below
+documents M1 work that landed on `main` but never released as a
+standalone version.)
+
 ### Changed — Drop redundant tool catalog from worker prompt (M5 of `thin-worker-prompt.md`)
 
 `kaos_ui.agents.augment_instructions` no longer inlines a tool-name
@@ -41,9 +51,9 @@ only. The tools-disabled refusal directive is preserved.
 - `kaos_ui/agents.py` worker prompt budget tightened to ≤300 tokens
   in `tests/unit/test_worker_prompt_budget.py`.
 
-## [0.1.0a8] — 2026-05-16
+## [0.1.0a8] — 2026-05-16 (not released as a tag — folded into 0.1.0a9)
 
-### Changed — Thin-worker-prompt refactor (M1 + M5 of `thin-worker-prompt.md`)
+### Changed — Thin-worker-prompt refactor (M1 of `thin-worker-prompt.md`)
 
 The example backend's worker system prompt is now ~720 tokens (down
 from ~1,600), and **no document body is inlined into the prompt at
