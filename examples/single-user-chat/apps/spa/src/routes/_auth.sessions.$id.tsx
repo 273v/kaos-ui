@@ -90,7 +90,47 @@ function ChatDetail() {
   // sidecars we tee off the live SSE stream.
   const initialMessages = useMemo<ChatMessage[]>(() => {
     if (!history.data) return [];
-    return history.data.messages.map((m) => ({
+    // B11 — collapse AgenticLoop replan-iteration duplicates. When
+    // `auto_loop=true` and the GoalChecker keeps returning
+    // `needs_more_work`, the kaos-agents worker re-runs the user
+    // turn N times and appends a fresh `user:` + `assistant:` pair
+    // to SessionMemory on EACH iteration. The user typed the
+    // message once; we keep only the final user+assistant pair from
+    // each consecutive-duplicate group so the transcript reads as
+    // one turn per user-typed-message.
+    //
+    // Architecturally this should land in kaos-agents (the
+    // AgenticLoop should own a single memory write per turn), but
+    // until that release the SPA does the dedupe so users don't
+    // see the same question rendered 3x. `meta.message_count` is
+    // already the correct turn count — it only increments by 2 per
+    // `run_agentic_turn` call.
+    const raw = history.data.messages;
+    const deduped: typeof raw = [];
+    for (let i = 0; i < raw.length; i++) {
+      const cur = raw[i];
+      if (!cur) continue;
+      if (cur.role === "user") {
+        let lastDupIdx = i;
+        let j = i + 2;
+        while (
+          j < raw.length &&
+          raw[j]?.role === "user" &&
+          raw[j]?.content === cur.content
+        ) {
+          lastDupIdx = j;
+          j += 2;
+        }
+        const finalUser = raw[lastDupIdx];
+        const finalAsst = raw[lastDupIdx + 1];
+        if (finalUser) deduped.push(finalUser);
+        if (finalAsst && finalAsst.role === "assistant") deduped.push(finalAsst);
+        i = lastDupIdx + (finalAsst?.role === "assistant" ? 1 : 0);
+      } else {
+        deduped.push(cur);
+      }
+    }
+    return deduped.map((m) => ({
       id: newId(),
       role: m.role === "system" ? "system" : m.role,
       // B10 — strip scratchpad tags (`[/response]`, `<function_calls>`)
