@@ -162,23 +162,17 @@ def _instructions_with_corpus(
     )
     if not corpus_markdown:
         return base
-    return (
-        f"{base}\n\n"
-        "## Documents attached to this session\n\n"
-        "The user has uploaded the following documents. Their contents are "
-        "inlined below (long files are truncated). Cite the source filename "
-        "when answering questions grounded in this material.\n\n"
-        "**Search-before-clarify rule.** When the user's question is "
-        "ambiguous or could plausibly be answered from these attached "
-        "documents, CALL THE TOOLS to search them BEFORE asking the user "
-        "for clarification. Concretely: use `kaos-content-search-document` "
-        "or `kaos-pdf-extract-page-text` with the literal terms from the "
-        "user's question against every attached file. Only ask a "
-        "clarifying question AFTER a tool search returns nothing relevant. "
-        "Apologising for ambiguity while uploaded documents go unread is "
-        "the failure mode this rule is here to prevent.\n\n"
-        f"{corpus_markdown}"
-    )
+    # Catalog of attached files — METADATA ONLY (filename, size,
+    # content_type, VFS paths, summary). File bodies are not inlined;
+    # the agent reads them via `kaos-content-*` / `kaos-pdf-*` tools
+    # using the VFS paths in this block.
+    #
+    # The "search-before-clarify" behavior rule that used to live
+    # here was deleted as part of the thin-worker-prompt refactor —
+    # that's the GoalChecker's job (returns `needs_more_work` when
+    # the agent says "I can't / I don't know" while tools are
+    # available). See kaos-modules/docs/plans/thin-worker-prompt.md.
+    return f"{base}\n\n## Documents attached to this session\n\n{corpus_markdown}"
 
 
 def _build_forward_body(

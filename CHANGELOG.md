@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0a8] — 2026-05-16
 
+### Changed — Thin-worker-prompt refactor (M1 + M5 of `thin-worker-prompt.md`)
+
+The example backend's worker system prompt is now ~720 tokens (down
+from ~1,600), and **no document body is inlined into the prompt at
+any point**. Policy decisions (which tools to call, when to search
+before clarifying, when to escalate) now flow exclusively through
+the kaos-agents Signature decision points (`_TurnToolPolicySignature`
+docstring picks `kept_groups`; `_GoalCheckerSignature` returns
+verdicts and `next_action`; `AgenticLoop` threads the next-action
+as `thinking_note` to the next worker iteration). See the full
+plan at `kaos-modules/docs/plans/thin-worker-prompt.md`.
+
+**Removed from the worker prompt:**
+
+- The 400-token "Search-before-answer rule" block in
+  `kaos_ui.agents.augment_instructions` (B13 addition) — duplicated
+  the planner Signature's group-selection shortcuts in English.
+- The 150-token "Search-before-clarify rule" block in
+  `app.services.stream_proxy._instructions_with_corpus` (F.11.B) —
+  duplicated the critic Signature's "agent said 'I can't' →
+  needs_more_work" shortcut.
+- The 700-token tool-taxonomy + path-format tutorial in
+  `app.settings._DEFAULT_SYSTEM_PROMPT` — the tool catalog is
+  injected separately with descriptions; the model doesn't need a
+  prose tutorial of every group.
+- The F.11.A force-elevation block in `app.routers.chat` that
+  widened `SessionPolicy.allowed_groups` to include `documents`+`vfs`
+  whenever files were attached. The planner Signature's corpus-kinds
+  hint owns that decision — the router carries the policy through
+  unchanged.
+
+**`render_session_corpus_markdown` no longer inlines file bodies.**
+
+Pre-refactor, every uploaded file's full markdown serialization
+was dumped into the prompt under a `### filename` header, up to a
+40,000-char-per-file budget. A 20-file legal upload mix shipped
+~200K tokens of inert content into every turn, including replan
+iterations the agent didn't read it on. The new output is a
+metadata catalog per file: filename, size, content type, the two
+VFS paths (bytes + AST), parse status, and the cached one-line
+summary. Agents reach the body by calling
+`kaos-content-search-document` / `kaos-pdf-extract-page-text` /
+`kaos-content-corpus-narrow` with the VFS paths the metadata
+block exposed. Mirrors kelvin-agent's `Document.to_compact_dict()`
+pattern.
+
+The `per_file_budget_chars` kwarg on `render_session_corpus_markdown`
+is retained for back-compat with callers that pass it; it is no
+longer consulted.
+
+### Added — Token-budget contract test
+
+`tests/unit/test_worker_prompt_budget.py` (13 tests). Mechanical
+guard against the worker prompt regrowing 400 tokens of English
+behavior rules — the failure mode that produced the 2026-05-16
+dumpster fire. Asserts (a) the rendered prompt is ≤800 tokens
+steady state and ≤300 tokens tools-disabled, (b) nine specific
+forbidden substrings (hardcoded tool names, imperative behavior
+rules) never appear, (c) every tool name appears at most once
+(in the catalog). When a future contributor adds a rule to
+`augment_instructions`, one of these fires with a pointer to the
+right Signature instead.
+
+### Removed
+
+- `test_attached_files_force_documents_and_vfs_into_policy` in
+  `tests/integration/test_chat_agentic_loop.py` — the F.11.T
+  regression that locked in the F.11.A bypass. Replaced with
+  `test_chat_router_passes_policy_through_unchanged` which pins
+  the inverse contract: the router must not widen the policy.
+
+
+
 ### Backend dependency bump — `kaos-agents>=0.1.0a5`
 
 The respond-handler root-cause fix for the `[/response]` scratchpad

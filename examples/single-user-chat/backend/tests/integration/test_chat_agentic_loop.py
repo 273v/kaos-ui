@@ -269,32 +269,39 @@ def test_run_id_encodes_pre_turn_message_count(
     assert captured["run_id"] == "turn-0"
 
 
-def test_attached_files_force_documents_and_vfs_into_policy(
+def test_chat_router_passes_policy_through_unchanged(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """F.11.A regression — when at least one file is attached to the
-    session, the chat router must widen the SessionPolicy's
-    ``allowed_groups`` (and ``soft_ceiling``) to include
-    ``documents`` and ``vfs`` before handing the policy to
-    :func:`run_agentic_turn`. Without this gate the planner has
-    historically picked "ask a clarifying question" over "search the
-    attached docs" for ambiguous queries, even when the answer was
-    in the inlined corpus head excerpt.
+    """The chat router must NOT mutate the session policy before
+    handing it to :func:`run_agentic_turn`.
+
+    Earlier (F.11.A, 2026-05-16) the router force-elevated
+    ``documents`` + ``vfs`` into ``allowed_groups`` whenever files
+    were attached, on the theory that the planner Signature was
+    untrustworthy. This created two sources of truth for the
+    kept-groups decision: the router's hardcoded English heuristic
+    AND the planner's :class:`_TurnToolPolicySignature` docstring.
+    They could disagree.
+
+    The thin-worker-prompt refactor
+    (kaos-modules/docs/plans/thin-worker-prompt.md M1) reverted
+    that bypass. The planner Signature owns the decision; the
+    router carries the policy through. This test pins the
+    pass-through contract — if a future contributor reintroduces a
+    `dataclasses.replace(session_policy, ...)` block, it fails.
     """
     captured = _patch_agentic_turn(monkeypatch)
     sid = _create_session(client, tools_enabled=True)
 
-    # Narrow the session ceiling to a single group that's neither
-    # `documents` nor `vfs`, so the assertions below test the WIDENING
-    # behavior — not the default-policy passthrough.
+    # Narrow the session ceiling to a single non-doc/vfs group.
     patch_r = client.patch(
         f"/v1/chat/sessions/{sid}/tool-set",
         json={"allowed_groups": ["web"], "denied_tools": []},
     )
     assert patch_r.status_code == 200, patch_r.text
 
-    # Attach a tiny valid PDF so the chat router computes a non-empty
-    # `corpus_headlines` string before calling run_agentic_turn.
+    # Attach a tiny valid PDF so corpus_headlines is non-empty
+    # (the trigger F.11.A used to widen the policy).
     pdf_bytes = (
         b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
         b"2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\n"
@@ -318,17 +325,17 @@ def test_attached_files_force_documents_and_vfs_into_policy(
 
     policy = captured["policy"]
     assert isinstance(policy, SessionPolicy)
-    # The router must have FORCED these in even though the user
-    # narrowed the ceiling to just `web`.
-    assert "documents" in policy.allowed_groups, (
-        f"documents missing from allowed_groups: {sorted(policy.allowed_groups)}"
+    # The user narrowed to {"web"}; the router must NOT have
+    # widened this on its own. If documents/vfs are present, the
+    # router is overriding the policy again — fail.
+    assert policy.allowed_groups == frozenset({"web"}), (
+        "Router widened policy.allowed_groups from user-narrowed {'web'} "
+        f"to {sorted(policy.allowed_groups)}. The planner Signature is the "
+        "single source of truth for kept_groups — see "
+        "kaos-modules/docs/plans/thin-worker-prompt.md §2.3 and §5."
     )
-    assert "vfs" in policy.allowed_groups, (
-        f"vfs missing from allowed_groups: {sorted(policy.allowed_groups)}"
-    )
-    # Soft ceiling raised in lockstep so auto-elevation can keep them.
-    assert "documents" in policy.soft_ceiling
-    assert "vfs" in policy.soft_ceiling
-    # corpus_headlines must be non-empty (sanity check on the precondition).
+    # Confirm corpus_headlines IS being passed through to the
+    # planner (it's a real Signature input, just not a router-side
+    # policy-mutation trigger).
     assert captured["corpus_headlines"]
     assert "course-descriptions.pdf" in captured["corpus_headlines"]

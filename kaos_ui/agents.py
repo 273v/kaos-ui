@@ -238,32 +238,24 @@ def augment_instructions(
         )
 
     catalog = "\n".join(f"- {name}" for name in tool_names)
+    # Worker prompt = date + voice + catalog. Nothing else.
+    #
+    # Behavior policy (which tools to use, when to search before
+    # answering, when to escalate) lives in the kaos-agents Signature
+    # decision points — `_TurnToolPolicySignature` docstring picks
+    # `kept_groups`, `_GoalCheckerSignature` docstring drives replan
+    # verdicts, and the AgenticLoop threads the critic's `next_action`
+    # to the next worker iteration as `thinking_note`. Free-text rules
+    # in this prompt would (a) duplicate, (b) drift from, and (c)
+    # potentially contradict those Signatures.
+    #
+    # See kaos-modules/docs/plans/thin-worker-prompt.md for the full
+    # rationale + the anti-goals checklist that blocks regrowing this
+    # function with hardcoded English behavior rules.
     return (
         f"{preamble}{base_prompt}\n\n"
         f"Tools are enabled for this session. Available KAOS tool names "
-        f"({len(tool_names)}):\n{catalog}\n\n"
-        "When the user asks what tools you can use, answer from this list.\n\n"
-        "## Search-before-answer rule (factual queries)\n\n"
-        "When the user asks anything that depends on facts about the world "
-        "outside your training data — names, current roles, recent events, "
-        '"who is X", "look up Y", "what is the latest on Z", "find the '
-        'source for W" — your FIRST action MUST be a tool call to a web '
-        "or document source. Never answer factual lookups from your "
-        "training data alone; that data is stale and may hallucinate.\n\n"
-        "Concretely:\n"
-        '- "look up who that is" / "who is X" → `kaos-source-fetch-url` '
-        "against a primary directory (faculty page, company about page, "
-        "SEC EDGAR, GLEIF, etc.) or `kaos-source-edgar-search` / "
-        "`kaos-source-gleif-lookup` as appropriate.\n"
-        '- "what is the latest rule on X" → `kaos-source-fr-search` or '
-        "`kaos-source-ecfr-search`.\n"
-        '- "is this still in effect" / "find the source" → search before '
-        "you cite.\n\n"
-        "If you ARE going to answer from training data (e.g. the user "
-        "explicitly asked for a definition, not a lookup), say so "
-        'explicitly: "Based on training data (not verified against live '
-        'sources): ...". Hallucinating a confident-sounding answer that '
-        "could have been verified is the failure mode this rule prevents."
+        f"({len(tool_names)}):\n{catalog}"
     )
 
 
