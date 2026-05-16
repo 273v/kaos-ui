@@ -7,10 +7,34 @@
  * fetching and passes `files` here so this stays presentational.
  */
 
-import { ChevronDown, ChevronRight, Download, FileText, Loader2, RefreshCw, X } from "lucide-react";
-import { useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  FileText,
+  Loader2,
+  MessageSquareQuote,
+  RefreshCw,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FileMeta } from "../lib/files.js";
+
+/**
+ * Payload for the "Ask about this" affordance — the doc-explorer's
+ * inline highlight-to-prefill flow (F.9). The host receives both
+ * the source filename and the verbatim selected passage; it's
+ * responsible for routing this into the composer.
+ *
+ * Convention: passages > 600 chars get truncated by the host so
+ * the prefill stays scannable inside the composer textarea. The
+ * raw selection is passed through verbatim so the host can decide.
+ */
+export interface AskAboutSelection {
+  filename: string;
+  passage: string;
+}
 
 interface Props {
   open: boolean;
@@ -50,6 +74,13 @@ interface Props {
    * the `<a href>`.
    */
   onDownload?: (filename: string) => void | Promise<void>;
+  /**
+   * Highlight-to-Ask flow (F.9). Fires when the user selects text
+   * inside a file's expanded summary and clicks the floating "Ask
+   * about this" pill. The host wires this into the composer prefill
+   * (typically a search-param-driven route navigation).
+   */
+  onAskAboutSelection?: (payload: AskAboutSelection) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -70,16 +101,75 @@ function FileCard({
   resummarizing,
   downloadUrl,
   onDownload,
+  onAskAboutSelection,
 }: {
   file: FileMeta;
   onResummarize?: (filename: string) => void;
   resummarizing?: boolean;
   downloadUrl?: string | null;
   onDownload?: (filename: string) => void | Promise<void>;
+  onAskAboutSelection?: (payload: AskAboutSelection) => void;
 }) {
   const [open, setOpen] = useState(false);
   const failed = file.parse.status === "failed";
   const hasSummary = !!file.summary;
+
+  // Highlight-to-Ask state. We track the most recent selection scoped
+  // to *this card's* summary container; cross-card selections are
+  // ignored (the browser allows them but they're rarely intentional).
+  const summaryRef = useRef<HTMLDivElement | null>(null);
+  const [askPos, setAskPos] = useState<{ top: number; left: number } | null>(null);
+  const [askText, setAskText] = useState<string>("");
+
+  const clearAsk = useCallback(() => {
+    setAskPos(null);
+    setAskText("");
+  }, []);
+
+  // Document-level mouseup catches selection completion regardless of
+  // where the mouse lifted (drag can exit + re-enter the container).
+  useEffect(() => {
+    if (!open || !onAskAboutSelection) return;
+    const onMouseUp = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        clearAsk();
+        return;
+      }
+      // Require the selection to be ENTIRELY inside this card's
+      // summary container — anchor + focus both contained.
+      const root = summaryRef.current;
+      if (!root) return;
+      const anchor = sel.anchorNode;
+      const focus = sel.focusNode;
+      if (!anchor || !focus) {
+        clearAsk();
+        return;
+      }
+      if (!root.contains(anchor) || !root.contains(focus)) {
+        clearAsk();
+        return;
+      }
+      const text = sel.toString().trim();
+      // Bail on trivial selections (< 4 chars or whitespace-only).
+      if (text.length < 4) {
+        clearAsk();
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      const rootRect = root.getBoundingClientRect();
+      // Position the pill just under the last line of the selection,
+      // anchored to the card so it scrolls with the panel.
+      setAskPos({
+        top: rect.bottom - rootRect.top + 6,
+        left: Math.min(rect.left - rootRect.left, rootRect.width - 140),
+      });
+      setAskText(text);
+    };
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
+  }, [open, onAskAboutSelection, clearAsk]);
 
   return (
     <li className="rounded-md border border-border bg-background">
@@ -162,7 +252,7 @@ function FileCard({
         </div>
       </div>
       {open && (
-        <div className="px-3 pb-3 pt-1 text-xs space-y-2">
+        <div ref={summaryRef} className="relative px-3 pb-3 pt-1 text-xs space-y-2">
           {failed && file.parse.error && (
             <div className="rounded-sm border border-destructive/40 bg-destructive/5 px-2 py-1 text-destructive break-words">
               {file.parse.error}
@@ -173,13 +263,35 @@ function FileCard({
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                 Summary
               </p>
-              <p className="leading-relaxed text-foreground break-words">{file.summary}</p>
+              <p className="leading-relaxed text-foreground break-words selection:bg-accent/20">
+                {file.summary}
+              </p>
             </div>
           ) : !failed ? (
             <p className="italic text-muted-foreground">
               No summary yet — the summarizer may have been offline at upload time.
             </p>
           ) : null}
+          {askPos && onAskAboutSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                onAskAboutSelection({ filename: file.filename, passage: askText });
+                window.getSelection()?.removeAllRanges();
+                clearAsk();
+              }}
+              style={{ top: askPos.top, left: askPos.left }}
+              className="absolute z-10 inline-flex items-center gap-1 rounded-md border border-accent/40 bg-card px-2 py-1 text-[11px] font-medium text-foreground shadow-sm hover:bg-accent/10 hover:border-accent/60 transition-colors"
+              // mousedown handler prevents the underlying selection
+              // from being cleared by the button's own click — without
+              // this, the selection clears before our onClick fires.
+              onMouseDown={(e) => e.preventDefault()}
+              title="Ask the agent about this passage"
+            >
+              <MessageSquareQuote className="h-3 w-3 text-accent" />
+              Ask about this
+            </button>
+          )}
         </div>
       )}
     </li>
@@ -197,6 +309,7 @@ export function DocumentExplorer({
   resummarizing,
   getDownloadUrl,
   onDownload,
+  onAskAboutSelection,
 }: Props) {
   if (!open) return null;
   const needsBackfill = files.some(
@@ -263,6 +376,7 @@ export function DocumentExplorer({
                 resummarizing={resummarizing?.has(f.filename)}
                 downloadUrl={getDownloadUrl?.(f.filename)}
                 onDownload={onDownload}
+                onAskAboutSelection={onAskAboutSelection}
               />
             ))}
           </ul>

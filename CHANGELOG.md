@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a7] — 2026-05-16
+
+### Added — Top-5-easiest features from the framework survey
+
+A research pass surveyed 20 LLM chat UI frameworks + flagship products
+(assistant-ui, Vercel AI Elements, Open WebUI, LibreChat, Lobe Chat,
+AnythingLLM, Chatbot UI, Continue, Cline, Roo Code, shadcn-chat, Letta,
+LangGraph Studio, Claude Projects, ChatGPT Atlas, Perplexity Spaces,
+Cursor 2.0, Anthropic Console, Cody, Mintlify, Linear Agent) and
+produced a ranked list of 10 features to ship next. Full report at
+`.screenshots/RESEARCH-next-features.md`. This release lands the **5
+easiest** of those 10 — all S- or low-risk M-effort — in a single
+coherent batch.
+
+- **F.4 — Plan / Act mode toggle on the composer**
+  (`apps/spa/src/components/settings/PlanActChip.tsx`). New chip in
+  the composer bottom-left. **Plan** = read-only research (auto-loop +
+  auto-elevate OFF — the agent answers without invoking any tool that
+  could mutate state). **Act** = full agentic loop (the v0.1.0a4+
+  default). Sourced from `meta.policy`, written via the existing
+  `usePatchToolSet` hook — single source of truth. Pattern from
+  Continue.dev's Plan/Agent toggle and Cline.
+
+- **F.5 — Composer chip area polish**
+  (`packages/kaos-ui-react/src/chat/Composer.tsx`). Bumped the Send /
+  Stop button to 40×40 (WCAG 2.5.8 — pre-empted a touch-size
+  regression Lighthouse caught when the chip row grew). The
+  ModelPickerChip + PlanActChip both dock into `leftChips`; thinking-
+  effort selector deferred until kaos-agents exposes it on the wire.
+
+- **F.6 — Inline reasoning summary, collapsed by default**
+  (`packages/kaos-ui-react/src/chat/ReasoningSummary.tsx`). Renders
+  the most-recent `goal_check.rationale` / `next_action` / `missing`
+  as a gray-italic 1-line summary above the assistant text. Click to
+  expand into the full rationale + iteration / confidence /
+  latency metadata. Data already lives on `ChatMessage.goal_check`
+  from the SSE reducer — pure UI. Pattern: Claude 4.6 adaptive
+  thinking + Vercel AI Elements `Reasoning`.
+
+- **F.9 — Highlight-text-in-document → "Ask about this" prefill**
+  (`packages/kaos-ui-react/src/chat/DocumentExplorer.tsx` + chat
+  route). Selecting text inside a document summary surfaces a
+  floating "Ask about this" pill anchored to the selection. Click →
+  composer pre-fills `About this passage from \`<doc>\`:\n\n> <passage>`
+  (truncated at 600 chars) and focuses. Pattern: Mintlify highlight-
+  to-Ask, ChatGPT Atlas page-aware sidebar.
+
+- **F.3 — Slash commands as filesystem skills**
+  (`packages/kaos-ui-react/src/chat/SlashMenu.tsx` +
+  `apps/spa/src/lib/skills.ts`). Composer `/` menu loads from a
+  `Skill[]` registry. Each skill = (id, name, description, prefill,
+  optional persona, optional model, optional `allowed_groups`).
+  Picking a skill replaces the composer text with its prefill and
+  patches the tool-policy when `allowed_groups` is set. Built-in
+  catalog ships 6 skills (Federal Register search, summarize,
+  redline, verify, compare, forensics). Keyboard nav: ↑↓ to select,
+  ↵ / Tab to insert, esc to dismiss. Pattern: Claude Code Skills
+  (`.claude/skills/<name>/SKILL.md`), Linear Agent skills, LibreChat
+  Presets.
+
+### Public API additions to `@273v/kaos-ui-react/chat`
+
+- `<ReasoningSummary goal={...} />`
+- `<SlashMenu skills={...} query={...} open={...} onPick={...} onClose={...} />`
+- `<DocumentExplorer onAskAboutSelection={...} />` prop
+- Types: `Skill`, `SkillPersona`, `SlashMenuProps`, `AskAboutSelection`.
+
+### Fixed
+
+- a11y: Composer Send button bumped from 36×36 → 40×40 after
+  Lighthouse flagged the touch-target size regression when the
+  composer chip row densified.
+- a11y: Slash-menu `/id` accent text bumped to `font-semibold` —
+  the regular weight at `text-accent` (4.34:1) failed WCAG AA for
+  small text; semibold passes.
+
+### Verification
+
+- Lighthouse on the active chat surface: **100 / 100 / 100 / 100**
+  (a11y / best-practices / SEO / agentic). 36 audits passed, 0 failed.
+- Browser console: clean.
+- TypeScript: clean across kaos-ui-react + SPA.
+- 96 SPA vitest passing — no regressions.
+
 ## [0.1.0a6] — 2026-05-16
 
 ### Added — Typography + spacing + tabular polish (Round 2)
@@ -507,7 +591,8 @@ First public alpha.
   is stable for the duration of the `0.1.x` line; experimental surfaces
   live under `kaos_ui.mcp.tools` and may evolve.
 
-[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a6...HEAD
+[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a7...HEAD
+[0.1.0a7]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a7
 [0.1.0a6]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a4

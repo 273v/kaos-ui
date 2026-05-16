@@ -11,6 +11,7 @@ export { DropZone } from "./DropZone.js";
 export { FileChips } from "./FileChips.js";
 export { CitationsPanel } from "./CitationsPanel.js";
 export { DocumentExplorer } from "./DocumentExplorer.js";
+export type { AskAboutSelection } from "./DocumentExplorer.js";
 export { ModelPicker } from "./ModelPicker.js";
 export type { ModelEntry } from "./ModelPicker.js";
 export { ToolPolicyBadge } from "./ToolPolicyBadge.js";
@@ -20,6 +21,9 @@ export { ElevationPill } from "./ElevationPill.js";
 export { CapabilityApproval } from "./CapabilityApproval.js";
 export type { CapabilityDecision } from "./CapabilityApproval.js";
 export { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
+export { ReasoningSummary } from "./ReasoningSummary.js";
+export { SlashMenu } from "./SlashMenu.js";
+export type { Skill, SkillPersona, SlashMenuProps } from "./SlashMenu.js";
 
 // Tabular primitive — used inline in transcripts (kaos-md table
 // auto-promotion) and standalone for `kaos-tabular` comparison
