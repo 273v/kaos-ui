@@ -22,7 +22,7 @@ import {
   useSessionFiles,
   useUploadFile,
 } from "@273v/kaos-ui-react/hooks";
-import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
+import { type ChatMessage, newId, stripScratchpadTags } from "@273v/kaos-ui-react/lib";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
@@ -93,7 +93,13 @@ function ChatDetail() {
     return history.data.messages.map((m) => ({
       id: newId(),
       role: m.role === "system" ? "system" : m.role,
-      content: m.content,
+      // B10 — strip scratchpad tags (`[/response]`, `<function_calls>`)
+      // from historical assistant turns. Sessions created against
+      // older kaos-agents (< 0.1.0a5) persisted dirty bytes into
+      // session memory; this strip keeps the transcript clean even
+      // for those legacy sessions. The live SSE reducer applies the
+      // same strip via event-handler.ts.
+      content: m.role === "assistant" ? stripScratchpadTags(m.content) : m.content,
       created_at: m.added_at * 1000,
       streaming: false,
       tool_calls:

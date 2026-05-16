@@ -18,7 +18,10 @@ dependencies = [
     # `retrieval`) that the derive_group classifier reads. kaos-ui
     # 0.1.0a2 ships TR-1 / P1-5, so the local-path override is
     # dropped — every kaos-* dep now resolves to PyPI.
-    "kaos-agents>=0.1.0a4,<0.2",
+    # 0.1.0a5 (2026-05-16) drops the ChatCodec override in
+    # BaseAgent._simple_respond — fixes the `[/response]` /
+    # `</response>` scratchpad-tag leak users saw on Haiku 4.5.
+    "kaos-agents>=0.1.0a5,<0.2",
     "kaos-core>=0.1.0a7,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
     # NOT transitive from kaos-agents — declare explicitly.
@@ -73,9 +76,13 @@ packages = ["app"]
 # All kaos-* deps resolve to PyPI as of 2026-05-16. The previous
 # kaos-ui local-path override was dropped after kaos-ui 0.1.0a2 + the
 # AgenticLoop wire-up (kaos-agents 0.1.0a4) shipped.
-# [tool.uv.sources]
-# (intentionally empty — re-introduce only for short-lived dev pins
-# against a local checkout, never on main.)
+#
+# Temporary git pin (2026-05-16): kaos-agents 0.1.0a5 is tagged on
+# GitHub (v0.1.0a5) but not yet published to PyPI. Once `twine upload`
+# lands the wheel, drop this `tool.uv.sources` block and re-run
+# `uv lock` so the project goes back to a pure-PyPI resolution.
+[tool.uv.sources]
+kaos-agents = { git = "https://github.com/273v/kaos-agents.git", tag = "v0.1.0a5" }
 
 [tool.pytest.ini_options]
 minversion = "8.0"

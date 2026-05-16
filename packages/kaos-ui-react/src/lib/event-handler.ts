@@ -11,6 +11,7 @@
 import type { ChatMessage, ToolCallSummary, TurnStatusKind } from "./chat-state.js";
 import { newId } from "./chat-state.js";
 import type { KaosAgentEvent, SpanEvent } from "./events.js";
+import { stripScratchpadTags } from "./text-strip.js";
 
 export interface TranscriptState {
   /** Ordered transcript shown in the conversation column. */
@@ -37,31 +38,6 @@ function currentAssistant(messages: ChatMessage[]): ChatMessage | null {
     if (m && m.role === "assistant" && m.streaming) return m;
   }
   return null;
-}
-
-// Defense-in-depth: drop scratchpad / training-leak tokens that
-// some instruction-tuned models emit as TEXT instead of as proper
-// tool_use blocks or codec-anchored fields. Three patterns:
-//
-//   1. `<function_calls>...</function_calls>` — Claude emits its
-//      function-calling syntax as text when tool binding is not
-//      using the native tool_use path. Must strip the WHOLE block
-//      (opener + JSON body + closer), not just the closer, because
-//      the body is a `[{...}]` array the user shouldn't see.
-//   2. `[/name]` — ChatCodec opener-only field markers hallucinated
-//      with a closing slash by Haiku-class models. The opener is
-//      legitimate scaffolding the codec emits; only the closer
-//      needs to be dropped from the rendered text.
-//   3. `</name>` — XMLCodec-style closer hallucinated under the
-//      same conditions.
-//
-// All patterns are conservative: only `\w+` slugs in brackets so
-// literal text like `[/usr/local]` or `</a href="...">` is left alone.
-const SCRATCHPAD_BLOCK_RE = /<function_calls>[\s\S]*?<\/function_calls>/g;
-const SCRATCHPAD_TAG_RE = /\[\/\w+\]|<\/\w+>/g;
-function stripScratchpadTags(text: string): string {
-  if (!text) return text;
-  return text.replace(SCRATCHPAD_BLOCK_RE, "").replace(SCRATCHPAD_TAG_RE, "");
 }
 
 function patchAssistant(messages: ChatMessage[], updates: Partial<ChatMessage>): ChatMessage[] {

@@ -9,7 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0a8] — 2026-05-16
 
-### Fixed — Bug bundle (B1, B2, B3, B6, B8, B9 / F.11.A-D + T, M.6)
+### Backend dependency bump — `kaos-agents>=0.1.0a5`
+
+The respond-handler root-cause fix for the `[/response]` scratchpad
+leak lives in **kaos-agents 0.1.0a5** (drops the ChatCodec override
+in `BaseAgent._simple_respond`, switches to native JSONCodec / JSON
+schema). The example backend's `pyproject.toml` floor moves from
+`>=0.1.0a4` to `>=0.1.0a5`. Until kaos-agents 0.1.0a5 publishes to
+PyPI, `[tool.uv.sources]` resolves it from the
+`https://github.com/273v/kaos-agents.git` tag `v0.1.0a5`. The
+override block should be removed once the PyPI wheel lands.
+
+### Fixed — B10: scratchpad tags leak in HISTORY hydration
+
+F.11.D's strip only ran on live `text_delta` SSE events. Historical
+messages loaded via `GET /v1/chat/sessions/{id}/messages` came back
+straight from session memory and rendered the raw `[/response]` /
+`<function_calls>{...}</function_calls>` artifacts that older
+kaos-agents persisted. Fix:
+
+- Hoisted the strip helper out of `event-handler.ts` into
+  `packages/kaos-ui-react/src/lib/text-strip.ts` and re-exported
+  from the `kaos-ui-react/lib` barrel as `stripScratchpadTags`.
+- The history mapper in `apps/spa/src/routes/_auth.sessions.$id.tsx`
+  now wraps assistant `content` through the same strip. User-typed
+  messages are NOT stripped (they're never the source of these
+  tokens).
+
+Sessions created against kaos-agents 0.1.0a5+ won't accumulate
+dirty bytes; this strip protects legacy transcripts.
+
+### Fixed — Bug bundle (B1, B2, B3, B6, B8, B9, B10 / F.11.A-D + T, M.6)
 
 ### Added — M.6 SessionPolicy patch surface
 

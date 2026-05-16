@@ -68,3 +68,5 @@ export { extractCitations } from "./citations.js";
 
 export type { KaosQueryKey } from "./query-keys.js";
 export { kaosQueryKeys } from "./query-keys.js";
+
+export { stripScratchpadTags } from "./text-strip.js";
