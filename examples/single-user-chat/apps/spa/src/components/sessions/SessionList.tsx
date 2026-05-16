@@ -38,6 +38,64 @@ function sortSessions(items: SessionSummary[], mode: SortMode): SessionSummary[]
   }
 }
 
+// Time-bucket headers per AUDIT.md §S1 + RESEARCH-sota.md §1. Five
+// buckets keep scanning fast without folder-style structure (which
+// no legal-research competitor uses). Buckets are computed against
+// `last_message_at || created_at` (the same ts our default sort
+// uses) so a "Today" header always matches the rows below it.
+type Bucket = {
+  id: "today" | "yesterday" | "prev_7" | "prev_30" | "older";
+  label: string;
+  // upper-exclusive ms threshold relative to "now"; null = catch-all.
+  cutoffMs: number | null;
+};
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const BUCKETS: ReadonlyArray<Bucket> = [
+  { id: "today", label: "Today", cutoffMs: MS_PER_DAY },
+  { id: "yesterday", label: "Yesterday", cutoffMs: 2 * MS_PER_DAY },
+  { id: "prev_7", label: "Previous 7 days", cutoffMs: 7 * MS_PER_DAY },
+  { id: "prev_30", label: "Previous 30 days", cutoffMs: 30 * MS_PER_DAY },
+  { id: "older", label: "Older", cutoffMs: null },
+];
+
+function bucketTs(s: SessionSummary): number {
+  return s.last_message_at
+    ? new Date(s.last_message_at).valueOf()
+    : new Date(s.created_at).valueOf();
+}
+
+function bucketize(
+  items: SessionSummary[],
+  now: number,
+): { bucket: Bucket; items: SessionSummary[] }[] {
+  // Truncate "now" to the start of the local day so a session from
+  // 30 minutes ago consistently lands in Today even if "now" rolled
+  // past midnight while the user was on the page.
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const baseline = startOfToday.valueOf();
+
+  const out: { bucket: Bucket; items: SessionSummary[] }[] = BUCKETS.map(
+    (b) => ({ bucket: b, items: [] }),
+  );
+  for (const s of items) {
+    const age = Math.max(0, baseline - bucketTs(s));
+    // Today = anything from `baseline` forward (incl. future-ish
+    // clock skew); anything before today falls into yesterday-or-older.
+    let idx = 0;
+    if (bucketTs(s) >= baseline) {
+      idx = 0;
+    } else {
+      idx = BUCKETS.findIndex((b) => b.cutoffMs == null || age < b.cutoffMs);
+      if (idx < 0) idx = BUCKETS.length - 1;
+    }
+    out[idx]?.items.push(s);
+  }
+  return out.filter((b) => b.items.length > 0);
+}
+
 export function SessionList({ archived = false }: Props) {
   const params = useParams({ strict: false });
   const activeId = (params as { id?: string }).id;
@@ -94,6 +152,8 @@ export function SessionList({ archived = false }: Props) {
             <SortIcon className="h-3 w-3" />
             <span className="uppercase tracking-wide">{SORT_LABELS[sort].label}</span>
             <select
+              id="sidebar-sort"
+              name="sidebar-sort"
               value={sort}
               onChange={(e) => setSort(e.target.value as SortMode)}
               className="absolute inset-0 opacity-0 cursor-pointer"
@@ -113,6 +173,26 @@ export function SessionList({ archived = false }: Props) {
             : starredOnly
               ? "No starred sessions. Star a row to pin it here."
               : "No conversations yet. Start one with “New chat”."}
+        </div>
+      ) : sort === "last_used" && !archived ? (
+        // Time-bucketed view — only when the user is on the default
+        // chronological sort. Other sort modes are explicit user
+        // overrides and we respect them as flat lists.
+        <div className="flex flex-col gap-1 px-2">
+          {bucketize(items, Date.now()).map(({ bucket, items: rows }) => (
+            <section key={bucket.id} aria-label={bucket.label}>
+              <h3 className="px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wide text-foreground/70">
+                {bucket.label}
+              </h3>
+              <ul className="flex flex-col gap-0.5">
+                {rows.map((s) => (
+                  <li key={s.id}>
+                    <SessionListItem session={s} active={s.id === activeId} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
       ) : (
         <ul className="flex flex-col gap-0.5 px-2">

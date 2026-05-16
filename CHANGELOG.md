@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a5] — 2026-05-16
+
+### Added — UX overhaul (Round 1)
+
+After the 0.1.0a4 audit shipped, a follow-up round captured 14
+screenshots across every SPA surface and ran the work back through
+the kaos-modules competitive analysis (`Harvey`, `Legora`, `Mike`,
+`Casetext`, `Lexis+ Protégé`) and a fresh web SOTA scan (`Claude`,
+`ChatGPT` Oct-2025, `Perplexity`, `Cursor`, `v0`). The findings are
+captured in `.screenshots/AUDIT.md`. This release lands the
+high-impact items that close the gap to the SOTA chat-UI baseline.
+
+- **Welcome page rebuilt as a capability grid.** Replaces the bare
+  "Welcome." heading with a 4-card grid (Search FR / Summarize
+  document / Draft or redline / Verify citation) that creates a
+  fresh session and prefills the composer in one click — the
+  dominant pattern across ChatGPT / Gemini / Cursor in 2025-2026.
+  Persona chips (research / drafting / forensics) sit below the
+  grid; picking one creates the session with that policy preset.
+  (`apps/spa/src/routes/_auth.sessions.index.tsx`)
+- **Sidebar time-bucketing.** Sessions are now grouped by
+  `last_message_at`: Today / Yesterday / Previous 7 days /
+  Previous 30 days / Older. OpenAI removed the same grouping in
+  June 2025 and faced a user revolt — the strongest signal in the
+  SOTA research. Buckets only render under the default "Last used"
+  sort; explicit user sorts ("Created", "Starred first") stay flat.
+  (`apps/spa/src/components/sessions/SessionList.tsx`)
+- **`/sessions/:id?prefill=…` route param.** Capability cards on
+  the Welcome page set it, the chat route reads it on mount and
+  clears it from the URL via `replace`, so a refresh doesn't
+  re-prefill and the URL stays scannable.
+
+### Fixed
+
+- **High: SettingsSheet hooks-order violation.** Opening the sheet
+  threw `Rendered more hooks than during the previous render`
+  because two `useMemo` calls lived below an
+  `if (!open) return null` early return. Moved the hooks above the
+  early return so they always run in the same order.
+  (`apps/spa/src/components/settings/SettingsSheet.tsx`)
+- **a11y: 4 form fields missing `id`/`name`.** Sidebar sort
+  `<select>`, composer model `<select>`, composer file `<input>`,
+  composer message `<textarea>` all had aria-labels but no
+  id/name, which Chrome flagged + which broke form-reset
+  heuristics. Added stable id/name on each.
+  (`apps/spa/src/components/sessions/SessionList.tsx`,
+  `packages/kaos-ui-react/src/chat/ModelPicker.tsx`,
+  `packages/kaos-ui-react/src/chat/Composer.tsx`)
+- **a11y: WCAG 2.5.3 Label-in-Name on the Citations header
+  button.** The accessible name was "Toggle citations panel" but
+  the visible badge text was "4". Aria-label is now
+  ``Citations (${count})`` when a count is present.
+  (`apps/spa/src/routes/_auth.sessions.$id.tsx`)
+- **a11y: 4.06:1 contrast on the sidebar session-row message-count
+  badges.** Below WCAG AA 4.5:1. Bumped from
+  `text-muted-foreground/15` / `text-muted-foreground` to
+  `text-muted-foreground/20` / `text-foreground/80`.
+  (`apps/spa/src/components/sessions/SessionListItem.tsx`)
+- **a11y: login form lacked a username field.** A `type="password"`
+  bearer field without a preceding username breaks password-manager
+  autofill and weakens screen-reader form semantics. Added a hidden
+  `autocomplete="username"` text input before the password field.
+  (`apps/spa/src/routes/login.tsx`)
+- **SEO + crawler hygiene.** Added a `<meta name="description">` to
+  `index.html`, a `public/robots.txt` that disallows all
+  (single-tenant auth-gated app), and a `public/llms.txt` that
+  declares the project shape for LLM crawlers. Lifts Lighthouse SEO
+  from 60 → 100 and Agentic-Browsing from 50 → 100.
+- **Lighthouse accessibility 96 → 100** after the contrast +
+  Label-in-Name + form-field fixes land together.
+
+### Verification
+
+- Lighthouse on the active chat surface: **Accessibility 100 / Best
+  Practices 100 / SEO 100 / Agentic-Browsing 100** — 36 audits
+  passed, 0 failed.
+- Browser console: clean across `/login`, `/sessions`, and
+  `/sessions/:id` after the fixes; no application errors, no
+  warnings, no DevTools `[issue]` lines.
+- Backend pytest: 144 passing (no regressions).
+- SPA vitest: 96 passing (no regressions).
+- Root kaos-ui pytest: 118 passing (no regressions).
+
 ## [0.1.0a4] — 2026-05-15
 
 ### Fixed — Post-0.1.0a3 audit (7 findings)
@@ -337,7 +420,8 @@ First public alpha.
   is stable for the duration of the `0.1.x` line; experimental surfaces
   live under `kaos_ui.mcp.tools` and may evolve.
 
-[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a4...HEAD
+[Unreleased]: https://github.com/273v/kaos-ui/compare/v0.1.0a5...HEAD
+[0.1.0a5]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/273v/kaos-ui/releases/tag/v0.1.0a2

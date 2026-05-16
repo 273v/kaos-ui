@@ -1,0 +1,40 @@
+# Single-User Chat
+
+> A reference SPA for `kaos-agents` showing transparent tool policy,
+> citation surfaces, and the AgenticLoop's auto-elevation behavior.
+> Single-tenant by design — bearer-token auth, no public routes.
+
+This is the example app shipped with the
+[kaos-ui](https://github.com/273v/kaos-ui) scaffolder
+(`kaos-ui new web:spa`). It demonstrates the full backend +
+frontend pattern for a `kaos-agents`-powered chat surface:
+SSE streaming, dynamic tool policy, document upload, citation
+extraction, and the four AgenticLoop events
+(`tool_policy_elevated`, `capability_requested`, `goal_checked`,
+`loop_terminated`).
+
+## Project
+
+- [README](https://github.com/273v/kaos-ui/blob/main/README.md):
+  what kaos-ui is and how to scaffold a project from it.
+- [CHANGELOG](https://github.com/273v/kaos-ui/blob/main/CHANGELOG.md):
+  release notes including the AgenticLoop wire-up.
+- [Example source](https://github.com/273v/kaos-ui/tree/main/examples/single-user-chat):
+  the backend + SPA this app is built from.
+
+## Architecture
+
+- Backend: FastAPI on `kaos-agents` 0.1.0a4 (AgenticLoop) + `kaos-core`
+  VFS, with httpx-proxied streaming to the kaos-agents `/v1/sessions/*`
+  API. Bearer auth, single-tenant.
+- Frontend: React 19 + Vite + TanStack Router + Tailwind 4, consuming
+  the [`@273v/kaos-ui-react`](https://www.npmjs.com/package/@273v/kaos-ui-react)
+  component library.
+- Streaming: SSE wire shape with 20 typed event variants (15 canonical
+  kaos-agents + 5 kaos-ui extensions).
+
+## Notes for crawlers
+
+This is an *auth-gated single-user app*, not a public service. There is
+no public content to index. The codebase is the artifact; visit the
+GitHub repo above for sources and documentation.

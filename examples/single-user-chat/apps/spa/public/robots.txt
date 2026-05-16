@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /
+
+# Single-User Chat is a private, auth-gated SPA. There is no public
+# index — every route below `/` requires a bearer token, and search
+# engines should not crawl or attempt to index it.

@@ -23,7 +23,7 @@ import {
 import { type ChatMessage, newId } from "@273v/kaos-ui-react/lib";
 import { createFileRoute } from "@tanstack/react-router";
 import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
@@ -41,6 +41,11 @@ const SearchSchema = z.object({
   debug: z
     .union([z.literal("true"), z.literal(true), z.literal("false"), z.literal(false)])
     .optional(),
+  // Prefill the composer when the route mounts. The Welcome page's
+  // capability cards land here with prefill set; the user can edit
+  // before pressing send. Cleared from URL on first read so refresh
+  // doesn't re-prefill.
+  prefill: z.string().max(4000).optional(),
 });
 
 export const Route = createFileRoute("/_auth/sessions/$id")({
@@ -101,8 +106,21 @@ function ChatDetail() {
   const citations = useCitations(id, stream.state.messages);
 
   const search = Route.useSearch();
+  const navigateRoute = Route.useNavigate();
   const debugDefault = search.debug === "true" || search.debug === true;
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(search.prefill ?? "");
+
+  // Clear the prefill param from the URL on first mount so refresh
+  // doesn't re-prefill (and so the URL stays scannable).
+  useEffect(() => {
+    if (search.prefill) {
+      void navigateRoute({
+        search: (prev) => ({ ...prev, prefill: undefined }),
+        replace: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
@@ -248,7 +266,15 @@ function ChatDetail() {
               (citationsOpen ? "bg-muted text-foreground" : "")
             }
             title={citations.total > 0 ? `${citations.total} citations` : "Citations"}
-            aria-label="Toggle citations panel"
+            // Accessible name MUST include the visible badge text
+            // (WCAG 2.5.3 Label in Name) — Lighthouse flagged this
+            // when the count badge "4" appeared but the aria-label
+            // didn't reference it.
+            aria-label={
+              citations.total > 0
+                ? `Citations (${citations.total})`
+                : "Citations"
+            }
             aria-pressed={citationsOpen}
           >
             <Quote className="h-3.5 w-3.5" />

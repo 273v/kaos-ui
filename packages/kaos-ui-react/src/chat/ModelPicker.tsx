@@ -47,6 +47,8 @@ export function ModelPicker({
       <span className="font-medium">{current?.label ?? value}</span>
       <ChevronDown className="h-3 w-3 text-muted-foreground" />
       <select
+        id="composer-model"
+        name="composer-model"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}

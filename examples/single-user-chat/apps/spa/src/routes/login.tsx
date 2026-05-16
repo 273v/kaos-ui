@@ -81,12 +81,33 @@ function LoginRoute() {
             mutation.mutate(token);
           }}
         >
+          {/*
+            Chrome / password managers expect a username field to
+            associate with the password — without one, autofill
+            misfires + screen readers lose the implicit "credentials
+            form" semantics. We have no real username (the bearer is
+            its own credential), so use a single-value hidden text
+            input that resolves uniformly across managers.
+          */}
+          <input
+            type="text"
+            id="kaos-login-username"
+            name="username"
+            autoComplete="username"
+            value="kaos"
+            readOnly
+            hidden
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+
           <div>
             <label htmlFor="token" className="block text-xs font-medium mb-2">
               Bearer token
             </label>
             <Input
               id="token"
+              name="token"
               type="password"
               autoComplete="current-password"
               autoFocus
