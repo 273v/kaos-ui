@@ -77,9 +77,30 @@ export function Message({
   // Slightly more vertical room per turn — 24px above / 24px below
   // beats the previous 16/16 for a reading-flow feel without
   // burning vertical real-estate on short replies.
+  //
+  // Subtle role-differentiated chrome (kaos-ui 0.1.0a8):
+  //   - User turns get a soft inset card — `bg-muted/40` tint,
+  //     rounded, with a hairline border and a faint shadow. Reads
+  //     as "the question I asked," visually elevated off the page.
+  //   - Assistant turns stay flat — the agent IS the page speaking.
+  //     A 2px accent-tinted left border ties the answer back to
+  //     the system voice without making it a heavy card.
+  //   - Tool / error turns keep their existing destructive accent.
+  //
+  // Aimed at the ChatGPT / Claude reading rhythm: question floats,
+  // answer flows. Tokens chosen from the existing theme so dark
+  // mode and high-contrast users inherit consistent behavior.
+  const articleClass = isError
+    ? "py-6 border-l-2 border-destructive pl-4"
+    : isUser
+      ? "my-3 rounded-lg border border-border/60 bg-muted/40 px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+      : isAssistant
+        ? "py-6 pl-4 border-l-2 border-accent/30"
+        : "py-6";
+
   return (
     <article
-      className={`py-6 ${isError ? "border-l-2 border-destructive pl-4" : ""}`}
+      className={articleClass}
       aria-label={`${roleLabel} message`}
     >
       <header className="mb-2">
@@ -89,7 +110,7 @@ export function Message({
             (isError
               ? "text-destructive"
               : isUser
-                ? "text-foreground/60"
+                ? "text-foreground/55"
                 : "text-foreground/70")
           }
         >
