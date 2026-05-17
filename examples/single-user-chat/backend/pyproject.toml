@@ -29,21 +29,34 @@ dependencies = [
     # this floor. 0.1.0a8 (2026-05-17) adds the Windows VFS session-
     # id path-encoding fix (PR #32) — irrelevant for the SPA's
     # Linux/macOS surface but kept in scope so CI parity with the
-    # kaos-agents Windows job holds.
-    "kaos-agents>=0.1.0a8,<0.2",
+    # kaos-agents Windows job holds. 0.1.0a9 (2026-05-17) bundles
+    # five wishlist PRs: DEEPEN dead-code removal (#34), LLM-based
+    # plan-execute synthesis (#35), Span(JUDGE)+Span(ROUTE)
+    # observability events (#36), confidence-gated soft-miss CONTINUE
+    # (#37 — judge's matched=False with low confidence no longer
+    # kills plans), and conditional plan steps via Step.abort_if /
+    # Step.pivot_to (#38). Combined, these are the closing pieces of
+    # the R1-REAL v2 matrix recovery — plan-execute now surfaces
+    # fluent narratives instead of JSON dumps, doesn't bail on fussy
+    # judge verdicts, and emits live span events for the SPA run
+    # inspector to render judge/route decisions.
+    "kaos-agents>=0.1.0a9,<0.2",
     "kaos-core>=0.1.0a7,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
-    # NOT transitive from kaos-agents — declare explicitly.
-    "kaos-llm-core>=0.1.0a9,<0.2",
-    "kaos-llm-client>=0.1.0a3,<0.2",
+    # NOT transitive from kaos-agents — declare explicitly. 2026-05-17:
+    # bumped kaos-llm-core floor to 0.1.0a12 (3 minor releases ahead of
+    # 0.1.0a9 — picks up the cumulative Call/ReAct/grounding fixes
+    # those releases shipped) and kaos-llm-client floor to 0.1.0a4.
+    "kaos-llm-core>=0.1.0a12,<0.2",
+    "kaos-llm-client>=0.1.0a4,<0.2",
     # Optional content/extraction tools — only invoked when a session
     # has tools_enabled=True. kaos_ui.agents.build_chat_runtime
     # registers these conditionally via contextlib.suppress(ImportError).
-    "kaos-content[markdown]>=0.1.0a7,<0.2",
+    "kaos-content[markdown]>=0.1.0a8,<0.2",
     "kaos-pdf>=0.1.0a4,<0.2",
     "kaos-office>=0.1.0a4,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
-    "kaos-citations>=0.1.0a2,<0.2",
+    "kaos-citations>=0.1.0a3,<0.2",
     # P2-1b: source discovery + materialization. Federal Register / eCFR /
     # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
     # parsers. 30 tools; offline parsers carry tags=["forensics"] for
@@ -55,7 +68,7 @@ dependencies = [
     "kaos-web>=0.1.0a4,<0.2",
     # P2-1d: kaos-nlp-core content_type classifier — magic-byte
     # detection feeds the AgenticLoop's corpus_kinds Signature input.
-    "kaos-nlp-core>=0.1.0a7,<0.2",
+    "kaos-nlp-core>=0.1.0a8,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",
