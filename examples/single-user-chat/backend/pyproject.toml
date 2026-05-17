@@ -21,7 +21,16 @@ dependencies = [
     # 0.1.0a5 (2026-05-16) drops the ChatCodec override in
     # BaseAgent._simple_respond — fixes the `[/response]` /
     # `</response>` scratchpad-tag leak users saw on Haiku 4.5.
-    "kaos-agents>=0.1.0a5,<0.2",
+    # 0.1.0a7 (2026-05-17) ships the plan-execute partial-findings
+    # synthesis branch (PR #28), the working decompose replan loop
+    # (PR #30), and the IntentSignature corpus_attached signal
+    # (PR #29). The SPA's UX-C2 multi-turn corpus regression and the
+    # long-horizon plan "stopped: needs_replan" UX gap both close at
+    # this floor. 0.1.0a8 (2026-05-17) adds the Windows VFS session-
+    # id path-encoding fix (PR #32) — irrelevant for the SPA's
+    # Linux/macOS surface but kept in scope so CI parity with the
+    # kaos-agents Windows job holds.
+    "kaos-agents>=0.1.0a8,<0.2",
     "kaos-core>=0.1.0a7,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
     # NOT transitive from kaos-agents — declare explicitly.
@@ -73,20 +82,13 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
-# All kaos-* deps resolve to PyPI as of 2026-05-16. The previous
-# kaos-ui local-path override was dropped after kaos-ui 0.1.0a2 + the
-# AgenticLoop wire-up (kaos-agents 0.1.0a4) shipped.
-#
-# Temporary git pin (2026-05-16): tracking the
-# `feat/signature-evals-thin-prompt` branch on kaos-agents so the
-# planner + critic Signatures carry the M2 docstring rules
-# (corpus-attached lookup-beyond-corpus + confident-hallucination /
-# clarification-when-docs-attached shortcuts) ahead of the upstream
-# merge of PR #25 (gated on @jillbomm two-owner CODEOWNERS review).
-# Once #25 merges and a kaos-agents 0.1.0a6+ release is cut, drop
-# this `tool.uv.sources` block and re-run `uv lock`.
+# kaos-agents now resolves to its 0.1.0a8 PyPI wheel (2026-05-17 —
+# the prior `feat/signature-evals-thin-prompt` branch override that
+# carried the M2 docstring rules ahead of merge has been dropped now
+# that PR #25 (and the 0.1.0a6 release that bundled it) shipped, and
+# 0.1.0a7 + 0.1.0a8 add the SPA-relevant synthesis branch / replan
+# loop / corpus_attached signal / Windows VFS fix on top.
 [tool.uv.sources]
-kaos-agents = { git = "https://github.com/273v/kaos-agents.git", branch = "feat/signature-evals-thin-prompt" }
 # Local editable install for kaos-ui so changes to
 # `kaos_ui.agents.augment_instructions` (system-prompt composition,
 # date preamble, search-before-answer rule) reach the running

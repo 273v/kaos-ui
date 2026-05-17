@@ -271,8 +271,8 @@ wheels = [
 
 [[package]]
 name = "kaos-agents"
-version = "0.1.0a5"
-source = { git = "https://github.com/273v/kaos-agents.git?branch=feat%2Fsignature-evals-thin-prompt#e23e62a4cdf98dfabdfd4fd45f8c65ec47e945b3" }
+version = "0.1.0a8"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-content", extra = ["html", "markdown"] },
     { name = "kaos-core" },
@@ -280,6 +280,10 @@ dependencies = [
     { name = "kaos-nlp-core" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/18/f2fe58b5f4cf289c832ca6c8d30facbd2eb6f4eb1f0dcbf365e87fe1497e/kaos_agents-0.1.0a8.tar.gz", hash = "sha256:61abe48591554b7750c7ddc0262f64831153bbab82e4c4189616a6e14b4bfce2", size = 3094046, upload-time = "2026-05-17T02:47:38.572Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/4e/dbca881e9df648e130151ac6cdfea04194ec40ef6def40001ad10c80436c/kaos_agents-0.1.0a8-py3-none-any.whl", hash = "sha256:fa302e3bd38f9b0da25fdd1dc4fdea64f53b1d4edcdd18bb1e305cccbf17b079", size = 827770, upload-time = "2026-05-17T02:47:35.899Z" },
 ]
 
 [[package]]
@@ -993,7 +997,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "kaos-agents", git = "https://github.com/273v/kaos-agents.git?branch=feat%2Fsignature-evals-thin-prompt" },
+    { name = "kaos-agents", specifier = ">=0.1.0a8,<0.2" },
     { name = "kaos-citations", specifier = ">=0.1.0a2,<0.2" },
     { name = "kaos-content", extras = ["markdown"], specifier = ">=0.1.0a7,<0.2" },
     { name = "kaos-core", specifier = ">=0.1.0a7,<0.2" },
