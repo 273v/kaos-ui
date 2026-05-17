@@ -171,10 +171,89 @@ describe("event-handler — wire-event coverage", () => {
     expect(next).toBeDefined();
   });
 
-  it("plan_proposed adds a warn banner", () => {
-    const next = applyEvent(initialState, { type: "plan_proposed" });
-    expect(next.banners).toHaveLength(1);
-    expect(next.banners[0]?.kind).toBe("warn");
+  it("plan_proposed populates the current assistant message's plan field", () => {
+    // VIS-3: previously this event rendered a grey "we don't render plans
+    // yet" banner. Now it patches `message.plan` so the inline PlanCard
+    // can render.
+    const { state, assistantId } = seedWithPlaceholder();
+    const next = applyEvent(state, {
+      type: "plan_proposed",
+      strategy: "decompose",
+      steps: [
+        { step_id: "s1", description: "Search Federal Register", tool_name: "fr-search" },
+        { step_id: "s2", description: "Fetch full text", tool_name: "fr-get-content" },
+      ],
+    });
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.plan).toBeDefined();
+    expect(msg?.plan?.strategy).toBe("decompose");
+    expect(msg?.plan?.steps).toHaveLength(2);
+    expect(msg?.plan?.steps[0]?.status).toBe("waiting");
+    expect(msg?.plan?.steps[0]?.description).toBe("Search Federal Register");
+    expect(msg?.plan?.steps[0]?.tool_name).toBe("fr-search");
+    // No banner is emitted anymore — the plan is the visible artifact.
+    expect(next.banners).toHaveLength(0);
+  });
+
+  it("Span(step,start) flips the matching plan step to running", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const withPlan = applyEvent(state, {
+      type: "plan_proposed",
+      strategy: "direct",
+      steps: [
+        { step_id: "s1", description: "Step one" },
+        { step_id: "s2", description: "Step two" },
+      ],
+    });
+    const next = applyEvent(withPlan, {
+      type: "span",
+      subject: "step",
+      phase: "start",
+      span_id: "sp-1",
+      attributes: { step_id: "s2", step_index: 2 },
+    } as unknown as Parameters<typeof applyEvent>[1]);
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.plan?.steps[0]?.status).toBe("waiting");
+    expect(msg?.plan?.steps[1]?.status).toBe("running");
+  });
+
+  it("Span(step,complete) flips the matching plan step to done with result preview", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const withPlan = applyEvent(state, {
+      type: "plan_proposed",
+      strategy: "direct",
+      steps: [{ step_id: "s1", description: "Step one" }],
+    });
+    const next = applyEvent(withPlan, {
+      type: "span",
+      subject: "step",
+      phase: "complete",
+      span_id: "sp-1",
+      attributes: { step_id: "s1", result_preview: "found 3 results" },
+    } as unknown as Parameters<typeof applyEvent>[1]);
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.plan?.steps[0]?.status).toBe("done");
+    expect(msg?.plan?.steps[0]?.result_preview).toBe("found 3 results");
+  });
+
+  it("Span(step,error) flips the matching plan step to error", () => {
+    const { state, assistantId } = seedWithPlaceholder();
+    const withPlan = applyEvent(state, {
+      type: "plan_proposed",
+      strategy: "direct",
+      steps: [{ step_id: "s1", description: "Step one" }],
+    });
+    const next = applyEvent(withPlan, {
+      type: "span",
+      subject: "step",
+      phase: "error",
+      span_id: "sp-1",
+      error_message: "tool refused",
+      attributes: { step_id: "s1" },
+    } as unknown as Parameters<typeof applyEvent>[1]);
+    const msg = next.messages.find((m: ChatMessage) => m.id === assistantId);
+    expect(msg?.plan?.steps[0]?.status).toBe("error");
+    expect(msg?.plan?.steps[0]?.result_preview).toBe("tool refused");
   });
 
   it("citation_found returns state without throwing", () => {

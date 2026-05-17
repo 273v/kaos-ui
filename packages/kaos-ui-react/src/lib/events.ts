@@ -44,9 +44,26 @@ export interface IntentClassifiedEvent {
   confidence?: number;
   reasoning?: string;
 }
+/**
+ * A single proposed plan step.
+ *
+ * Mirrors :class:`kaos_agents.events.plan.PlanStepSummary` — the
+ * compact form that ships on ``PlanProposed``. The richer per-step
+ * status (`waiting`/`running`/`done`/`error`) is tracked by the
+ * client from ``Span(STEP, ...)`` events; the wire shape itself only
+ * provides ``step_id`` + ``description`` + optional ``tool_name``.
+ */
+export interface PlanStepSummary {
+  step_id: string;
+  description: string;
+  tool_name?: string | null;
+}
+
 export interface PlanProposedEvent {
   type: "plan_proposed";
-  steps?: unknown[];
+  steps?: PlanStepSummary[];
+  /** "direct" | "decompose" | "rolling" | "adaptive" */
+  strategy?: string;
 }
 export interface CitationFoundEvent {
   type: "citation_found";

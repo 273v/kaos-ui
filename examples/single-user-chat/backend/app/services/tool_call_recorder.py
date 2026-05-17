@@ -26,6 +26,7 @@ asks it to flush to a path.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -163,6 +164,88 @@ class TurnToolCallRecorder:
 def turn_sidecar_path(session_id: str, turn_index: int) -> str:
     """VFS path for the per-turn tool-call sidecar."""
     return f"sessions/{session_id}/toolcalls/turn-{turn_index:04d}.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# Fallback parser — used when the sidecar is missing or empty for a turn.
+#
+# kaos-agents serializes SessionMemory.ACTIONS items as flattened content
+# strings via /v1/sessions/{id}/memory/actions: the rich tool_execution
+# metadata on disk (tool_name, args, result_summary, duration_ms, is_error,
+# cost_usd) is collapsed into a single one-line summary that looks like:
+#
+#   Tool: kaos-source-fr-search(()) → Found 38 Federal Register documents...
+#
+# (followed by an optional JSON-blob body separated by `\n\n`).
+#
+# The sidecar writer (TurnToolCallRecorder) is the preferred source — it
+# captures structured fields off the live SSE stream. But if the stream
+# dies before any tool_call_summary event flushes (client disconnects,
+# StreamingResponse cancels, recorder.observe never runs), the sidecar
+# is empty and chips disappear from the reloaded transcript even though
+# the agent persisted real tool calls.
+#
+# As a backstop, the /messages handler re-reads memory/actions and parses
+# the content strings into ToolCallRecord rows. The reconstructed records
+# carry tool_name + result_preview but not args_preview (the API drops
+# args). That's "enough so the user knows tools ran" — the long-term fix
+# is for kaos-agents to expose the structured tool_execution metadata
+# via the memory API (filed for a future release).
+# ---------------------------------------------------------------------------
+
+
+_TOOL_CONTENT_RE = re.compile(
+    r"^Tool:\s*(?P<name>[\w.\-:]+)\s*\(.*?\)\s*→\s*(?P<summary>.+)", re.DOTALL
+)
+
+
+def parse_action_content(content: str) -> ToolCallRecord | None:
+    """Parse one memory/actions content string back into a ToolCallRecord.
+
+    The kaos-agents API renders ACTIONS items as
+    ``Tool: <name>(<args>) → <summary>[\\n\\n<body>]`` — see the comment
+    above for context. Returns ``None`` when the content doesn't match
+    (e.g., a non-tool action, an empty string, or a future format).
+    """
+    if not isinstance(content, str) or not content:
+        return None
+    m = _TOOL_CONTENT_RE.match(content.strip())
+    if m is None:
+        return None
+    name = m.group("name").strip()
+    summary = m.group("summary").strip()
+    # The summary line is followed by an optional `\n\n{json}` blob. Keep
+    # the full thing as result_preview so the expander shows the agent's
+    # actual return; truncate so chip-render doesn't pull megabytes.
+    preview = summary[:2000]
+    # We don't get a stable call_id from the API. Synthesize one from the
+    # tool name + a short hash of the content so the React key stays
+    # stable across re-fetches.
+    import hashlib
+
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
+    return ToolCallRecord(
+        id=f"{name}-{digest}",
+        name=name,
+        status="done",
+        result_preview=preview,
+    )
+
+
+def parse_actions_into_records(items: list[dict[str, Any]]) -> list[ToolCallRecord]:
+    """Map a list of memory/actions items into ToolCallRecord rows.
+
+    Items that don't look like tool actions are silently skipped. Order
+    is preserved (kaos-agents newest-first → caller may want to reverse).
+    """
+    records: list[ToolCallRecord] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        record = parse_action_content(item.get("content", ""))
+        if record is not None:
+            records.append(record)
+    return records
 
 
 def serialize_records(records: list[ToolCallRecord]) -> bytes:
