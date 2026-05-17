@@ -6,6 +6,72 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] — 2026-05-17
+
+### Added
+
+- **`ArtifactCard` rendered inside `<ToolCallBlock>` whenever the
+  tool's `structured_content` carries an `artifact_id`.** This is
+  Stage C of the cross-package
+  `no-hardcoded-caps-and-artifact-first-tool-results` plan in the
+  kaos-modules monorepo. Replaces the previous behavior where
+  artifact-emitting tools (`kaos-source-fr-get-content`,
+  `kaos-source-ecfr-content`, `kaos-source-fetch-url`,
+  `kaos-web-crawl-site`, `kaos-web-batch-fetch`) rendered a truncated
+  text snippet — now they show a proper file card:
+
+  - File-type icon (`<FileJson>`, `<FileCode>`, `<FileText>`,
+    `<ImageIcon>`, `<FileIcon>`) picked from `mime_type`.
+  - Manifest `name` (with title fallback) as the primary line.
+  - MIME-type chip + human-readable size (`formatBytes`) + an
+    `· artifact` tag in the metadata line so the card is recognizable
+    at a glance.
+  - Clickable `source_uri` link when the tool populated it (e.g. the
+    Federal Register `doc.html_url` or the reconstructed eCFR
+    versioner URL) — user can cross-check against the upstream
+    document.
+  - Copy-to-clipboard for the `kaos://artifacts/{id}/body` URI so
+    power users can dereference via MCP `resources/read`.
+
+  Triggers on a tiny `isArtifactRecord()` heuristic: the first
+  parsed record carries a non-empty `artifact_id` string. Works
+  uniformly across every artifact-emitting tool — new tools shipping
+  the artifact-first shape don't need a per-tool formatter entry.
+
+### Why
+
+Stages A+B of the cross-package plan landed the artifact-first
+contract end-to-end:
+
+- kaos-core 0.1.0a8: `ArtifactStore.create_from_bytes` +
+  `ArtifactManifest.source_uri` + `KaosCoreArtifactSettings`
+  (env-overridable tiers).
+- kaos-source 0.1.0a7: FR `get-content` + eCFR `content` migrated
+  off the `max_chars=50_000` truncation block.
+- kaos-web 0.1.0a5: crawl + batch-fetch dropped the silent
+  `[:5000]` truncation in the no-runtime-context fallback.
+- kaos-agents 0.1.0a12: promoted the three remaining LLM-context
+  caps to `KaosAgentSettings` (env-overridable).
+
+Without this card the user only saw a smaller blob of recovered
+JSON; the SPA had no way to surface "we materialised the full
+Reg S-P body, here's a 107 KB text/html artifact you can read."
+This card is the user-visible payoff of the plan.
+
+### Files touched
+
+- `src/chat/ToolCallBlock.tsx` — added `ArtifactCard` component +
+  `isArtifactRecord` predicate + `formatBytes` helper +
+  `pickArtifactIcon` helper. `StructuredResultBody` short-circuits
+  to the card when the first record looks like an artifact.
+
+### Test plan
+
+- [x] `tsc --noEmit` — passes
+- [x] `tsup` build (esm + cjs + dts) — passes
+- [ ] Browser test against the live SPA backend wired to the
+      updated kaos-source / kaos-web / kaos-agents on PyPI
+
 ## [0.1.0-alpha.1] — 2026-05-15
 
 ### Fixed

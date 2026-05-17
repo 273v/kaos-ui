@@ -24,6 +24,11 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  FileCode,
+  File as FileIcon,
+  FileJson,
+  FileText,
+  Image as ImageIcon,
   Loader2,
   X,
 } from "lucide-react";
@@ -32,7 +37,7 @@ import { useEffect, useState } from "react";
 import type { ToolCallSummary } from "../lib/chat-state.js";
 import { copyToClipboard } from "../lib/copy-to-clipboard.js";
 import { JsonView } from "./JsonView.js";
-import { formatToolCall, repairAndParseJson, type FormattedToolCall } from "./tool-formatters.js";
+import { type FormattedToolCall, formatToolCall, repairAndParseJson } from "./tool-formatters.js";
 
 interface Props {
   call: ToolCallSummary;
@@ -156,6 +161,120 @@ function FrDocCard({ record }: { record: Record<string, unknown> }) {
   );
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function pickArtifactIcon(mime: string | undefined) {
+  if (!mime) return FileIcon;
+  if (mime.startsWith("image/")) return ImageIcon;
+  if (mime === "application/json" || mime === "application/x-ndjson") return FileJson;
+  if (mime === "application/xml" || mime === "text/html") return FileCode;
+  if (mime.startsWith("text/")) return FileText;
+  return FileIcon;
+}
+
+/**
+ * Artifact card — rendered when a tool's structured_content carries an
+ * ``artifact_id`` (Stage A+B of the no-hardcoded-caps-and-artifact-first-
+ * tool-results plan). Replaces the previous behavior where artifact-
+ * returning tools (Federal Register get-content, eCFR content, web
+ * crawl, fetch-url) showed a truncated text snippet.
+ *
+ * Rendering priority:
+ * 1. Manifest name + size + MIME chip (always shown).
+ * 2. Originating ``source_uri`` (e.g. ``https://www.federalregister.gov/...``)
+ *    as a clickable "view source" link when present — the user can
+ *    cross-check against the upstream document.
+ * 3. ``artifact_id`` in monospace + copy-to-clipboard for power users.
+ * 4. ``body_uri`` (the ``kaos://artifacts/{id}/body`` resource) shown
+ *    raw for power users who want to dereference via MCP
+ *    ``resources/read``.
+ */
+function ArtifactCard({ record }: { record: Record<string, unknown> }) {
+  const artifactId = (record.artifact_id as string | undefined) ?? "";
+  const bodyUri = (record.body_uri as string | undefined) ?? "";
+  const mimeType = (record.mime_type as string | undefined) ?? undefined;
+  const size = (record.size as number | undefined) ?? 0;
+  const sourceUri =
+    (record.source_uri as string | undefined) ?? (record.source_url as string | undefined) ?? "";
+  // Best-effort name: name → title → derive from source uri → artifact id tail
+  const name =
+    (record.name as string | undefined) ??
+    (record.title as string | undefined) ??
+    (sourceUri ? (sourceUri.split("/").filter(Boolean).pop() ?? "") : "") ??
+    artifactId.slice(0, 8);
+  const Icon = pickArtifactIcon(mimeType);
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="rounded-md border border-border bg-background px-3 py-2 text-xs">
+      <div className="flex items-start gap-2">
+        <Icon className="h-5 w-5 mt-0.5 shrink-0 text-muted-foreground" />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-[13px] leading-snug break-words">{name}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+            {mimeType && (
+              <span className="inline-flex items-center rounded-sm bg-muted px-1 py-0.5 font-mono">
+                {mimeType}
+              </span>
+            )}
+            {size > 0 && <span>· {formatBytes(size)}</span>}
+            <span className="font-mono">· artifact</span>
+          </div>
+          {sourceUri && (
+            <a
+              href={sourceUri}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground break-all"
+              onClick={(e) => e.stopPropagation()}
+              title="Open the originating source in a new tab"
+            >
+              <ExternalLink className="h-3 w-3 shrink-0" />
+              <span>{sourceUri}</span>
+            </a>
+          )}
+          {artifactId && (
+            <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground/80">
+              <span className="font-mono break-all">{artifactId}</span>
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const ok = await copyToClipboard(bodyUri || artifactId);
+                  setCopied(ok);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+                className="uppercase tracking-wider hover:text-foreground inline-flex items-center gap-1"
+                title="Copy kaos:// body URI"
+              >
+                <Copy className="h-2.5 w-2.5" />
+                {copied ? "copied" : "copy uri"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Heuristic: does the record carry the artifact-first contract that
+ * the kaos-core artifact tier system (Stage A, 0.1.0a8) emits? When
+ * present, every other rendering path is overridden — the artifact is
+ * the canonical answer.
+ */
+function isArtifactRecord(record: Record<string, unknown> | undefined): boolean {
+  if (!record) return false;
+  const id = record.artifact_id;
+  return typeof id === "string" && id.length > 0;
+}
+
 function FetchUrlCard({ record }: { record: Record<string, unknown> }) {
   const url = (record.url as string | undefined) ?? "";
   return url ? (
@@ -195,6 +314,17 @@ function StructuredResultBody({
 }) {
   const { result_kind, result_records, result_lead } = presentation;
   if (result_records.length === 0) return null;
+  // Stage C (no-hardcoded-caps-and-artifact-first-tool-results plan):
+  // when the tool's structured_content carries an artifact_id, the
+  // artifact is the canonical answer — render the file card instead
+  // of whatever tool-specific shape would otherwise apply. Works for
+  // every artifact-emitting tool: kaos-source-fr-get-content (B2),
+  // kaos-source-ecfr-content (B2), kaos-source-fetch-url, kaos-web
+  // crawl + batch-fetch (B3), etc.
+  const first = result_records[0];
+  if (first && isArtifactRecord(first)) {
+    return <ArtifactCard record={first} />;
+  }
   if (result_kind === "fr_search") {
     const shown = Math.min(result_records.length, 6);
     const found = extractFoundCount(result_lead);
@@ -215,10 +345,9 @@ function StructuredResultBody({
         )}
         {missingFromDisplay > 0 && (
           <div className="text-[10px] text-muted-foreground italic">
-            Showing {shown} of {found} results — the agent saw all {found},
-            but kaos-agents caps the wire preview at ~200 chars so only the
-            first {result_records.length} reconstructed here. The agent's
-            answer still drew on the full set.
+            Showing {shown} of {found} results — the agent saw all {found}, but kaos-agents caps the
+            wire preview at ~200 chars so only the first {result_records.length} reconstructed here.
+            The agent's answer still drew on the full set.
           </div>
         )}
       </div>
@@ -244,9 +373,7 @@ function StructuredResultBody({
       return false;
     }
   })();
-  return (
-    <JsonView value={result_records[0]} maxHeight={240} truncated={!rawRoundTrips} />
-  );
+  return <JsonView value={result_records[0]} maxHeight={240} truncated={!rawRoundTrips} />;
 }
 
 export function ToolCallBlock({ call, defaultOpen = false }: Props) {
@@ -339,11 +466,10 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
               </div>
               {presentation.result_raw_json && (
                 <p className="mt-1 text-[10px] text-muted-foreground italic">
-                  The agent's tool returned a longer payload, but kaos-agents
-                  truncated the wire preview at ~200 chars and the remaining
-                  fragment didn't contain a parseable record. Use{" "}
-                  <span className="underline">show raw</span> for the bytes
-                  that did arrive, or copy the call JSON.
+                  The agent's tool returned a longer payload, but kaos-agents truncated the wire
+                  preview at ~200 chars and the remaining fragment didn't contain a parseable
+                  record. Use <span className="underline">show raw</span> for the bytes that did
+                  arrive, or copy the call JSON.
                 </p>
               )}
             </div>
