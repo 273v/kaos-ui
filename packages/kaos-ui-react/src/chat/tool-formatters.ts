@@ -139,6 +139,158 @@ function safeJsonParse<T = unknown>(raw: string | undefined): T | null {
 }
 
 /**
+ * Repair-and-parse: returns whatever fields can be recovered from a
+ * truncated JSON blob.
+ *
+ * kaos-agents truncates wire `result_summary` at ~200 chars, which
+ * usually lands inside a string value of the FIRST inner record. The
+ * naive `JSON.parse` refuses the whole payload, so the user sees raw
+ * text where they should see structured fields.
+ *
+ * Strategy: walk the input tracking depth + string state. Each time
+ * we cross a structural boundary at the right depth — a closing brace
+ * or a comma after a value — we record the position as "safe to
+ * truncate at". When we reach EOF (or a partial string we can't close)
+ * we truncate at the last safe boundary, drop a trailing comma if any,
+ * append closing braces to match the still-open structures, and parse.
+ *
+ * Example: a 200-char truncation of
+ *   ``{"results": [{"document_number": "2024-30494", "title": "EDGAR
+ *     Filer Access...", "type": "Rule", "publication_date""``
+ * is repaired to
+ *   ``{"results": [{"document_number": "2024-30494", "title": "EDGAR
+ *     Filer Access...", "type": "Rule"}]}``
+ * and parses cleanly — the user sees 3 fields of the first record
+ * instead of an unparseable blob.
+ */
+export function repairAndParseJson<T = unknown>(raw: string | undefined): T | null {
+  if (!raw) return null;
+  // Fast path: parse as-is.
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    /* fall through to repair */
+  }
+
+  // Walk the string, find the last position we can safely truncate at.
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastSafePos = -1;
+  // Track the opening character of each level so we know how to close.
+  const opens: string[] = [];
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+        // Don't mark lastSafePos here — a closed string could be a
+        // KEY (`"foo":`) with no value yet, which won't parse with
+        // appended closers. Only the structural tokens below — `,`,
+        // `}`, `]`, numbers, and true/false/null — are
+        // unambiguously "this value is complete" boundaries.
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      opens.push(ch);
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      opens.pop();
+      depth--;
+      // After a balanced close, the position right after it is
+      // unambiguously safe.
+      lastSafePos = i + 1;
+    } else if (ch === "," && depth > 0) {
+      // After a comma at depth >= 1, the position is safe — we
+      // can drop the comma and any partial field that follows.
+      lastSafePos = i;
+    } else if ((ch === "t" || ch === "f" || ch === "n") && depth > 0) {
+      // true / false / null literals — best-effort detection.
+      // Find the end of the literal.
+      const literals = { t: "true", f: "false", n: "null" } as const;
+      const word = literals[ch as keyof typeof literals];
+      if (raw.slice(i, i + word.length) === word) {
+        // After consuming, position is safe.
+        lastSafePos = i + word.length;
+        i += word.length - 1;
+      }
+    } else if (/[0-9-]/.test(ch as string) && depth > 0) {
+      // Number literal. Consume digits / decimal / exponent.
+      let j = i;
+      while (j < raw.length && /[0-9eE+.\-]/.test(raw[j] as string)) {
+        j++;
+      }
+      lastSafePos = j;
+      i = j - 1;
+    }
+  }
+
+  if (lastSafePos <= 0 || opens.length === 0) return null;
+
+  // Build the repaired candidate.
+  let candidate = raw.slice(0, lastSafePos).trimEnd();
+  if (candidate.endsWith(",")) {
+    candidate = candidate.slice(0, -1).trimEnd();
+  }
+  // Re-balance: walk the candidate to figure out which structures
+  // remain open, then append matching closers in reverse order.
+  const stillOpen: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (const c of candidate) {
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (inStr) {
+      if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") stillOpen.push("}");
+    else if (c === "[") stillOpen.push("]");
+    else if (c === "}" || c === "]") stillOpen.pop();
+  }
+  if (inStr) {
+    // We're inside a string at the end of the candidate. Drop the
+    // trailing open quote + everything between it and the previous
+    // boundary. We can detect this by walking back to the last comma
+    // / open-brace / open-bracket and truncating there.
+    let cutoff = -1;
+    for (let i = candidate.length - 1; i >= 0; i--) {
+      const c = candidate[i];
+      if (c === "," || c === "{" || c === "[") {
+        cutoff = i + (c === "," ? 0 : 1);
+        break;
+      }
+    }
+    if (cutoff <= 0) return null;
+    candidate = candidate.slice(0, cutoff).trimEnd();
+    if (candidate.endsWith(",")) candidate = candidate.slice(0, -1).trimEnd();
+  }
+  candidate = candidate + stillOpen.reverse().join("");
+
+  try {
+    return JSON.parse(candidate) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Walk a string and yield every balanced top-level ``{…}`` object that
  * parses as JSON. Used to recover an array of records from a truncated
  * `{"results": [{...}, {...}, {...}]` blob — `JSON.parse` would refuse
@@ -211,7 +363,7 @@ function formatFrSearch(
   // result_preview at ~200 chars, which usually slices the trailing
   // record mid-string — we still want to surface the records that
   // DID make it through intact.
-  const parsed = safeJsonParse<FrSearchResult>(raw);
+  const parsed = safeJsonParse<FrSearchResult>(raw) ?? repairAndParseJson<FrSearchResult>(raw);
   let records: Record<string, unknown>[] = Array.isArray(parsed?.results)
     ? (parsed.results as Record<string, unknown>[])
     : [];
@@ -291,7 +443,11 @@ function formatGeneric(
   lead: string,
   raw: string | undefined,
 ): { args: string; summary: string; records: Record<string, unknown>[] } {
-  const parsed = safeJsonParse<Record<string, unknown>>(raw) ?? extractBalancedObjects<Record<string, unknown>>(raw ?? "")[0] ?? null;
+  const parsed =
+    safeJsonParse<Record<string, unknown>>(raw) ??
+    repairAndParseJson<Record<string, unknown>>(raw) ??
+    extractBalancedObjects<Record<string, unknown>>(raw ?? "")[0] ??
+    null;
   return {
     args: "",
     // Empty when there's literally nothing — that's the signal for the

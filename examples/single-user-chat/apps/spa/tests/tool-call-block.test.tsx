@@ -76,7 +76,8 @@ describe("<ToolCallBlock>", () => {
 
   it("offers a copy-json affordance", () => {
     render(<ToolCallBlock call={makeCall()} defaultOpen />);
-    expect(screen.getByRole("button", { name: /copy json/i })).toBeInTheDocument();
+    // aria-label is "Copy raw call JSON"; visible text is "copy json".
+    expect(screen.getByRole("button", { name: /copy raw call json/i })).toBeInTheDocument();
   });
 
   it("expands when the header is clicked", () => {
