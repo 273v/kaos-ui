@@ -174,16 +174,35 @@ function FetchUrlCard({ record }: { record: Record<string, unknown> }) {
   ) : null;
 }
 
+/**
+ * Parse the tool's own "Found N documents" lead-in to figure out
+ * how many records the agent actually saw, vs the count the SPA was
+ * able to reconstruct from the wire preview. When the agent saw
+ * more than we recovered, we tell the user that's a *display* gap
+ * (kaos-agents wire cap), not a *search* gap.
+ */
+function extractFoundCount(lead: string): number | null {
+  const m = lead.match(/Found\s+(\d+)/i);
+  if (!m) return null;
+  const n = Number.parseInt(m[1] ?? "", 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function StructuredResultBody({
   presentation,
-  wasTruncated,
 }: {
   presentation: FormattedToolCall;
-  wasTruncated: boolean;
 }) {
-  const { result_kind, result_records } = presentation;
+  const { result_kind, result_records, result_lead } = presentation;
   if (result_records.length === 0) return null;
   if (result_kind === "fr_search") {
+    const shown = Math.min(result_records.length, 6);
+    const found = extractFoundCount(result_lead);
+    // How many records the agent actually saw but we couldn't render
+    // (because kaos-agents capped the wire preview at ~200 chars and
+    // we could only reconstruct N of them).
+    const missingFromDisplay =
+      found != null && found > result_records.length ? found - result_records.length : 0;
     return (
       <div className="space-y-1">
         {result_records.slice(0, 6).map((r, i) => (
@@ -191,13 +210,15 @@ function StructuredResultBody({
         ))}
         {result_records.length > 6 && (
           <div className="text-[10px] text-muted-foreground italic">
-            …and {result_records.length - 6} more
+            …and {result_records.length - 6} more recovered records below
           </div>
         )}
-        {wasTruncated && (
+        {missingFromDisplay > 0 && (
           <div className="text-[10px] text-muted-foreground italic">
-            kaos-agents truncated the wire preview — additional records may
-            exist but didn't make it to the SPA.
+            Showing {shown} of {found} results — the agent saw all {found},
+            but kaos-agents caps the wire preview at ~200 chars so only the
+            first {result_records.length} reconstructed here. The agent's
+            answer still drew on the full set.
           </div>
         )}
       </div>
@@ -211,8 +232,21 @@ function StructuredResultBody({
   }
   // Unknown structured payload — render as JsonView. The presentation
   // has at least one record we recovered, so this is the partial /
-  // generic JSON case.
-  return <JsonView value={result_records[0]} maxHeight={240} truncated={wasTruncated} />;
+  // generic JSON case. We mark `truncated` based on whether the raw
+  // wire JSON would round-trip cleanly; if not, the JsonView is
+  // showing a *repair* and the user should know.
+  const rawRoundTrips = (() => {
+    if (!presentation.result_raw_json) return true;
+    try {
+      JSON.parse(presentation.result_raw_json);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  return (
+    <JsonView value={result_records[0]} maxHeight={240} truncated={!rawRoundTrips} />
+  );
 }
 
 export function ToolCallBlock({ call, defaultOpen = false }: Props) {
@@ -224,20 +258,6 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
 
   const presentation = formatToolCall(call);
   const { label, args_summary, result_summary } = presentation;
-  // Was the wire JSON unparseable as a whole? If so the structured
-  // view is showing a *partial* repair and we should annotate that.
-  const wasTruncated =
-    !!presentation.result_raw_json &&
-    presentation.result_records.length > 0 &&
-    (() => {
-      try {
-        JSON.parse(presentation.result_raw_json!);
-        return false;
-      } catch {
-        return true;
-      }
-    })();
-
   // Pretty-printed args from JSON, when parseable. Falls back to the
   // raw string in `<pre>` only when it isn't JSON.
   const parsedArgs = call.args_preview
@@ -306,7 +326,7 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                 result
               </div>
-              <StructuredResultBody presentation={presentation} wasTruncated={wasTruncated} />
+              <StructuredResultBody presentation={presentation} />
             </div>
           )}
           {!showRaw && presentation.result_records.length === 0 && presentation.result_lead && (
