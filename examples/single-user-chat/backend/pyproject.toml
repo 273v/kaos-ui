@@ -40,7 +40,16 @@ dependencies = [
     # fluent narratives instead of JSON dumps, doesn't bail on fussy
     # judge verdicts, and emits live span events for the SPA run
     # inspector to render judge/route decisions.
-    "kaos-agents>=0.1.0a9,<0.2",
+    # 2026-05-17: bumped to 0.1.0a11 — picks up Improvement #1
+    # (PatternMismatch event delivery fix). 0.1.0a10 shipped the
+    # dispatch redirect (ChatAgent + PLAN intent → real ReAct + tools
+    # instead of fabricated training-data answer) but its diagnostic
+    # PatternMismatch typed event was never yielded to SSE consumers
+    # because emitter.emit() pushed to a collector but the dispatcher
+    # discarded the return. 0.1.0a11 returns (handler, event) from
+    # _detect_pattern_mismatch and yields the event explicitly. SPA
+    # run inspector can now show the redirect.
+    "kaos-agents>=0.1.0a11,<0.2",
     "kaos-core>=0.1.0a7,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
     # NOT transitive from kaos-agents — declare explicitly. 2026-05-17:

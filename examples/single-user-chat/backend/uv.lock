@@ -271,7 +271,7 @@ wheels = [
 
 [[package]]
 name = "kaos-agents"
-version = "0.1.0a9"
+version = "0.1.0a11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-content", extra = ["html", "markdown"] },
@@ -281,9 +281,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a3/20/05c11ee66bd312a76410fd36232c7fc1bd0b158b39bc787e92dc026d9905/kaos_agents-0.1.0a9.tar.gz", hash = "sha256:62a63df113801563fd67a0d59ef239a2f5f1475ee6157a803aeeeea9ded65e57", size = 3114771, upload-time = "2026-05-17T04:10:12.247Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/d0/010283a9843b206f183541382c6f8525e36d2065b540065c0b94c9613bbe/kaos_agents-0.1.0a11.tar.gz", hash = "sha256:cfd300185dc53a1d14c6d9bdd5b6aae7a18565be1eda50a5510642b037c819b6", size = 3124844, upload-time = "2026-05-17T13:17:15.66Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/b1/0d463b405e5fbcb7dc5aabec821a2133c4364f8679a8348e297294830637/kaos_agents-0.1.0a9-py3-none-any.whl", hash = "sha256:7d311af1d40b1e2bf385d5c3865c07d5d84a01bb17acee65e1f9e0f568ec6fdc", size = 840565, upload-time = "2026-05-17T04:10:09.885Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/9f/a6a96bb842e5d2bd564f757c9f093d084650a25d64266b749ff6e68941f7/kaos_agents-0.1.0a11-py3-none-any.whl", hash = "sha256:f74030ba0e047554584d9f26fb5abd45642bfabdb502f5a1f625d9443e587046", size = 843814, upload-time = "2026-05-17T13:17:13.232Z" },
 ]
 
 [[package]]
@@ -997,7 +997,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "kaos-agents", specifier = ">=0.1.0a9,<0.2" },
+    { name = "kaos-agents", specifier = ">=0.1.0a11,<0.2" },
     { name = "kaos-citations", specifier = ">=0.1.0a3,<0.2" },
     { name = "kaos-content", extras = ["markdown"], specifier = ">=0.1.0a8,<0.2" },
     { name = "kaos-core", specifier = ">=0.1.0a7,<0.2" },
