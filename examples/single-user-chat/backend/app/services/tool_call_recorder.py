@@ -51,6 +51,13 @@ class ToolCallRecord(BaseModel):
     status: ToolCallStatus
     args_preview: str | None = None
     result_preview: str | None = None
+    structured_content: dict[str, Any] | None = None
+    """Full tool ``ToolResult.structuredContent`` dict (Stage C of the
+    no-hardcoded-caps-and-artifact-first-tool-results plan). Carries
+    ``artifact_id`` / ``body_uri`` / ``source_uri`` / ``size`` /
+    ``mime_type`` for artifact-emitting tools so the SPA's ArtifactCard
+    can render the file inline. ``None`` for tools that don't ship
+    structured output."""
 
 
 class TurnToolCallRecorder:
@@ -104,17 +111,27 @@ class TurnToolCallRecorder:
             result_preview = attrs.get("result_summary") or attrs.get("result")
             if not isinstance(result_preview, str):
                 result_preview = None
+            raw_structured = attrs.get("structured_content")
+            structured_content = (
+                raw_structured if isinstance(raw_structured, dict) else None
+            )
             updates: dict[str, Any] = {
                 "name": tool_name,
                 "status": status,
             }
             if result_preview is not None:
                 updates["result_preview"] = result_preview
+            if structured_content is not None:
+                updates["structured_content"] = structured_content
             self._by_id[call_id] = (
                 existing.model_copy(update=updates)
                 if existing is not None
                 else ToolCallRecord(
-                    id=call_id, name=tool_name, status=status, result_preview=result_preview
+                    id=call_id,
+                    name=tool_name,
+                    status=status,
+                    result_preview=result_preview,
+                    structured_content=structured_content,
                 )
             )
         elif phase == "error":

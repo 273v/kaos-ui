@@ -153,6 +153,11 @@ function applySpan(state: TranscriptState, ev: SpanEvent): TranscriptState {
       };
     }
     if (phase === "complete") {
+      const rawStructured = ev.attributes?.structured_content;
+      const structured_content =
+        rawStructured && typeof rawStructured === "object" && !Array.isArray(rawStructured)
+          ? (rawStructured as Record<string, unknown>)
+          : undefined;
       return {
         ...state,
         messages: appendToolCall(state.messages, {
@@ -160,8 +165,10 @@ function applySpan(state: TranscriptState, ev: SpanEvent): TranscriptState {
           name: toolName,
           status: "done",
           result_preview:
+            (ev.attributes?.result_summary as string | undefined) ??
             (ev.attributes?.result_preview as string | undefined) ??
             (ev.attributes?.result as string | undefined),
+          structured_content,
         }),
       };
     }
