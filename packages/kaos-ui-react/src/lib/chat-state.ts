@@ -96,6 +96,35 @@ export interface CapabilityRequestSnapshot {
   previous_allowed: string[];
 }
 
+/**
+ * One step within a per-turn plan snapshot.
+ *
+ * Sourced from :class:`kaos_agents.events.plan.PlanStepSummary` (via
+ * the wire ``plan_proposed`` event) plus per-step ``Span(STEP, ...)``
+ * lifecycle updates. The `status` reflects whichever phase we last
+ * saw — the dispatcher emits start → complete / error, and the
+ * planner may emit `running` while a step's tool call is in flight.
+ */
+export interface PlanStep {
+  step_id: string;
+  description: string;
+  tool_name?: string | null;
+  status: "waiting" | "running" | "done" | "error";
+  /** Optional 1-line summary of the step result (post-completion). */
+  result_preview?: string;
+}
+
+/**
+ * Per-turn plan snapshot. Populated on `plan_proposed` and updated
+ * by `Span(STEP, ...)` lifecycle events. Persisted via the per-turn
+ * plan sidecar so reloaded sessions still show the plan.
+ */
+export interface PlanSnapshot {
+  /** "direct" | "decompose" | "rolling" | "adaptive" (kaos-agents 0.1.0a1+). */
+  strategy: string;
+  steps: PlanStep[];
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -121,6 +150,15 @@ export interface ChatMessage {
   latency_ms?: number;
   /** Inline tool-call cards rendered inside the assistant message. */
   tool_calls?: ToolCallSummary[];
+  /**
+   * The plan the planner proposed for this turn, plus per-step
+   * lifecycle status. Populated on `plan_proposed`; per-step status
+   * is updated by `Span(STEP, ...)` events as the executor runs.
+   * Renders as an inline plan card so the user can see (a) what the
+   * agent decided to do, (b) which steps are running / done / failed,
+   * (c) which tools each step is calling.
+   */
+  plan?: PlanSnapshot;
   /**
    * Per-turn tool-policy decision the planner made for this turn.
    * Optional — set only when the backend emits `tool_policy_decided`

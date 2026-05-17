@@ -6,6 +6,7 @@ export type { ComposerProps } from "./Composer.js";
 export { Message } from "./Message.js";
 export { TurnStatus } from "./TurnStatus.js";
 export { ToolCallBlock } from "./ToolCallBlock.js";
+export { PlanCard } from "./PlanCard.js";
 export { UsageChip } from "./UsageChip.js";
 export { DropZone } from "./DropZone.js";
 export { FileChips } from "./FileChips.js";

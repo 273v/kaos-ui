@@ -657,36 +657,101 @@ async def get_history(
     # Hydrate per-turn tool_calls from the sidecars we wrote during chat.
     # The N-th assistant message in chronological order corresponds to
     # toolcalls/turn-{N:04d}.jsonl. Pre-existing sessions (created before
-    # this feature shipped) have no sidecars — assistant messages without
-    # a matching file just get an empty tool_calls list.
+    # this feature shipped) — or any turn whose SSE stream client
+    # disconnected before the sidecar flush — have an empty/missing
+    # sidecar. For those, we fall back to deriving tool_calls from
+    # kaos-agents' memory/actions endpoint. The fallback loses
+    # args_preview (the API drops structured args) but at minimum tells
+    # the user *which* tools ran with what result — the difference
+    # between "I see 0 chips and assume the agent did nothing" and "I
+    # see 9 chips telling me kaos-source-fr-search ran six times".
     runtime = getattr(request.app.state, "kaos_runtime", None)
     if runtime is not None:
         from app.models import HistoryToolCall
-        from app.services.tool_call_recorder import parse_records_jsonl, turn_sidecar_path
+        from app.services.tool_call_recorder import (
+            parse_actions_into_records,
+            parse_records_jsonl,
+            turn_sidecar_path,
+        )
 
-        assistant_index = 0
-        for msg in parsed:
-            if msg.role != "assistant":
-                continue
-            path = turn_sidecar_path(session_id, assistant_index)
-            assistant_index += 1
+        assistant_msgs = [m for m in parsed if m.role == "assistant"]
+        assistant_indices: dict[int, int] = {id(m): i for i, m in enumerate(assistant_msgs)}
+
+        # Per-message sidecar hydration first (the rich path — has args).
+        msgs_needing_fallback: list[HistoryMessage] = []
+        for msg in assistant_msgs:
+            path = turn_sidecar_path(session_id, assistant_indices[id(msg)])
             try:
                 blob = await runtime.vfs.read(path)
+                records = parse_records_jsonl(blob)
             except Exception:
-                # Missing sidecar (pre-existing turn or VFS miss) is the
-                # common case — no logging.
-                continue
-            records = parse_records_jsonl(blob)
-            msg.tool_calls = [
-                HistoryToolCall(
-                    id=r.id,
-                    name=r.name,
-                    status=r.status,
-                    args_preview=r.args_preview,
-                    result_preview=r.result_preview,
+                records = []
+            if records:
+                msg.tool_calls = [
+                    HistoryToolCall(
+                        id=r.id,
+                        name=r.name,
+                        status=r.status,
+                        args_preview=r.args_preview,
+                        result_preview=r.result_preview,
+                    )
+                    for r in records
+                ]
+            else:
+                msgs_needing_fallback.append(msg)
+
+        # Fallback: pull memory/actions once, partition by assistant
+        # message timestamp, attach. We accept the cost of one extra
+        # round-trip per /messages call ONLY when at least one assistant
+        # turn is missing its sidecar.
+        if msgs_needing_fallback:
+            try:
+                actions_resp = await upstream.get(
+                    f"/v1/sessions/{session_id}/memory/actions",
+                    headers={"Authorization": f"Bearer {bearer}"},
                 )
-                for r in records
-            ]
+                actions_resp.raise_for_status()
+                actions_items = list(actions_resp.json().get("items", []))
+            except Exception:
+                actions_items = []
+
+            if actions_items:
+                # kaos-agents returns newest-first; reverse to match
+                # message chronology so the per-turn partition works.
+                actions_items.reverse()
+                # For each missing-sidecar assistant message, take the
+                # slice of actions whose added_at falls in this message's
+                # turn window. Turn window = (prev assistant ts, this
+                # assistant ts]; for the first assistant message, lower
+                # bound is 0. This is best-effort — action timestamps
+                # land between user-send and assistant-finish, both of
+                # which are bracketed by the assistant message's own
+                # added_at. It's good enough for single-turn sessions
+                # (the common case where this fallback fires) and
+                # degrades gracefully for multi-turn.
+                prev_ts = 0.0
+                for msg in assistant_msgs:
+                    window = [
+                        a
+                        for a in actions_items
+                        if prev_ts < float(a.get("added_at", 0.0)) <= msg.added_at + 1.0
+                    ]
+                    prev_ts = msg.added_at
+                    if msg not in msgs_needing_fallback:
+                        continue
+                    records = parse_actions_into_records(window)
+                    if not records:
+                        continue
+                    msg.tool_calls = [
+                        HistoryToolCall(
+                            id=r.id,
+                            name=r.name,
+                            status=r.status,
+                            args_preview=r.args_preview,
+                            result_preview=r.result_preview,
+                        )
+                        for r in records
+                    ]
 
     return HistoryResponse(
         session_id=session_id,

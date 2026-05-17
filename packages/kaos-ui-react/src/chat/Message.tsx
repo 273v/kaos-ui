@@ -21,6 +21,7 @@ import { ElevationPill } from "./ElevationPill.js";
 import { GoalCheckBadge } from "./GoalCheckBadge.js";
 import { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
 import { ReasoningSummary } from "./ReasoningSummary.js";
+import { PlanCard } from "./PlanCard.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
 import { ToolPolicyBadge } from "./ToolPolicyBadge.js";
 import { UsageChip } from "./UsageChip.js";
@@ -174,6 +175,19 @@ export function Message({
           </span>
         )}
       </div>
+
+      {message.plan && message.plan.steps.length > 0 && (
+        <div className="mt-3">
+          <PlanCard
+            plan={message.plan}
+            defaultOpen={
+              verboseTools ||
+              message.streaming ||
+              message.plan.steps.some((s) => s.status === "error" || s.status === "running")
+            }
+          />
+        </div>
+      )}
 
       {message.tool_calls && message.tool_calls.length > 0 && (
         <div className="mt-3 space-y-2">

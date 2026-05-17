@@ -153,3 +153,58 @@ def test_turn_sidecar_path_is_zero_padded() -> None:
     assert turn_sidecar_path("S1", 0) == "sessions/S1/toolcalls/turn-0000.jsonl"
     assert turn_sidecar_path("S1", 42) == "sessions/S1/toolcalls/turn-0042.jsonl"
     assert turn_sidecar_path("S1", 12345) == "sessions/S1/toolcalls/turn-12345.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# Fallback parser tests — VIS-2 (kaos-modules/docs/plans/...).
+# ---------------------------------------------------------------------------
+
+
+def test_parse_action_content_extracts_tool_name_and_summary() -> None:
+    from app.services.tool_call_recorder import parse_action_content
+
+    content = (
+        "Tool: kaos-source-fr-search(()) → Found 38 Federal Register document(s), "
+        'showing 20 (page 1 of 2) {"results": [{"document_number": "2025-18321"}]}'
+    )
+    rec = parse_action_content(content)
+    assert rec is not None
+    assert rec.name == "kaos-source-fr-search"
+    assert rec.status == "done"
+    assert "Found 38 Federal Register" in (rec.result_preview or "")
+    # No args available from memory/actions — fallback is name + preview only.
+    assert rec.args_preview is None
+
+
+def test_parse_action_content_returns_none_for_non_tool() -> None:
+    from app.services.tool_call_recorder import parse_action_content
+
+    assert parse_action_content("") is None
+    assert parse_action_content("not a tool line") is None
+    assert parse_action_content("system: hello") is None
+
+
+def test_parse_action_content_stable_id() -> None:
+    from app.services.tool_call_recorder import parse_action_content
+
+    content = "Tool: kaos-source-fr-search(()) → ok"
+    r1 = parse_action_content(content)
+    r2 = parse_action_content(content)
+    assert r1 is not None and r2 is not None
+    # Same input → same synthesized id, so React key stays stable across
+    # re-fetches.
+    assert r1.id == r2.id
+    assert r1.id.startswith("kaos-source-fr-search-")
+
+
+def test_parse_actions_into_records_skips_non_tool_items() -> None:
+    from app.services.tool_call_recorder import parse_actions_into_records
+
+    items = [
+        {"content": "Tool: tool-a(()) → ok", "added_at": 1.0},
+        {"content": "some non-tool log line", "added_at": 2.0},
+        {"content": "Tool: tool-b(()) → done", "added_at": 3.0},
+        {"content": "", "added_at": 4.0},
+    ]
+    recs = parse_actions_into_records(items)
+    assert [r.name for r in recs] == ["tool-a", "tool-b"]

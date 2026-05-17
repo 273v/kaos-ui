@@ -8,7 +8,13 @@
  * time so consumers are forced to handle it.
  */
 
-import type { ChatMessage, ToolCallSummary, TurnStatusKind } from "./chat-state.js";
+import type {
+  ChatMessage,
+  PlanSnapshot,
+  PlanStep,
+  ToolCallSummary,
+  TurnStatusKind,
+} from "./chat-state.js";
 import { newId } from "./chat-state.js";
 import type { KaosAgentEvent, SpanEvent } from "./events.js";
 import { stripScratchpadTags } from "./text-strip.js";
@@ -62,6 +68,26 @@ function appendToolCall(messages: ChatMessage[], tc: ToolCallSummary): ChatMessa
   });
 }
 
+/**
+ * Patch one plan step's status. Used by `Span(step, ...)` event
+ * handlers so the user sees per-step progress in the plan card.
+ * No-op when there's no current plan or no matching step_id.
+ */
+function patchPlanStep(
+  messages: ChatMessage[],
+  stepId: string,
+  updates: Partial<PlanStep>,
+): ChatMessage[] {
+  const target = currentAssistant(messages);
+  if (!target || !target.plan) return messages;
+  const newSteps = target.plan.steps.map((s) =>
+    s.step_id === stepId ? { ...s, ...updates } : s,
+  );
+  return messages.map((m) =>
+    m.id === target.id && m.plan ? { ...m, plan: { ...m.plan, steps: newSteps } } : m,
+  );
+}
+
 function applySpan(state: TranscriptState, ev: SpanEvent): TranscriptState {
   const subject = ev.subject;
   const phase = ev.phase;
@@ -79,10 +105,35 @@ function applySpan(state: TranscriptState, ev: SpanEvent): TranscriptState {
   }
 
   if (subject === "step") {
+    const stepIndex =
+      typeof ev.attributes?.step_index === "number" ? (ev.attributes.step_index as number) : 1;
+    const stepId = ev.attributes?.step_id as string | undefined;
     if (phase === "start") {
-      const stepIndex =
-        typeof ev.attributes?.step_index === "number" ? (ev.attributes.step_index as number) : 1;
-      return { ...state, status: { kind: "step", index: stepIndex } };
+      const messages = stepId
+        ? patchPlanStep(state.messages, stepId, { status: "running" })
+        : state.messages;
+      return { ...state, status: { kind: "step", index: stepIndex }, messages };
+    }
+    if (phase === "complete" && stepId) {
+      const result =
+        (ev.attributes?.result_preview as string | undefined) ??
+        (ev.attributes?.result_summary as string | undefined);
+      return {
+        ...state,
+        messages: patchPlanStep(state.messages, stepId, {
+          status: "done",
+          result_preview: result,
+        }),
+      };
+    }
+    if (phase === "error" && stepId) {
+      return {
+        ...state,
+        messages: patchPlanStep(state.messages, stepId, {
+          status: "error",
+          result_preview: ev.error_message ?? "step failed",
+        }),
+      };
     }
     return state;
   }
@@ -199,18 +250,28 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
     }
 
     case "plan_proposed": {
-      // CHAT pattern won't fire this in v1, but we still wire it: render
-      // a banner so the dev knows it happened.
+      // PlanExecute / Research patterns emit this. Render as an inline
+      // plan card on the current assistant message so the user sees
+      // what the agent is about to do — and per-step Span(step, ...)
+      // events will fill in `running` / `done` / `error` status as
+      // execution progresses. CHAT pattern doesn't normally emit
+      // this; if it does (the 0.1.0a10 PatternMismatch redirect
+      // doesn't, only PlanExecuteAgent does), we still render it.
+      const target = currentAssistant(state.messages);
+      if (!target) return state;
+      const planSteps: PlanStep[] = (event.steps ?? []).map((s) => ({
+        step_id: s.step_id,
+        description: s.description,
+        tool_name: s.tool_name ?? undefined,
+        status: "waiting",
+      }));
+      const plan: PlanSnapshot = {
+        strategy: event.strategy ?? "direct",
+        steps: planSteps,
+      };
       return {
         ...state,
-        banners: [
-          ...state.banners,
-          {
-            id: newId(),
-            kind: "warn",
-            text: "Plan proposed (PlanExecute / Research pattern). The chat pattern doesn't display the plan inline yet.",
-          },
-        ],
+        messages: patchAssistant(state.messages, { plan }),
       };
     }
 
