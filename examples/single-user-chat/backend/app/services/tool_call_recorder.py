@@ -123,7 +123,7 @@ class TurnToolCallRecorder:
             self._by_id[call_id] = (
                 existing.model_copy(update=updates)
                 if existing is not None
-                else ToolCallRecord(id=call_id, **updates)  # type: ignore[arg-type]
+                else ToolCallRecord(id=call_id, **updates)  # ty: ignore[invalid-argument-type]
             )
 
     def _observe_args_delta(self, payload: Any) -> None:
