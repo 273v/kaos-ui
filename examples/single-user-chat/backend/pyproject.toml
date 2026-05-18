@@ -49,8 +49,18 @@ dependencies = [
     # discarded the return. 0.1.0a11 returns (handler, event) from
     # _detect_pattern_mismatch and yields the event explicitly. SPA
     # run inspector can now show the redirect.
-    "kaos-agents>=0.1.0a11,<0.2",
-    "kaos-core>=0.1.0a7,<0.2",
+    # 2026-05-17 (E2E goal): bumped to 0.1.0a12 — Stage B4 (partial)
+    # of the no-hardcoded-caps-and-artifact-first-tool-results plan.
+    # Promotes result_summary_max_chars / eval_result_max_chars /
+    # rerank_passage_max_chars to env-overridable KaosAgentSettings
+    # fields (KAOS_AGENT_*). No behavior change at default values.
+    "kaos-agents>=0.1.0a12,<0.2",
+    # 2026-05-17 (Stage A): bumped to 0.1.0a8 — adds
+    # ArtifactStore.create_from_bytes + ArtifactManifest.source_uri +
+    # KaosCoreArtifactSettings (env-overridable tier thresholds via
+    # KAOS_CORE_ARTIFACT_INLINE_THRESHOLD / _SUMMARY_THRESHOLD).
+    # Required for Stage C ArtifactCard rendering to receive source_uri.
+    "kaos-core>=0.1.0a8,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
     # NOT transitive from kaos-agents — declare explicitly. 2026-05-17:
     # bumped kaos-llm-core floor to 0.1.0a12 (3 minor releases ahead of
@@ -70,11 +80,17 @@ dependencies = [
     # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
     # parsers. 30 tools; offline parsers carry tags=["forensics"] for
     # the SessionPolicy derivation.
-    "kaos-source>=0.1.0a6,<0.2",
+    # 2026-05-17 (Stage B2): bumped to 0.1.0a7 — FRGetContent + ECFRContent
+    # migrated off max_chars=50_000 truncation to ArtifactStore.create_from_bytes.
+    # Full bodies now addressable via structured_content.artifact_id.
+    "kaos-source>=0.1.0a7,<0.2",
     # P2-1c: web fetch + browser (Playwright) + netinfra (DNS / WHOIS /
     # TLS / TCP / UDP). 45 tools; browser tagged ["browser"], netinfra
     # tagged ["netinfra"] for the SessionPolicy derivation.
-    "kaos-web>=0.1.0a4,<0.2",
+    # 2026-05-17 (Stage B3): bumped to 0.1.0a5 — crawl_tools fallback no
+    # longer silently truncates at 5000 chars; full body returned (or
+    # routed via artifact tier when runtime context available).
+    "kaos-web>=0.1.0a5,<0.2",
     # P2-1d: kaos-nlp-core content_type classifier — magic-byte
     # detection feeds the AgenticLoop's corpus_kinds Signature input.
     "kaos-nlp-core>=0.1.0a8,<0.2",

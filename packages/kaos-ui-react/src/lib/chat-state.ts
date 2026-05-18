@@ -14,6 +14,16 @@ export interface ToolCallSummary {
   status: "running" | "done" | "error";
   args_preview?: string;
   result_preview?: string;
+  /**
+   * Full ``ToolResult.structuredContent`` dict for artifact-emitting
+   * tools (Stage C of the no-hardcoded-caps-and-artifact-first-tool-
+   * results plan). Carries ``artifact_id`` / ``body_uri`` /
+   * ``source_uri`` / ``size`` / ``mime_type`` so ``<ArtifactCard>``
+   * can render the file inline without parsing the (truncated)
+   * ``result_preview`` string. ``null`` / ``undefined`` for tools
+   * that don't ship structured output.
+   */
+  structured_content?: Record<string, unknown> | null;
 }
 
 /**

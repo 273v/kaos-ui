@@ -434,6 +434,22 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
       </button>
       {open && (
         <div className="px-3 py-2 text-xs space-y-2 border-t border-border/70">
+          {/*
+            Stage C — when the wire delivered ``structured_content`` with
+            an ``artifact_id`` the artifact IS the canonical answer.
+            Render the file card immediately, ahead of every other
+            tool-specific shape, so the user always sees the materialised
+            artifact instead of an empty body when the wire's
+            ``result_preview`` text was truncated.
+          */}
+          {call.structured_content && isArtifactRecord(call.structured_content) && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                artifact
+              </div>
+              <ArtifactCard record={call.structured_content} />
+            </div>
+          )}
           {call.args_preview && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">

@@ -11,7 +11,7 @@ See docs/ARCHITECTURE.md § 3.3 for the design.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
@@ -668,6 +668,12 @@ class HistoryToolCall(BaseModel):
     status: Literal["running", "done", "error"]
     args_preview: str | None = None
     result_preview: str | None = None
+    structured_content: dict[str, Any] | None = None
+    """Full ``ToolResult.structuredContent`` dict — carries
+    ``artifact_id`` / ``body_uri`` / ``source_uri`` / ``size`` /
+    ``mime_type`` for artifact-emitting tools (Stage C of the
+    no-hardcoded-caps-and-artifact-first-tool-results plan). The SPA's
+    ArtifactCard renders the file inline when this is populated."""
 
 
 class HistoryMessage(BaseModel):
