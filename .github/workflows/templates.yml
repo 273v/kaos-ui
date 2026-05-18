@@ -1,0 +1,55 @@
+name: templates
+
+# kaos-ui-specific scheduled lane (per
+# kaos-modules/docs/oss/40-ci-cd/runner-cost-reduction-plan.md):
+# the per-template scaffold-and-boot matrix is heavy (pnpm install +
+# uv sync × 6 templates) so it sits off the PR critical path. Runs
+# weekly, on manual dispatch, on release tags, and on PRs that
+# explicitly carry the `templates` label.
+
+on:
+  schedule:
+    - cron: "31 5 * * 1"  # Mondays at 05:31 UTC
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: templates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  templates-smoke:
+    name: Per-template smoke
+    runs-on: ubuntu-latest
+    # On PR, only when the `templates` label is present. Schedule /
+    # dispatch / tag triggers run unconditionally.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'templates')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Run per-template smoke matrix
+        run: uv run pytest tests/integration/ -v -m "" --no-cov
