@@ -112,9 +112,7 @@ class TurnToolCallRecorder:
             if not isinstance(result_preview, str):
                 result_preview = None
             raw_structured = attrs.get("structured_content")
-            structured_content = (
-                raw_structured if isinstance(raw_structured, dict) else None
-            )
+            structured_content = raw_structured if isinstance(raw_structured, dict) else None
             updates: dict[str, Any] = {
                 "name": tool_name,
                 "status": status,
