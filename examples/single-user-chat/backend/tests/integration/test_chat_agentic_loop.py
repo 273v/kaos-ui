@@ -225,6 +225,12 @@ def test_message_count_increments_on_successful_turn(
     before = client.get(f"/v1/chat/sessions/{sid}/meta").json()
     assert before["message_count"] == 0
 
+    # The message-count touch + heuristic-title patch run in a
+    # Starlette :class:`BackgroundTask` attached to the SSE response,
+    # so the body has to be fully consumed before the framework
+    # invokes the task. ``client.post`` returns after consuming the
+    # stream, so the task IS guaranteed to run before the call
+    # returns — see persist_turn-followups.md §7 / UX-D1.
     r = client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "hi"})
     assert r.status_code == 200
 

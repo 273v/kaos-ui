@@ -88,25 +88,6 @@ async def _upstream_create_session(
 # ── routes ──────────────────────────────────────────────────────────
 
 
-def _derive_title(first_message: str, *, max_len: int = 60) -> str:
-    """Pick a short title from the first user message.
-
-    Strips whitespace, collapses runs, truncates at a word boundary so
-    we don't leave dangling characters. Falls back to "Untitled" for
-    empty / whitespace-only input.
-    """
-    text = " ".join(first_message.split())
-    if not text:
-        return "Untitled"
-    if len(text) <= max_len:
-        return text
-    # Truncate at the last space before max_len so we don't slice a word.
-    cutoff = text.rfind(" ", 0, max_len)
-    if cutoff <= 0:
-        cutoff = max_len
-    return text[:cutoff].rstrip() + "…"
-
-
 def _to_sse_event(ev: object) -> dict[str, str] | None:
     """Normalize an :func:`run_agentic_turn` yield into an SSE record.
 
@@ -428,14 +409,83 @@ async def send_message(
     # derived from the pre-stream message_count (each turn = 2
     # messages: user + assistant), which is what touch(increment=2)
     # writes into the next session state.
-    from app.services.tool_call_recorder import (
-        TurnToolCallRecorder,
-        serialize_records,
-        turn_sidecar_path,
-    )
+    from typing import Any
+    from urllib.parse import quote
+
+    from starlette.background import BackgroundTask
+
+    from app.services.persist_turn import persist_turn_completion
+    from app.services.tool_call_recorder import TurnToolCallRecorder
 
     recorder = TurnToolCallRecorder()
     turn_index = meta.message_count // 2
+
+    # Shared container for hand-off from the SSE generator to the
+    # BackgroundTask. The generator populates ``records`` in its
+    # ``finally:`` block (the only place we know streaming is done);
+    # the BackgroundTask reads them after the response body has been
+    # sent. Mutable list rather than a Future so we don't pay for
+    # cross-task synchronization on a single-producer / single-
+    # consumer hand-off.
+    persist_snapshot: dict[str, Any] = {"records": [], "captured": False}
+
+    async def _fetch_history(sid: str) -> list[HistoryMessage]:
+        r = await upstream.get(
+            f"/v1/sessions/{quote(sid)}/memory/messages",
+            headers={"Authorization": f"Bearer {bearer}"},
+        )
+        if r.status_code >= 400:
+            return []
+        raw = r.json()
+        parsed: list[HistoryMessage] = []
+        for item in raw.get("items", []):
+            content_str = item.get("content", "")
+            role: str = "assistant"
+            text: str = content_str
+            for prefix, mapped in (
+                ("user: ", "user"),
+                ("assistant: ", "assistant"),
+                ("system: ", "system"),
+            ):
+                if content_str.startswith(prefix):
+                    role = mapped
+                    text = content_str[len(prefix) :]
+                    break
+            parsed.append(
+                HistoryMessage(
+                    role=role,  # type: ignore[arg-type]
+                    content=text,
+                    added_at=float(item.get("added_at", 0.0)),
+                )
+            )
+        parsed.sort(key=lambda m: m.added_at)
+        return parsed
+
+    async def _do_persist() -> None:
+        """BackgroundTask runner — invoked AFTER the SSE response body
+        has been fully sent (Starlette's contract).
+
+        The framework guarantees this runs even when the client
+        disconnects, because the task is registered with the response
+        object rather than the request scope. That's the load-bearing
+        property the 2026-05-18 persona matrix found missing in the
+        prior finally-block implementation.
+        """
+        if not persist_snapshot["captured"]:
+            # Defensive: the generator should always populate the
+            # snapshot in its ``finally:`` block, but a synchronous
+            # exception before the first yield could skip it.
+            return
+        await persist_turn_completion(
+            store=store,
+            session_id=session_id,
+            is_first_turn=is_first_turn,
+            user_message=body.message,
+            sidecar_records=persist_snapshot["records"],
+            runtime=runtime,
+            turn_index=turn_index,
+            fetch_history=_fetch_history,
+        )
 
     async def event_generator():
         # AgenticLoop wire-up: drive plan → elevate → execute → check →
@@ -500,96 +550,29 @@ async def send_message(
                     pass
                 yield sse_event
         finally:
-            # Persist the sidecar BEFORE the title/touch work so a failure
-            # in the LLM-titler doesn't lose tool-call history.
-            if not recorder.is_empty() and runtime is not None:
-                try:
-                    blob = serialize_records(recorder.records())
-                    await runtime.vfs.write(turn_sidecar_path(session_id, turn_index), blob)
-                except Exception:
-                    logger.exception(
-                        "failed to persist tool-call sidecar session=%s turn=%d",
-                        session_id,
-                        turn_index,
-                    )
-            # Increment by 1: a turn is (user message + assistant reply),
-            # not two messages. Set title on first turn from the user
-            # input as an IMMEDIATE heuristic so the sidebar updates
-            # right away — the LLM auto-titler runs as a background
-            # task and replaces it with something better a moment
-            # later (and again every 10 turns / 24h, until the user
-            # renames manually).
-            try:
-                if is_first_turn:
-                    await store.patch(
-                        session_id,
-                        title=_derive_title(body.message),
-                        title_source="auto",
-                    )
-                await store.touch(session_id, increment_messages=2)
-            except Exception:
-                logger.exception("failed to touch session %s after stream", session_id)
-
-            # Fire-and-forget LLM-titler. We don't await this — the
-            # caller has already received the full SSE stream, and the
-            # title patch will surface on the next sidebar refresh.
-            try:
-                import asyncio
-
-                from app.services.title import maybe_retitle_session
-
-                async def _fetch_history(sid: str):
-                    from urllib.parse import quote
-
-                    r = await upstream.get(
-                        f"/v1/sessions/{quote(sid)}/memory/messages",
-                        headers={"Authorization": f"Bearer {bearer}"},
-                    )
-                    if r.status_code >= 400:
-                        return []
-                    raw = r.json()
-                    parsed: list[HistoryMessage] = []
-                    for item in raw.get("items", []):
-                        content_str = item.get("content", "")
-                        role: str = "assistant"
-                        text: str = content_str
-                        for prefix, mapped in (
-                            ("user: ", "user"),
-                            ("assistant: ", "assistant"),
-                            ("system: ", "system"),
-                        ):
-                            if content_str.startswith(prefix):
-                                role = mapped
-                                text = content_str[len(prefix) :]
-                                break
-                        parsed.append(
-                            HistoryMessage(
-                                role=role,  # type: ignore[arg-type]
-                                content=text,
-                                added_at=float(item.get("added_at", 0.0)),
-                            )
-                        )
-                    parsed.sort(key=lambda m: m.added_at)
-                    return parsed
-
-                # Fire-and-forget the auto-titler. We deliberately don't keep
-                # a reference — the task self-cancels on shutdown via the
-                # default loop policy. RUF006 is suppressed here since
-                # cancellation isn't required for correctness.
-                _ = asyncio.create_task(  # noqa: RUF006
-                    maybe_retitle_session(
-                        store=store,
-                        session_id=session_id,
-                        fetch_history=_fetch_history,
-                    )
-                )
-            except Exception:
-                logger.exception("failed to schedule auto-titler for %s", session_id)
+            # All we do here is snapshot the recorder state so the
+            # BackgroundTask attached to the response below can read
+            # records by value after streaming completes. The actual
+            # durable writes happen there, NOT here — see
+            # ``kaos-modules/docs/plans/persona-matrix-followups.md``
+            # §7 and task UX-D1 for why finally-block awaits are
+            # vulnerable to client-disconnect cancellation.
+            persist_snapshot["records"] = (
+                list(recorder.records()) if not recorder.is_empty() else []
+            )
+            persist_snapshot["captured"] = True
 
     return EventSourceResponse(
         event_generator(),
         ping=15,
         headers={"X-Accel-Buffering": "no"},
+        # Starlette runs ``_do_persist`` AFTER the response body is
+        # fully sent. The framework owns the lifetime, so a client
+        # disconnect during streaming doesn't cancel these writes —
+        # which closes the bug surfaced by the 2026-05-18 persona
+        # matrix where 8/10 sessions stuck at ``Untitled`` /
+        # ``message_count=0``.
+        background=BackgroundTask(_do_persist),
     )
 
 

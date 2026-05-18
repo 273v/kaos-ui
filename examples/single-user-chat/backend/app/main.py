@@ -27,12 +27,59 @@ import contextlib
 
 import httpx
 from kaos_agents.api.server import create_app as create_agent_app
+
+# ---------------------------------------------------------------------------
+# URI contract redesign (kaos-core 0.1.0a10) — Stage 3 wiring.
+# The SPA uploads files into ``sessions/<sid>/files/<name>``. The 0.1.0a10
+# resolver routes bare-name tool inputs through ``context.default_vfs_namespace``,
+# so every KaosContext built downstream by kaos-agents must carry "files/" for
+# the agent's bare-name lookups to land. kaos-agents 0.1.0a14 doesn't yet
+# construct a per-session KaosContext with the host's namespace (will ship in
+# 0.1.0a15+); until then we patch ``KaosContext.__init__`` to default the
+# namespace to "files/" when the caller doesn't supply one. Idempotent.
+# ---------------------------------------------------------------------------
+# kaos-agents Runner only builds a KaosContext when ``corpus`` is set; for
+# normal chat turns it passes ``context=None`` to ``bridge_runtime_tools``,
+# which means tools fall back to a runtime-less stub context with no VFS.
+# Patch the internal-agent builder to materialise a real session-scoped
+# context with ``default_vfs_namespace`` set to the SPA upload prefix so
+# file-input tools resolve bare names like ``"EMNA Mutual NDA.docx"`` to
+# the on-disk session VFS at ``sessions/<sid>/files/<name>``.
+#
+# Because the SPA runtime VFS uses GLOBAL isolation (see
+# build_chat_runtime), context_id is NOT prepended automatically — the
+# session prefix has to be in the namespace string itself.
+#
+# Will be obsolete once kaos-agents 0.1.0a15 builds the per-session
+# context natively + the SPA backend switches to PER_CONTEXT isolation.
+from kaos_agents.runtime.runner import Runner as _Runner
+from kaos_core.base.context import KaosContext as _KaosContext
 from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
 from app.routers import chat, citations, files, health, models
 from app.settings import AppSettings
+
+if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
+    _original_build_internal = _Runner._build_internal_agent
+
+    def _patched_build_internal(self, session_id, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Always construct a fresh per-session context so the namespace
+        # tracks the request's session_id. SPA uploads land at
+        # ``sessions/<sid>/files/<name>`` on disk (global-isolation VFS).
+        if self._runtime is not None:
+            namespace = f"sessions/{session_id}/files/"
+            self._context = _KaosContext(
+                session_id=session_id,
+                runtime=self._runtime,
+                vfs=self._runtime.vfs,
+                default_vfs_namespace=namespace,
+            )
+        return _original_build_internal(self, session_id, *args, **kwargs)
+
+    _Runner._build_internal_agent = _patched_build_internal  # ty: ignore[invalid-assignment]
+    _Runner._spa_context_injection_patch_applied = True  # ty: ignore[unresolved-attribute]
 
 
 def create_app(settings: AppSettings | None = None):

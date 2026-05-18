@@ -112,9 +112,7 @@ class TurnToolCallRecorder:
             if not isinstance(result_preview, str):
                 result_preview = None
             raw_structured = attrs.get("structured_content")
-            structured_content = (
-                raw_structured if isinstance(raw_structured, dict) else None
-            )
+            structured_content = raw_structured if isinstance(raw_structured, dict) else None
             updates: dict[str, Any] = {
                 "name": tool_name,
                 "status": status,
@@ -140,7 +138,7 @@ class TurnToolCallRecorder:
             self._by_id[call_id] = (
                 existing.model_copy(update=updates)
                 if existing is not None
-                else ToolCallRecord(id=call_id, **updates)  # type: ignore[arg-type]
+                else ToolCallRecord(id=call_id, **updates)  # ty: ignore[invalid-argument-type]
             )
 
     def _observe_args_delta(self, payload: Any) -> None:
