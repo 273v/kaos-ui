@@ -418,9 +418,15 @@ async def send_message(
 
     from app.services.persist_turn import persist_turn_completion
     from app.services.run_log import RunEventLog, read_active_pointer
-    from app.services.tool_call_recorder import TurnToolCallRecorder
+    from app.services.tool_call_recorder import TurnToolCallRecorder, TurnUsageRecorder
 
     recorder = TurnToolCallRecorder()
+    # #520: per-turn cost/token aggregator. Was previously not
+    # instantiated, so SessionMeta.last_turn_cost_usd / last_turn_tokens
+    # stayed at 0.0 even when the UI showed real cost via the
+    # turn_summary cost_usd field. Observe the SSE stream alongside
+    # the tool-call recorder.
+    usage_recorder = TurnUsageRecorder()
     turn_index = meta.message_count // 2
 
     # SSE resume Stage 1: refuse a second concurrent POST. If
@@ -566,6 +572,8 @@ async def send_message(
                 runtime=runtime,
                 turn_index=turn_index,
                 fetch_history=_fetch_history,
+                turn_cost_usd=float(persist_snapshot.get("turn_cost_usd") or 0.0),
+                turn_tokens=int(persist_snapshot.get("turn_tokens") or 0),
             )
         finally:
             # SSE resume Stage 1: flip the active-pointer to a terminal
@@ -683,6 +691,13 @@ async def send_message(
         # critic iterations the loop ran.
         iter_text_parts: list[str] = []
         last_iter_text: str = ""
+        # #519: tracks whether the previous turn_summary closed the
+        # stream. The NEXT text_delta after a closed stream begins a
+        # new phase (typically the AgenticLoop's refusal lead text
+        # after a terminator) and should REPLACE rather than append —
+        # mirroring the SPA event-handler's #508 logic so MEMORY
+        # persists exactly what the UI rendered.
+        streaming_closed: bool = False
         try:
             # M2 reasoning-action consistency critic — gates the
             # ``satisfied`` verdict on whether the worker's response
@@ -748,27 +763,41 @@ async def send_message(
                     except Exception:
                         pass
                 # Best-effort tap: parsing failures must not corrupt
-                # the stream. The recorder ignores events it doesn't
-                # know.
+                # the stream. Both recorders ignore events they don't
+                # know. Single try block — neither call should be able
+                # to raise, but if one does we still want the other to
+                # have a chance on subsequent events.
                 try:
                     recorder.observe(event_name, payload)
+                    usage_recorder.observe(event_name, payload)
                 except Exception:
                     pass
 
-                # Iteration-leak fix companion accumulator. Each worker
-                # iteration emits a stream of ``text_delta`` events
-                # followed by a single ``turn_summary``. Reset the
-                # per-iteration accumulator on ``turn_summary`` so the
-                # final value of ``last_iter_text`` after the loop is
-                # the LAST iteration's assistant text (the one the
-                # critic accepted — or the one we ended on if the loop
-                # terminated for budget / insufficient-evidence /
-                # max-iterations). See plan §3.1.a.
+                # Iteration-leak fix companion accumulator. Mirrors the
+                # SPA event-handler.ts state machine so MEMORY persists
+                # exactly what the UI rendered (closes #519: memory ≠ UI).
+                #
+                # Each worker iteration emits text_delta* → turn_summary.
+                # When a refusal terminator fires AFTER a successful
+                # worker iteration, it emits another text_delta +
+                # turn_summary(intent="refuse"). The UI applies #508:
+                # the post-turn-summary text_delta REPLACES (not
+                # concatenates) the previous content. We mirror that
+                # here so ``last_iter_text`` matches the UI exactly.
                 if isinstance(payload, dict):
                     ptype = payload.get("type")
                     if ptype == "text_delta":
                         content = payload.get("content")
                         if isinstance(content, str):
+                            if streaming_closed and content:
+                                # #508 mirror: the previous turn_summary
+                                # closed the stream; this delta begins
+                                # a new phase (typically the refusal
+                                # lead). REPLACE the prior text rather
+                                # than concatenate.
+                                last_iter_text = ""
+                                iter_text_parts.clear()
+                                streaming_closed = False
                             iter_text_parts.append(content)
                     elif ptype == "turn_summary":
                         candidate = "".join(iter_text_parts)
@@ -781,6 +810,10 @@ async def send_message(
                         if candidate:
                             last_iter_text = candidate
                         iter_text_parts.clear()
+                        # Mark stream-closed so the NEXT text_delta
+                        # knows it's starting a new phase and should
+                        # replace rather than append.
+                        streaming_closed = True
 
                 yield sse_event
         except Exception:
@@ -800,6 +833,12 @@ async def send_message(
             persist_snapshot["records"] = (
                 list(recorder.records()) if not recorder.is_empty() else []
             )
+            # #520: hand off the per-turn cost/token aggregate so
+            # persist_turn_completion can patch SessionMeta with the
+            # real numbers instead of the previous 0.0 defaults.
+            turn_cost_usd, turn_tokens = usage_recorder.snapshot()
+            persist_snapshot["turn_cost_usd"] = turn_cost_usd
+            persist_snapshot["turn_tokens"] = turn_tokens
             persist_snapshot["captured"] = True
 
             # Iteration-leak fix (task #458). Companion to the

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a11] — 2026-05-20
+
+The 0.1.0b1-followup patch. Fixes the two P0s surfaced during the
+0.1.0b1 Chrome MCP Stage 7 acceptance against freshly-published PyPI
+artifacts. Both are SPA-backend bugs in the chat router; the kaos-ui
+Python distribution is the host package.
+
+### Fixed — Memory ≠ UI (#519)
+
+`SessionMemory.MESSAGES` persisted the AgenticLoop's max_iterations
+refusal text while the UI displayed the worker's successful answer —
+violating the invariant that memory must match what the user saw.
+Root cause: the SPA backend's `last_iter_text` accumulator in
+`app/routers/chat.py` blindly took the last `turn_summary` event's
+text. When a refusal terminator fires *after* a successful worker
+iteration (typical max_iterations / cost_exceeded / wall_clock_exceeded
+path), the post-summary text_delta is the start of a new phase, not
+an append to the prior. The fix mirrors the SPA event-handler.ts #508
+replace-on-stream-closed logic in the backend: track `streaming_closed`
+across the event loop; when the next text_delta arrives after a
+`turn_summary`, RESET the iter accumulator + last_iter_text before
+appending. Result: persisted text exactly matches the UI's final
+rendered content.
+
+### Fixed — Cost telemetry zero in SessionMeta (#520)
+
+`/v1/chat/sessions/{id}/meta` returned `last_turn_cost_usd=0.0` and
+`last_turn_tokens=0` even when the UsageChip showed real numbers
+($0.0103 / 24.4k tokens observed during Stage 7). Root cause was
+structural: `TurnUsageRecorder` exists in
+`app/services/tool_call_recorder.py` but was never instantiated in
+`app/routers/chat.py`. Every call to `persist_turn_completion`
+defaulted `turn_cost_usd=0.0` / `turn_tokens=0`. Fix: instantiate
+`TurnUsageRecorder` alongside `TurnToolCallRecorder`, observe SSE
+events on both, snapshot to `persist_snapshot` in the finally-block,
+pass through to the BackgroundTask. The recorder prefers the
+`turn_summary` aggregate (covers Signature-level calls the SPA
+otherwise misses, per #342) and falls back to summing
+`usage_observed` events when the stream terminated early. Affects
+both `last_turn_*` and the `total_*` cumulative accumulators in
+`persist_turn.py`.
+
 ## [0.1.0a10] — 2026-05-20
 
 The "chat-stack honesty" release. Lands the P0 final-synthesis fix,
