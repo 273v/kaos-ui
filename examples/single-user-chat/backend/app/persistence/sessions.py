@@ -122,6 +122,10 @@ class SessionStore:
                 denied_tools=with_denied_floor([]),
                 persona="research",
             )
+        # P3-10: stamp the running build's identity so the SPA can
+        # badge older sessions as "predates current build."
+        from app.routers.health import current_build_sha
+
         meta = SessionMeta(
             id=sid,
             title=title,
@@ -132,6 +136,7 @@ class SessionStore:
             last_message_at=None,
             message_count=0,
             archived=False,
+            build_sha=current_build_sha(),
         )
         await self._write_meta(meta)
         return meta
@@ -175,6 +180,10 @@ class SessionStore:
                     archived=meta.archived,
                     starred=meta.starred,
                     title_source=meta.title_source,
+                    build_sha=meta.build_sha,
+                    last_turn_cost_usd=meta.last_turn_cost_usd,
+                    total_cost_usd=meta.total_cost_usd,
+                    total_tokens=meta.total_tokens,
                 )
             )
         # Newest first by activity, falling back to created_at.
@@ -208,6 +217,17 @@ class SessionStore:
         starred: bool | None = None,
         title_source: str | None = None,
         title_updated_at: datetime | None = None,
+        # P1-3 cost telemetry. ``last_turn_*`` overwrite; ``total_*``
+        # are absolute values the caller computed by reading the prior
+        # SessionMeta and adding the turn delta. Keeping the
+        # ``patch`` semantics consistent (caller provides the new
+        # value, store doesn't compute) avoids races where two
+        # concurrent turns each read the same prior total and write
+        # back independently.
+        last_turn_cost_usd: float | None = None,
+        last_turn_tokens: int | None = None,
+        total_cost_usd: float | None = None,
+        total_tokens: int | None = None,
     ) -> SessionMeta:
         meta = await self._read_meta(session_id)
         updates: dict[str, object] = {}
@@ -261,6 +281,14 @@ class SessionStore:
             updates["title_source"] = title_source
         if title_updated_at is not None:
             updates["title_updated_at"] = title_updated_at
+        if last_turn_cost_usd is not None:
+            updates["last_turn_cost_usd"] = last_turn_cost_usd
+        if last_turn_tokens is not None:
+            updates["last_turn_tokens"] = last_turn_tokens
+        if total_cost_usd is not None:
+            updates["total_cost_usd"] = total_cost_usd
+        if total_tokens is not None:
+            updates["total_tokens"] = total_tokens
         new_meta = meta.model_copy(update=updates)
         await self._write_meta(new_meta)
         return new_meta

@@ -60,6 +60,76 @@ class ToolCallRecord(BaseModel):
     structured output."""
 
 
+class TurnUsageRecorder:
+    """Stateful tap for ``usage_observed`` + ``turn_summary`` SSE events.
+
+    The kaos-agents wire stream emits one ``usage_observed`` event per
+    LLM call (planner Signature, critic Signature, worker text-gen,
+    auto-titler) plus a ``turn_summary`` at the very end carrying the
+    final aggregate. Both shapes have ``cost_usd`` and ``total_tokens``
+    fields. We prefer the ``turn_summary`` aggregate when present
+    because it includes Signature-level calls the SPA otherwise can't
+    see (per UX-A4 #342). Fall back to summing the per-call
+    ``usage_observed`` events for partial-completion paths.
+
+    Companion to :class:`TurnToolCallRecorder` — the chat router pipes
+    every SSE event into ``observe()`` for both recorders.
+    """
+
+    def __init__(self) -> None:
+        # Sum of every per-call ``usage_observed`` event seen this turn.
+        # Used as a fallback when the stream terminates before
+        # ``turn_summary`` fires (BudgetExceeded, network drop, etc.).
+        self._usage_sum_cost_usd: float = 0.0
+        self._usage_sum_input_tokens: int = 0
+        self._usage_sum_output_tokens: int = 0
+        # The final ``turn_summary`` aggregate, if it arrived. Tuple
+        # of (cost_usd, total_tokens). None until the event fires.
+        self._final_summary: tuple[float, int] | None = None
+
+    def observe(self, event_name: str, payload: Any) -> None:
+        """Inspect one SSE event and update the running totals.
+
+        Recognized event shapes (per kaos_agents wire serializers):
+        - ``turn_summary`` event: payload carries ``cost_usd`` (float)
+          and ``total_tokens`` (int).
+        - ``usage_observed`` event: payload carries ``cost_usd``,
+          ``input_tokens``, ``output_tokens``.
+        """
+        if not isinstance(payload, dict):
+            return
+        if event_name == "turn_summary":
+            cost = payload.get("cost_usd")
+            total_tokens = payload.get("total_tokens")
+            if isinstance(cost, int | float) and isinstance(total_tokens, int):
+                self._final_summary = (float(cost), int(total_tokens))
+            return
+        if event_name == "usage_observed":
+            cost = payload.get("cost_usd")
+            in_tok = payload.get("input_tokens")
+            out_tok = payload.get("output_tokens")
+            if isinstance(cost, int | float):
+                self._usage_sum_cost_usd += float(cost)
+            if isinstance(in_tok, int):
+                self._usage_sum_input_tokens += in_tok
+            if isinstance(out_tok, int):
+                self._usage_sum_output_tokens += out_tok
+
+    def snapshot(self) -> tuple[float, int]:
+        """Return ``(cost_usd, total_tokens)`` for the completed turn.
+
+        Prefers the ``turn_summary`` aggregate (covers Signature-level
+        calls the SPA otherwise misses); falls back to the sum of
+        ``usage_observed`` events when the stream ended early.
+        """
+        if self._final_summary is not None:
+            return self._final_summary
+        return (
+            self._usage_sum_cost_usd,
+            self._usage_sum_input_tokens + self._usage_sum_output_tokens,
+        )
+
+
 class TurnToolCallRecorder:
     """Stateful tap that consumes SSE events and emits ToolCallRecord rows.
 

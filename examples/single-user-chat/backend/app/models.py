@@ -351,7 +351,7 @@ class LoopTerminatedWire(BaseModel):
 class ModelEntry(BaseModel):
     """One row of the model picker catalog."""
 
-    id: str = Field(description="provider:model string, e.g. 'anthropic:claude-haiku-4-5'")
+    id: str = Field(description="provider:model string, e.g. 'anthropic:claude-opus-4-7'")
     label: str = Field(description="Human-readable name shown in the UI")
     provider: Provider
     recommended_for: str | None = None
@@ -400,6 +400,30 @@ class SessionMeta(BaseModel):
     # Wall-clock of the last auto-title generation. Used to throttle
     # re-summarization (default cadence: every 10 messages OR 24h).
     title_updated_at: datetime | None = None
+    # Cost + token telemetry. ``last_turn_cost_usd`` and
+    # ``last_turn_tokens`` reflect the most recent completed turn (set
+    # by ``persist_turn_completion`` from the captured ``turn_summary``
+    # / ``usage_observed`` SSE events). ``total_cost_usd`` and
+    # ``total_tokens`` accumulate across every turn since session
+    # creation; they're the user-facing cost-of-this-session number.
+    # Optional because pre-fix sessions were created without these
+    # fields and migrate forward as None until their next turn
+    # completes — the SPA's cost strip falls back to 0 / hidden when
+    # all four are None.
+    last_turn_cost_usd: float | None = None
+    last_turn_tokens: int | None = None
+    total_cost_usd: float | None = None
+    total_tokens: int | None = None
+    # P3-10 stale-session marker. Stamped at session-create time with
+    # the running build's identity (see
+    # ``app.routers.health.current_build_sha``). The SPA compares this
+    # to ``/v1/health.build_sha`` to badge sessions that predate the
+    # current build — useful for filtering out failure sessions from
+    # before a known fix (e.g., the 2026-05-18 wheel-cache outages
+    # documented in ``persona-matrix-followups.md`` § 13).
+    # ``None`` on sessions created before this field shipped — the
+    # SPA treats ``None`` as "pre-tracking; build identity unknown".
+    build_sha: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -502,7 +526,15 @@ class SessionMeta(BaseModel):
 
 
 class SessionSummary(BaseModel):
-    """Lightweight row used in the sidebar list."""
+    """Lightweight row used in the sidebar list.
+
+    Adds two telemetry fields beyond the strict UI row chrome:
+    ``build_sha`` lets the sidebar badge sessions created on an older
+    deployment (P3-10), and ``total_cost_usd`` lets the sidebar show
+    a per-session cost roll-up without an extra round-trip per row.
+    Both are optional; pre-fix sessions return ``None`` and the SPA
+    treats that as "unknown" rather than "zero".
+    """
 
     id: str
     title: str
@@ -513,6 +545,10 @@ class SessionSummary(BaseModel):
     archived: bool = False
     starred: bool = False
     title_source: Literal["manual", "auto"] = "auto"
+    build_sha: str | None = None
+    last_turn_cost_usd: float | None = None
+    total_cost_usd: float | None = None
+    total_tokens: int | None = None
 
 
 class SessionListResponse(BaseModel):

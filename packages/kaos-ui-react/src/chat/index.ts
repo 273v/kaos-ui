@@ -29,6 +29,21 @@ export { ReasoningSummary } from "./ReasoningSummary.js";
 export { SlashMenu } from "./SlashMenu.js";
 export type { Skill, SkillPersona, SlashMenuProps } from "./SlashMenu.js";
 
+// Chronological transcript scroll model (2026-05-19 redesign):
+// `useAutoScroll` is the FOLLOW / PAUSED / LOCKED state machine;
+// `<JumpToLatestPill>` is the floating control cluster.
+export {
+  useAutoScroll,
+  NEAR_BOTTOM_PX,
+  RESUME_FOLLOW_PX,
+} from "./use-auto-scroll.js";
+export type {
+  AutoScrollMode,
+  UseAutoScrollOptions,
+  UseAutoScrollResult,
+} from "./use-auto-scroll.js";
+export { JumpToLatestPill } from "./JumpToLatestPill.js";
+
 // Tabular primitive — used inline in transcripts (kaos-md table
 // auto-promotion) and standalone for `kaos-tabular` comparison
 // grids. Lives under `/chat` for now because that's where its

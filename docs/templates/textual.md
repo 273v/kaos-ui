@@ -66,7 +66,7 @@ class AppSettings(ModuleSettings):
     vfs_path: Path = Path.home() / ".kaos" / "{slug}" / "vfs"
 
     llm_provider: str = "anthropic"
-    llm_model: str = "claude-haiku-4-5"
+    llm_model: str = "claude-opus-4-7"
 
     # No auth_token — TUIs are single-user.
 

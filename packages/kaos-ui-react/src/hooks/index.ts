@@ -22,6 +22,9 @@ export { useCostAggregation } from "./use-cost-aggregation.js";
 
 export { useLocalStorage } from "./use-local-storage.js";
 
+export type { ActiveRunPointer } from "./use-active-run.js";
+export { useActiveRun } from "./use-active-run.js";
+
 // Re-export the transport-context reader from the lib layer so hook
 // consumers can import it from `@273v/kaos-ui-react/hooks` without
 // crossing subpath barriers.

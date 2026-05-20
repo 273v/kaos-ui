@@ -3,6 +3,7 @@ import { Archive, Check, MoreHorizontal, Pencil, Star, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useArchiveSession } from "@/hooks/use-archive-session";
+import { useHealth } from "@/hooks/use-health";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import type { SessionSummary } from "@/lib/api-types";
 
@@ -32,6 +33,18 @@ export function SessionListItem({ session, active }: Props) {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const archive = useArchiveSession();
   const patch = usePatchMeta(session.id);
+  const health = useHealth();
+
+  // P3-10 stale-session badge: the session was created on a different
+  // build than the one currently running. We only badge when BOTH
+  // SHAs are known — `build_sha === undefined/null` means the
+  // session predates P3-10 tracking and we have no signal either way.
+  const currentBuild = health.data?.build_sha;
+  const sessionBuild = session.build_sha;
+  const isStaleBuild =
+    typeof currentBuild === "string" &&
+    typeof sessionBuild === "string" &&
+    currentBuild !== sessionBuild;
 
   const commitRename = useCallback(() => {
     const trimmed = draftTitle.trim();
@@ -164,6 +177,16 @@ export function SessionListItem({ session, active }: Props) {
               title={session.title}
             >
               <span className="truncate flex-1">{session.title || "Untitled"}</span>
+              {isStaleBuild && (
+                <span
+                  role="status"
+                  aria-label="Session created on an older build"
+                  className="shrink-0 inline-flex items-center justify-center h-[18px] min-w-[2.75rem] px-1 rounded-full bg-warn/10 text-[9px] uppercase tracking-wider text-warn/80 font-medium"
+                  title={`Created on build ${sessionBuild}; current build is ${currentBuild}. Behavior may predate fixes shipped in the current build.`}
+                >
+                  older
+                </span>
+              )}
               {session.message_count > 0 && (
                 <span
                   aria-hidden="true"

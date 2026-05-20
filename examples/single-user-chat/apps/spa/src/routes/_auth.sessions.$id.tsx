@@ -15,6 +15,7 @@ import {
 } from "@273v/kaos-ui-react/chat";
 import { RunInspector } from "@273v/kaos-ui-react/debug";
 import {
+  useActiveRun,
   useBackfillFiles,
   useCitations,
   useDeleteFile,
@@ -26,7 +27,16 @@ import {
 import { type ChatMessage, newId, stripScratchpadTags } from "@273v/kaos-ui-react/lib";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bug, Download, FileText, Quote, Settings, Wrench } from "lucide-react";
+import {
+  Bug,
+  Download,
+  FileText,
+  Maximize2,
+  Minimize2,
+  Quote,
+  Settings,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { ModelPickerChip } from "@/components/settings/ModelPickerChip";
@@ -149,7 +159,16 @@ function ChatDetail() {
     }));
   }, [history.data]);
 
-  const stream = useSendMessage({ sessionId: id, initialMessages });
+  // SSE resume (Stage 1): on mount, ask the backend whether this
+  // session has an in-flight run; if so, thread the run id into
+  // useSendMessage so it opens the GET /runs/{run_id}/events stream
+  // instead of waiting for the user to send a fresh message.
+  const activeRun = useActiveRun(id);
+  const resumeFrom =
+    activeRun.data && activeRun.data.status === "running"
+      ? { runId: activeRun.data.run_id }
+      : null;
+  const stream = useSendMessage({ sessionId: id, initialMessages, resumeFrom });
   const citations = useCitations(id, stream.state.messages);
 
   const search = Route.useSearch();
@@ -177,6 +196,10 @@ function ChatDetail() {
   // stays on across reloads + new sessions. Keyed under a stable
   // string so a future "global UI prefs" page can introspect it.
   const [verboseTools, setVerboseTools] = useLocalStorage("kaos:verbose-tools", false);
+  // #453 — narrow vs wide transcript. Narrow uses the editorial
+  // 72ch measure; wide scales with viewport so multi-NDA matrices
+  // and CSV-ready tables don't word-wrap claustrophobically.
+  const [transcriptWide, setTranscriptWide] = useLocalStorage("kaos:transcript-wide", false);
 
   // B8 — refresh the session meta + message-history + sidebar list
   // when a turn finishes streaming. Without this, the immediate-
@@ -214,6 +237,14 @@ function ChatDetail() {
   const onSubmit = () => {
     const text = input.trim();
     if (!text) return;
+    // P0 — don't clear the textarea unless we know `send()` will
+    // actually fire. The hook silently no-ops when an SSE is in
+    // flight (live OR resume), and pre-fix the user would see
+    // "textarea cleared, nothing happened" on the post-turn
+    // resume-race window. The Send button is also disabled when
+    // pending=true, but Enter bypasses the disabled state, so this
+    // is the load-bearing guard for keyboard submits.
+    if (stream.state.pending) return;
     setInput("");
     void stream.send(text);
   };
@@ -448,6 +479,28 @@ function ChatDetail() {
 
           <button
             type="button"
+            onClick={() => setTranscriptWide((v) => !v)}
+            disabled={!meta}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
+              transcriptWide ? "bg-muted text-foreground" : ""
+            }`}
+            title={
+              transcriptWide
+                ? "Transcript width: wide — switch to narrow (72ch measure)"
+                : "Transcript width: narrow — switch to wide (scales with viewport)"
+            }
+            aria-label="Toggle transcript width"
+            aria-pressed={transcriptWide}
+          >
+            {transcriptWide ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setInspectorOpen((v) => !v)}
             disabled={!meta}
             className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
@@ -473,7 +526,11 @@ function ChatDetail() {
         </header>
 
         <div ref={transcriptRef} className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-6 py-8" role="log" aria-live="polite">
+          <div
+            className={`mx-auto px-6 py-8 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}
+            role="log"
+            aria-live="polite"
+          >
             {stream.state.banners.length > 0 && (
               <div className="mb-4 space-y-2">
                 {stream.state.banners.map((b) => (
@@ -522,7 +579,7 @@ function ChatDetail() {
         <DropZone onDrop={onAttach} disabled={!meta} />
 
         {uploadError && (
-          <div className="mx-auto max-w-3xl px-4">
+          <div className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
             <div
               role="alert"
               className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
@@ -541,7 +598,7 @@ function ChatDetail() {
         )}
 
         {files.data && files.data.files.length > 0 && (
-          <div className="mx-auto max-w-3xl px-4">
+          <div className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
             <FileChips
               files={files.data.files}
               onRemove={(name) => removeFile.mutate(name)}
@@ -586,7 +643,7 @@ function ChatDetail() {
             us swap server-loaded skill registries in later without
             changing the component API.
           */}
-          <div className="mx-auto max-w-3xl px-4 pointer-events-none">
+          <div className={`mx-auto px-4 pointer-events-none ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
             <div className="relative pointer-events-auto">
               <SlashMenu
                 skills={BUILTIN_SKILLS}

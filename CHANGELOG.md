@@ -7,6 +7,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Final-synthesis truncation on attorney-grade deliverables (P0-1)
+
+Closes `kaos-modules/docs/plans/2026-05-18-cross-layer-issue-inventory.md` § P0-1.
+
+Persona #4 (10-persona NDA matrix) — and three other personas — were
+losing their final answer to a 67- to 200-character polite preamble
+("I've gathered all the information needed and am ready to provide
+my final answer.") even though every search, document parse, and
+citation step had completed correctly. Root cause was at the prompt
+layer, not at any limit (`max_react_iterations`, `turn_budget_usd`,
+`max_tokens`): modern frontier models satisfy the agentic loop's
+goal-check on the work they've *announced*, then emit a meta-response
+about being ready instead of the deliverable itself.
+
+`examples/single-user-chat/backend/app/settings.py` —
+`_DEFAULT_SYSTEM_PROMPT` now ends with a "Deliverable contract"
+section that names the expected output shapes (table / list /
+summary / comparison / CSV / memo / citations) and requires them to
+be emitted inline in the same response that satisfies the goal.
+Verified on Persona #4 (5-jurisdiction enforceability comparison)
+against Opus 4.7: 5/5 jurisdictions, full CSV table, 2,678
+characters, no fabrication.
+
+### Added — Per-turn cost telemetry persisted to `SessionMeta` (P1-3)
+
+Closes inventory § P1-3.
+
+The SPA's `SessionMeta` carried only header-level cost/token
+counters in the SSE stream; nothing was ever persisted, which left
+the sidebar (and any future cost audit) with `null` cost and tokens
+on completed sessions. The new pipeline:
+
+- `backend/app/services/tool_call_recorder.py` — new
+  `TurnUsageRecorder` taps both `usage_observed` and `turn_summary`
+  events. The aggregate `turn_summary` wins when present; otherwise
+  the recorder sums `usage_observed` deltas (handles models /
+  providers that don't emit a summary).
+- `backend/app/routers/chat.py` — wires `TurnUsageRecorder` next to
+  `TurnToolCallRecorder`, snapshots `(cost_usd, tokens)` into
+  `persist_snapshot`, and threads them into
+  `persist_turn_completion`.
+- `backend/app/services/persist_turn.py` — reads prior `SessionMeta`,
+  computes the running totals, and patches `last_turn_cost_usd` /
+  `last_turn_tokens` / `total_cost_usd` / `total_tokens` in one
+  `store.patch(...)` call. Race-free under the existing patch
+  semantics (caller provides absolute values, store doesn't compute).
+- `backend/app/models.py` + `backend/app/persistence/sessions.py` —
+  fields added to both `SessionMeta` and the lightweight
+  `SessionSummary` row type so the sidebar can render them without
+  fetching the full meta document.
+- `apps/spa/src/lib/api-types.ts` — `SessionSummary` mirrors gain
+  optional `last_turn_cost_usd` / `total_cost_usd` / `total_tokens`.
+
+### Added — Build SHA + stale-session badge (P3-10)
+
+Closes inventory § P3-10.
+
+When kaos-* packages are upgraded under a running SPA, in-flight
+sessions can exhibit behavior that predates fixes in the deployed
+build (the bug-hunting equivalent of "did this user hit the version
+where X was broken?"). The SPA now stamps every session with the
+build identity:
+
+- `backend/app/routers/health.py` —
+  `@functools.lru_cache current_build_sha()` returns a 12-char
+  sha256 hash over the sorted `(pkg, version)` tuples of all
+  installed `kaos-*` packages. `/v1/health` now returns
+  `{"status": "ok", "build_sha": "<12-char>"}`.
+- `backend/app/persistence/sessions.py` — `SessionStore.create()`
+  stamps `meta.build_sha = current_build_sha()` at session-create
+  time. Pre-fix sessions persist with `build_sha = None` and are
+  treated as "pre-tracking, build identity unknown" rather than
+  "stale".
+- `apps/spa/src/hooks/use-health.ts` (new) — TanStack Query hook
+  with a 5-minute stale time (build SHA is process-lifetime
+  immutable).
+- `apps/spa/src/components/sessions/SessionListItem.tsx` — sidebar
+  rows show a small "older" pill (with `role="status"` for screen
+  readers and a `title` tooltip) when both SHAs are known and
+  differ.
+
+### Removed — `Runner._build_internal_agent` monkey-patch (P0)
+
+`backend/app/main.py` deleted the ~50-line module-import-time monkey
+patch that mutated `kaos_agents.Runner._build_internal_agent` to
+rewrite tool-call file paths. The patch was redundant: the manifest
+the SPA assembles before the turn already gives the agent absolute
+VFS paths through the URI contract (kaos-core 0.1.0a10+ +
+`default_vfs_namespace`). Removing the patch eliminates an entire
+class of shadow-of-upstream-types bugs and the start-up race where
+the patch was installed against the wrong `Runner` symbol when
+multiple kaos-agents wheels were on the path.
+
+### Changed — `ANTHROPIC_TOOL_FALLBACK.default_max_tokens` 8K → 64K
+
+`kaos-llm-client/kaos_llm_client/profiles.py` raised the fallback
+provider profile's `default_max_tokens` from 8192 → 64000 and the
+Claude 3.x legacy fallback from 4K → 64K. The Anthropic API clamps
+to the physical model cap upstream, so values larger than the cap
+are safe; values smaller actively truncate frontier-model
+deliverables (the original P0-1 symptom looked like a token cap
+before we traced it to the prompt). 64K is the floor for an
+attorney-facing surface.
+
+### Changed — Frontier-tier defaults across SPA + scaffolding templates
+
+The shipped single-user-chat SPA and the three SPA-/dashboard-/TUI-
+template scaffolds (`kaos-ui new web:spa`, `... dashboard:streamlit`,
+`... tui:textual`) all defaulted to `anthropic:claude-haiku-4-5` —
+the cheap routing tier. These defaults flow straight to end users
+who scaffold a new project. For audiences that ship a deployed app
+to attorneys / clinicians / financial pros, that default is
+load-bearing the wrong way: the inference-cost delta between haiku
+and a frontier reasoning model is rounding error against the cost
+of a wrong answer.
+
+- **`examples/single-user-chat`** — `AppSettings.default_model`
+  flipped `claude-haiku-4-5` → `claude-opus-4-7`. `auto_title_model`,
+  `summarizer_model`, `agentic_planner_model`, `agentic_goal_check_model`
+  all promoted Haiku → Sonnet 4.6 (the planner / goal-check models
+  ARE the routing decisions that gate "search the corpus" vs
+  "answer from prior" — Haiku-grade routing was directly upstream of
+  the section-number fabrication seen in the persona matrix).
+  `_BASELINE_TITLE_MODEL` baseline matched to Sonnet so the
+  decoration-time pin no longer triggers a per-call rebuild.
+  Catalog narrowed to `gpt ≥ 5.4` / `claude ≥ 4.5` / `gemini ≥ 2.5`
+  (no xAI/Grok, no `gpt-4.1-mini`, no `gpt-5`) — 8 entries, frontier
+  first. `.env.example`, `models.py` docstring, error-message hint
+  all match the new default.
+- **`kaos_ui/templates/web/spa/.env.example`,
+  `kaos_ui/templates/web/spa/backend/app/settings.py.tmpl`,
+  `kaos_ui/templates/dashboard/streamlit/.env.example`,
+  `kaos_ui/templates/dashboard/streamlit/{module}/settings.py.tmpl`,
+  `kaos_ui/templates/tui/textual/.env.example`,
+  `kaos_ui/templates/tui/textual/{module}/settings.py.tmpl`** —
+  default `APP_LLM_MODEL=claude-opus-4-7`, with an inline comment
+  warning against downshift for professional audiences.
+- **Docs** — `docs/templates/textual.md`,
+  `examples/single-user-chat/docs/{PRD,PLAN,ARCHITECTURE}.md`,
+  `examples/single-user-chat/README.md`,
+  `packages/kaos-ui-react/src/chat/ModelPicker.tsx` (docstring),
+  `packages/kaos-ui-react/src/hooks/use-cost-aggregation.ts`
+  (docstring) — all default examples + recommendations switched
+  to `claude-opus-4-7`. PRD § 5 + § 6 + § 7.4 updated with the
+  attorney-audience rationale.
+
+Existing kaos-agents library defaults (`KAOS_AGENT_DEFAULT_LLM_MODEL`
+etc.) are NOT touched — those are an upstream library concern; this
+release narrows what kaos-ui ships to its own end users.
+
 ## [0.1.0a9] — 2026-05-16
 
 Rolls up both M1 and M5 of `kaos-modules/docs/plans/thin-worker-prompt.md`

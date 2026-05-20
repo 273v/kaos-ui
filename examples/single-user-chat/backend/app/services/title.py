@@ -30,13 +30,14 @@ logger = app_logger("title_service")
 
 # Re-title every N messages or after this much wall-clock time, whichever
 # fires first. Default model lives in AppSettings.auto_title_model
-# (env var APP_AUTO_TITLE_MODEL). We baseline on Haiku at decoration
-# time, then pass the configured value at call time so env overrides
-# land without re-importing this module.
+# (env var APP_AUTO_TITLE_MODEL). We baseline on Sonnet at decoration
+# time to match the AppSettings default for an attorney-facing surface,
+# then pass the configured value at call time so env overrides land
+# without re-importing this module.
 _REFRESH_EVERY_MESSAGES = 10
 _REFRESH_MAX_AGE = timedelta(hours=24)
 _TITLE_MAX_INPUT_CHARS = 8_000
-_BASELINE_TITLE_MODEL = "anthropic:claude-haiku-4-5"
+_BASELINE_TITLE_MODEL = "anthropic:claude-sonnet-4-6"
 
 
 def _resolve_title_model() -> str:

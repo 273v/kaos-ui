@@ -91,15 +91,20 @@ def test_live_haiku_one_turn(client):
 
 def test_live_model_override_via_patch(client):
     """Patching model on the metadata sidecar should affect the next turn."""
+    from app.settings import AppSettings
+
+    expected_default = AppSettings().default_model
     r = client.post("/v1/chat/sessions", json={"title": "override-test"})
     sid = r.json()["id"]
-    assert r.json()["model"] == "anthropic:claude-haiku-4-5"
+    assert r.json()["model"] == expected_default
 
-    # Patch model to a different valid id (still Anthropic so we don't
-    # require two provider keys for this test).
+    # Patch model to a different valid id. We use Haiku 4.5 as the
+    # cheaper override target so the live test stays inexpensive — the
+    # session's *default* (now frontier-tier per AppSettings) is the
+    # contract this test verifies the user can override away from.
     r = client.patch(
         f"/v1/chat/sessions/{sid}/meta",
-        json={"model": "anthropic:claude-haiku-4-5"},  # same model is fine to verify patch path
+        json={"model": "anthropic:claude-haiku-4-5"},
     )
     assert r.status_code == 200
 

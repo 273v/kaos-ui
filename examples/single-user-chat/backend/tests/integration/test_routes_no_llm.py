@@ -10,7 +10,15 @@ pytestmark = pytest.mark.integration
 def test_health(client):
     r = client.get("/v1/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    body = r.json()
+    assert body["status"] == "ok"
+    # P3-10: the SPA stamps a build SHA on every session at create-time
+    # so the sidebar can badge older sessions; /v1/health exposes the
+    # current process's value. Shape: 12-char lowercase hex.
+    assert "build_sha" in body
+    assert isinstance(body["build_sha"], str)
+    assert len(body["build_sha"]) == 12
+    assert all(c in "0123456789abcdef" for c in body["build_sha"])
 
 
 def test_auth_gate_on_extension_routes(app):
@@ -89,25 +97,34 @@ def test_create_session_round_trip(client):
 
 
 def test_create_session_uses_defaults_when_body_empty(client):
+    from app.settings import AppSettings
+
+    expected_default = AppSettings().default_model
     r = client.post("/v1/chat/sessions", json={})
     assert r.status_code == 201
     meta = r.json()
     assert meta["title"] == "Untitled"
-    assert meta["model"] == "anthropic:claude-haiku-4-5"
+    # Default tracks AppSettings.default_model — kept dynamic so the
+    # test doesn't break the next time we move the default tier.
+    assert meta["model"] == expected_default
 
 
 def test_patch_meta(client):
     r = client.post("/v1/chat/sessions", json={"title": "Original"})
     sid = r.json()["id"]
 
+    # Use a model from the current catalog. We narrowed the SPA's
+    # catalog to frontier-tier only (gpt ≥ 5.4 / claude ≥ 4.5 /
+    # gemini ≥ 2.5) — `openai:gpt-5` is below the floor and now
+    # rejected with 422.
     r = client.patch(
         f"/v1/chat/sessions/{sid}/meta",
-        json={"title": "Renamed", "model": "openai:gpt-5", "tools_enabled": True},
+        json={"title": "Renamed", "model": "openai:gpt-5.5", "tools_enabled": True},
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["title"] == "Renamed"
-    assert body["model"] == "openai:gpt-5"
+    assert body["model"] == "openai:gpt-5.5"
     assert body["tools_enabled"] is True
 
 

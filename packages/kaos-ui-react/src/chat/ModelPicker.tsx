@@ -11,7 +11,7 @@
 import { ChevronDown } from "lucide-react";
 
 export interface ModelEntry {
-  /** Provider-prefixed id, e.g. `anthropic:claude-haiku-4-5`. */
+  /** Provider-prefixed id, e.g. `anthropic:claude-opus-4-7`. */
   id: string;
   /** Human label shown in the picker. */
   label: string;

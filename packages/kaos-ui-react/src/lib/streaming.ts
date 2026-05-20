@@ -41,10 +41,25 @@ export interface ReadSseStreamOptions extends RequestInit {
   fetch?: typeof fetch;
 }
 
-export async function* readSseStream(
+/**
+ * Result of opening an SSE stream — an async iterator of parsed events
+ * plus the run id we read off the response headers (when the backend
+ * sent one).
+ *
+ * The run id is required for SSE resume so the SPA can stash it
+ * synchronously, without waiting for the leading ``run_started``
+ * envelope. Backends that don't set ``X-Kaos-Run-Id`` produce
+ * ``runId === null`` and the SPA falls back to the envelope.
+ */
+export interface SseStreamHandle {
+  events: AsyncIterableIterator<StreamEvent>;
+  runId: string | null;
+}
+
+export async function readSseStream(
   url: string,
   init: ReadSseStreamOptions = {},
-): AsyncIterableIterator<StreamEvent> {
+): Promise<SseStreamHandle> {
   const { fetch: customFetch, ...requestInit } = init;
   const f = customFetch ?? globalThis.fetch;
   const response = await f(url, {
@@ -58,6 +73,23 @@ export async function* readSseStream(
   });
   if (!response.ok || !response.body) {
     throw new Error(`SSE request failed: ${response.status}`);
+  }
+
+  // Stage 1 SSE-resume: the backend stamps the run id on every POST
+  // response so the SPA can stash it before the first event lands.
+  // Header name matches the backend constant `X-Kaos-Run-Id`.
+  const runId = response.headers.get("X-Kaos-Run-Id");
+
+  return { events: drainSseResponse(response), runId };
+}
+
+async function* drainSseResponse(
+  response: Response,
+): AsyncIterableIterator<StreamEvent> {
+  if (!response.body) {
+    // Defensive — readSseStream already throws on a missing body,
+    // but TS doesn't carry that invariant through into the generator.
+    return;
   }
 
   // Buffer parser output so the async generator can yield one event
