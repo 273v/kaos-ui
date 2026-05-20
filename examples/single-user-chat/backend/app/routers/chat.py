@@ -297,6 +297,13 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
         policy_updates["auto_loop"] = body.auto_loop
     if body.persona is not None:
         policy_updates["persona"] = body.persona
+    # #312 — AgenticLoop budget caps.
+    if body.max_loop_iterations is not None:
+        policy_updates["max_loop_iterations"] = body.max_loop_iterations
+    if body.max_loop_cost_usd is not None:
+        policy_updates["max_loop_cost_usd"] = body.max_loop_cost_usd
+    if body.max_loop_wall_clock_seconds is not None:
+        policy_updates["max_loop_wall_clock_seconds"] = body.max_loop_wall_clock_seconds
     if policy_updates:
         new_policy = current.policy.model_copy(update=policy_updates)
     else:

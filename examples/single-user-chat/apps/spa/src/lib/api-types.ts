@@ -108,6 +108,13 @@ export interface ToolSetUpdateBody {
    *  ``soft_ceiling``; the caller must pass those alongside if they
    *  want a full persona swap. */
   persona?: Persona;
+  /** #312 (kaos-ui 0.1.0a13) — AgenticLoop budget caps. Backend bounds:
+   *  max_loop_iterations: 1–10 (default 3),
+   *  max_loop_cost_usd: 0–10 USD (default 0.25),
+   *  max_loop_wall_clock_seconds: 0–600 (default 60). */
+  max_loop_iterations?: number;
+  max_loop_cost_usd?: number;
+  max_loop_wall_clock_seconds?: number;
 }
 
 export interface SessionSummary {

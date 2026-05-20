@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a13] — 2026-05-20
+
+### Added — SettingsSheet AgenticLoop budget caps (#312)
+
+The settings sheet now exposes the three independent AgenticLoop hard
+caps as a "Loop budgets" fieldset below the auto_loop toggle:
+`max_loop_iterations` (1-10, default 3), `max_loop_cost_usd` (>0, ≤10,
+default $0.25), `max_loop_wall_clock_seconds` (>0, ≤600, default 60).
+Disabled when auto_loop is OFF since the caps only apply to the
+multi-iteration path. Backend `ToolSetUpdateBody` extended with
+matching optional fields + `ge`/`gt`/`le` validation that mirror the
+canonical `SessionPolicyWire` constraints. PATCH
+`/sessions/{id}/tool-set` propagates the three new fields through the
+same `policy_updates` dict path the other policy toggles use. The
+SPA's submit handler clamps + coerces to documented bounds before
+PATCH so empty/non-numeric inputs never send NaN.
+
 ## [0.1.0a12] — 2026-05-20
 
 The Stable+1 sweep release. Closes 8 backlog items spanning architectural

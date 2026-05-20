@@ -41,6 +41,22 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
   const [persona, setPersona] = useState<"research" | "drafting" | "forensics">(
     meta.policy?.persona ?? "research",
   );
+  // #312 U.10 — three AgenticLoop budget caps. Backend (SessionPolicyWire)
+  // exposes these with hard bounds:
+  //   max_loop_iterations: int 1–10 (default 3)
+  //   max_loop_cost_usd:    float 0–10 (default 0.25)
+  //   max_loop_wall_clock_seconds: float 0–600 (default 60)
+  // We store as strings to support empty-input transient states and
+  // coerce on submit.
+  const [maxIterations, setMaxIterations] = useState<string>(
+    String(meta.policy?.max_loop_iterations ?? 3),
+  );
+  const [maxCostUsd, setMaxCostUsd] = useState<string>(
+    String(meta.policy?.max_loop_cost_usd ?? 0.25),
+  );
+  const [maxWallSeconds, setMaxWallSeconds] = useState<string>(
+    String(meta.policy?.max_loop_wall_clock_seconds ?? 60),
+  );
 
   useEffect(() => {
     if (open) {
@@ -52,6 +68,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
       setAutoElevate(meta.policy?.auto_elevate ?? true);
       setAutoLoop(meta.policy?.auto_loop ?? true);
       setPersona(meta.policy?.persona ?? "research");
+      setMaxIterations(String(meta.policy?.max_loop_iterations ?? 3));
+      setMaxCostUsd(String(meta.policy?.max_loop_cost_usd ?? 0.25));
+      setMaxWallSeconds(String(meta.policy?.max_loop_wall_clock_seconds ?? 60));
     }
   }, [open, meta]);
 
@@ -163,12 +182,37 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
         model,
         system_prompt: systemPrompt,
       });
+      // #312: coerce + clamp budget strings to the backend's documented
+      // bounds. Empty / non-numeric falls back to the current value or
+      // the documented default to avoid sending NaN.
+      const iters = Math.max(
+        1,
+        Math.min(10, Number.parseInt(maxIterations, 10) || (meta.policy?.max_loop_iterations ?? 3)),
+      );
+      const cost = Math.max(
+        0.01,
+        Math.min(
+          10,
+          Number.parseFloat(maxCostUsd) || (meta.policy?.max_loop_cost_usd ?? 0.25),
+        ),
+      );
+      const wall = Math.max(
+        1,
+        Math.min(
+          600,
+          Number.parseFloat(maxWallSeconds) ||
+            (meta.policy?.max_loop_wall_clock_seconds ?? 60),
+        ),
+      );
       await patchToolSet.mutateAsync({
         allowed_groups: filteredAllowedGroups,
         auto_narrow: autoNarrow,
         auto_elevate: autoElevate,
         auto_loop: autoLoop,
         persona,
+        max_loop_iterations: iters,
+        max_loop_cost_usd: cost,
+        max_loop_wall_clock_seconds: wall,
       });
       onClose();
     } catch {
@@ -381,6 +425,79 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                   </span>
                 </span>
               </label>
+
+              {/* #312 — AgenticLoop budget caps. Three-column grid: each
+                  field gets its own label + numeric input + caption.
+                  Disabled when auto_loop is OFF since the caps only
+                  apply to the multi-iteration path. */}
+              <fieldset className="border-t border-border pt-3" disabled={!autoLoop}>
+                <legend className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+                  Loop budgets
+                </legend>
+                <div className={`grid grid-cols-3 gap-3 ${!autoLoop ? "opacity-60" : ""}`}>
+                  <div>
+                    <label
+                      htmlFor="max-loop-iterations"
+                      className="block text-[11px] text-muted-foreground mb-1"
+                    >
+                      Max iterations
+                    </label>
+                    <input
+                      id="max-loop-iterations"
+                      type="number"
+                      min={1}
+                      max={10}
+                      step={1}
+                      value={maxIterations}
+                      onChange={(e) => setMaxIterations(e.target.value)}
+                      className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5 tabular-nums"
+                    />
+                    <p className="mt-1 text-[10px] text-muted-foreground">1–10 (default 3)</p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="max-loop-cost"
+                      className="block text-[11px] text-muted-foreground mb-1"
+                    >
+                      Max cost (USD)
+                    </label>
+                    <input
+                      id="max-loop-cost"
+                      type="number"
+                      min={0.01}
+                      max={10}
+                      step={0.05}
+                      value={maxCostUsd}
+                      onChange={(e) => setMaxCostUsd(e.target.value)}
+                      className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5 tabular-nums"
+                    />
+                    <p className="mt-1 text-[10px] text-muted-foreground">$0.01–$10 (default $0.25)</p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="max-loop-wall"
+                      className="block text-[11px] text-muted-foreground mb-1"
+                    >
+                      Max wall-clock (s)
+                    </label>
+                    <input
+                      id="max-loop-wall"
+                      type="number"
+                      min={1}
+                      max={600}
+                      step={5}
+                      value={maxWallSeconds}
+                      onChange={(e) => setMaxWallSeconds(e.target.value)}
+                      className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5 tabular-nums"
+                    />
+                    <p className="mt-1 text-[10px] text-muted-foreground">1–600s (default 60)</p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground leading-snug">
+                  Three independent hard caps. The loop terminates when ANY cap fires — usually
+                  the cost cap. Defense-in-depth against runaway iterations.
+                </p>
+              </fieldset>
 
               {/* M.6 — Persona picker. */}
               <div className="border-t border-border pt-3">

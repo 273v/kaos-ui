@@ -668,6 +668,27 @@ class ToolSetUpdateBody(BaseModel):
             "if they want a full persona swap)."
         ),
     )
+    # #312 — AgenticLoop budget caps. All three are partial-update;
+    # omit to keep the existing value. Backend hard bounds mirror
+    # the field constraints on SessionPolicyWire above.
+    max_loop_iterations: int | None = Field(
+        default=None,
+        ge=1,
+        le=10,
+        description="Hard cap on iterations per turn. 1-10 (default 3).",
+    )
+    max_loop_cost_usd: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=10.0,
+        description="Hard cap on cumulative LLM cost per turn. $0.01-$10 (default $0.25).",
+    )
+    max_loop_wall_clock_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=600.0,
+        description="Hard cap on wall-clock time per turn. 1-600s (default 60).",
+    )
 
 
 class SendMessageBody(BaseModel):
