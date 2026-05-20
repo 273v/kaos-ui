@@ -104,13 +104,21 @@ export function Message({
   // page (assistant) → card (user) → page (assistant). User cards
   // mark the boundaries between turns; assistant prose fills the
   // page in between. No two cards in a row, no chat-bubble noise.
+  // #314 AgenticLoop UX polish: assistant turns use ``space-y-3`` so
+  // the per-message components (ToolPolicyBadge, ElevationPill,
+  // ReasoningSummary, PlanCard, ToolCallTimeline, prose body,
+  // CapabilityApproval, GoalCheckBadge, LoopTerminatedBanner,
+  // UsageChip) get consistent vertical breathing room instead of
+  // each component managing its own ad-hoc ``mb-3``. The header has
+  // ``mb-2`` baked in and uses ``sticky top-0``, so the first child
+  // gap-after-header still reads correctly.
   const articleClass = isError
-    ? "py-6 border-l-2 border-destructive pl-4"
+    ? "py-6 border-l-2 border-destructive pl-4 space-y-3"
     : isUser
       ? "my-6 rounded-md border border-[oklch(0.88_0.005_80)] " +
         "bg-[oklch(0.945_0.005_85)] px-5 py-[1.125rem] " +
-        "shadow-[0_1px_2px_oklch(0_0_0_/_0.05)]"
-      : "py-6";
+        "shadow-[0_1px_2px_oklch(0_0_0_/_0.05)] space-y-3"
+      : "py-6 space-y-3";
 
   return (
     <article
@@ -202,16 +210,17 @@ export function Message({
         produced the answer.
       */}
       {isAssistant && message.plan && message.plan.steps.length > 0 && (
-        <div className="mb-3">
-          <PlanCard
-            plan={message.plan}
-            defaultOpen={
-              verboseTools ||
-              message.streaming ||
-              message.plan.steps.some((s) => s.status === "error" || s.status === "running")
-            }
-          />
-        </div>
+        // #314 polish: removed inline mb-3 wrapper — the article-level
+        // space-y-3 handles vertical rhythm between AgenticLoop
+        // sections consistently now.
+        <PlanCard
+          plan={message.plan}
+          defaultOpen={
+            verboseTools ||
+            message.streaming ||
+            message.plan.steps.some((s) => s.status === "error" || s.status === "running")
+          }
+        />
       )}
 
       {isAssistant && message.tool_calls && message.tool_calls.length > 0 && (
