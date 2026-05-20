@@ -203,10 +203,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install pnpm
+      - name: Install pnpm (version from package.json packageManager)
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Set up Node 22
         uses: actions/setup-node@v4

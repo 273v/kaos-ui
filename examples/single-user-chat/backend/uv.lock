@@ -2,9 +2,6 @@ version = 1
 revision = 3
 requires-python = ">=3.13, <3.15"
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -333,16 +330,16 @@ markdown = [
 
 [[package]]
 name = "kaos-core"
-version = "0.1.0a11"
+version = "0.1.0a12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/cf/1ee2d4fe4ee5fea6b2fde548a6fae7af8429bc0ccd82cf79bbdf6429289a/kaos_core-0.1.0a11.tar.gz", hash = "sha256:a46720773992cfd762adac4580177e139c2c959a1591a2d1c4a7bae3c0f0be40", size = 192205, upload-time = "2026-05-18T13:58:19.763Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/89/f89f6461af4713c14f3a0844c11236ef564a2d71abd85c72bed66af9a8dd/kaos_core-0.1.0a12.tar.gz", hash = "sha256:4e8abec4514a840402c4993654d3e756da7b2462f01e1742562bbd8b3d191c1a", size = 197525, upload-time = "2026-05-20T14:11:35.426Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/14/e616679c498ff76f5a3115f1d79a86a20db8637741bd8c0220ec8a21169b/kaos_core-0.1.0a11-py3-none-any.whl", hash = "sha256:565078d35e0c4466cd3c7a5f57d5e3f900b083db5f613da77179541604de9131", size = 147598, upload-time = "2026-05-18T13:58:17.847Z" },
+    { url = "https://files.pythonhosted.org/packages/95/da/65ff51029b8fd063c4c47c4c74b1607edc29cf3ad6ef16c55a83e1608ced/kaos_core-0.1.0a12-py3-none-any.whl", hash = "sha256:22c4fac4fe9e458ec62cb698cf86af7d9c12a319d62331f37c35e1dc5c6cf6fe", size = 151388, upload-time = "2026-05-20T14:11:33.664Z" },
 ]
 
 [[package]]
