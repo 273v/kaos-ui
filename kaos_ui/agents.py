@@ -102,10 +102,9 @@ def build_chat_runtime(
         total += register_core_tools(runtime)
 
     if register_extras:
-        # kaos-pdf / kaos-office / kaos-content are runtime-optional.
-        # kaos-ui doesn't declare them as deps; consuming apps install
-        # whichever they want. ImportError is suppressed at runtime
-        # when absent.
+        # All optional kaos-* tool modules. kaos-ui doesn't declare
+        # them as deps; consuming apps install whichever they want.
+        # ImportError is suppressed so a slim deployment still works.
         with contextlib.suppress(ImportError):
             from kaos_pdf import register_pdf_tools  # ty: ignore[unresolved-import]
 
@@ -118,6 +117,37 @@ def build_chat_runtime(
             from kaos_content.tools import register_content_tools  # ty: ignore[unresolved-import]
 
             total += register_content_tools(runtime)
+        # kaos-web — search, fetch, page-links, page-tables. Wires up
+        # the search→load→links→navigate multi-step research loop.
+        # Browser/crawl/domain tools come via register_web_all_tools.
+        with contextlib.suppress(ImportError):
+            from kaos_web import register_web_all_tools  # ty: ignore[unresolved-import]
+
+            total += register_web_all_tools(runtime)
+        # kaos-llm-core — typed LLM programs (Call, ReAct, RAG,
+        # extraction) exposed as MCP tools. Lets the agent compose
+        # smaller LLM calls inside a turn (e.g. corpus-filter, synthesize).
+        with contextlib.suppress(ImportError):
+            from kaos_llm_core.integrations.mcp.registration import (  # ty: ignore[unresolved-import]
+                register_llm_core_tools,
+            )
+
+            total += register_llm_core_tools(runtime)
+        # kaos-graph — RDF / SPARQL / graph algorithms.
+        with contextlib.suppress(ImportError):
+            from kaos_graph.tools import (  # ty: ignore[unresolved-import]
+                register_graph_tools,
+            )
+
+            total += register_graph_tools(runtime)
+        # kaos-agents — its own agent / memory / extraction / graph
+        # MCP tools (kaos-agent-chat, kaos-agent-findings, etc).
+        with contextlib.suppress(ImportError):
+            from kaos_agents.tools.registry import (  # ty: ignore[unresolved-import]
+                register_agent_tools,
+            )
+
+            total += register_agent_tools(runtime)
 
     logger.info("registered %d tools on runtime", total)
     tool_names = tuple(sorted(runtime.tools.list_tools()))
@@ -259,13 +289,21 @@ def augment_instructions(
 # blocked when an allow-list is set. That's the desired UX: groups
 # are an opt-in narrowing layer over the unrestricted default.
 KAOS_TOOL_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("kaos-source-", "web"),
+    # kaos-web tools sit under "web" (the canonical general-web group).
+    # Longest-prefix-wins ordering: keep more specific prefixes above.
+    ("kaos-web-browser-", "browser"),
+    ("kaos-web-domain-", "netinfra"),
+    ("kaos-web-", "web"),
+    ("kaos-source-", "sources"),
     ("kaos-pdf-", "documents"),
     ("kaos-office-parse-", "documents"),
     ("kaos-content-", "documents"),
     ("kaos-citations-", "citations"),
     ("kaos-core-vfs-", "vfs"),
     ("kaos-core-artifacts-", "vfs"),
+    ("kaos-llm-core-", "llm"),
+    ("kaos-graph-", "graph"),
+    ("kaos-agent-", "agent"),
 )
 
 # Per-group descriptions — surfaced into ``GET /v1/chat/categories``
@@ -273,9 +311,24 @@ KAOS_TOOL_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
 # parseable so a planner Program (TR-5) can route on them.
 KAOS_TOOL_GROUP_DESCRIPTIONS: dict[str, str] = {
     "web": (
-        "Live web access (Federal Register / eCFR / EDGAR / GovInfo / "
-        "GLEIF / generic URL fetch). Enable for research questions "
-        "about regulations, filings, or public records."
+        "General web search and page fetch (SerpAPI / Brave / Exa "
+        "search, HTTP fetch, page links, page tables, page metadata). "
+        "Enable for any question that needs live web content — "
+        "current officeholders, current events, public webpages."
+    ),
+    "browser": (
+        "JS-rendered web pages via Playwright. Enable when an httpx "
+        "fetch returns no useful HTML (modern SPAs, candidate lists, "
+        "interactive dashboards)."
+    ),
+    "netinfra": (
+        "DNS / WHOIS / TLS / TCP / HTTP-header introspection. Enable "
+        "for forensic / infrastructure / cybersecurity questions."
+    ),
+    "sources": (
+        "Regulatory + legal data sources (Federal Register, eCFR, "
+        "EDGAR, GovInfo, PACER, GLEIF). Enable for research about "
+        "regulations, SEC filings, court dockets, or entity identifiers."
     ),
     "documents": (
         "Parse uploaded PDF / DOCX / PPTX / XLSX files and search "
@@ -290,6 +343,18 @@ KAOS_TOOL_GROUP_DESCRIPTIONS: dict[str, str] = {
         "Browse and read files from the session's virtual filesystem. "
         "Enable when the agent needs to confirm what's been uploaded "
         "or read raw bytes alongside the parsed AST."
+    ),
+    "llm": (
+        "Typed LLM-program tools (Call / ReAct / RAG / extraction). "
+        "Enable for compose-able sub-LLM tasks inside a turn."
+    ),
+    "graph": (
+        "Session knowledge-graph access (SPARQL, walk, projections). "
+        "Enable when reasoning over the run's accumulated PROV-O graph."
+    ),
+    "agent": (
+        "Agent-introspection tools (memory query/search, recipe list, "
+        "findings/corpus-filter). Enable for meta-agent workflows."
     ),
 }
 

@@ -157,143 +157,263 @@ html.dark,
  * inside markdown so quotes / digits don't drift between chrome
  * and prose. */
 .kaos-md {
-  font-size: 1rem;          /* 16px — reading body */
-  line-height: 1.65;
+  /* Container — sets the typographic frame.
+   *
+   * Sizing follows Butterick (web body 15-25px → 16px) and Medium-style
+   * reading defaults; the line-height (1.6) sits in the upper band of
+   * the 120-145% recommendation because LaTeX-justified prose with
+   * mixed inline code / numerics needs a little extra leading to keep
+   * descenders from kissing the next ascenders.
+   *
+   * Font is Inter (chrome-consistent — Legora/Harvey legal-AI house
+   * style is sans-serif Inter-class), kept variable so heading
+   * weights and oldstyle-nums render the way the type designer
+   * intended. The serif feel comes from the spacing/measure/
+   * justification, not the typeface. */
+  font-size: 1rem;
+  line-height: 1.6;
   font-feature-settings: "cv11", "ss01", "ss03";
+  font-variant-numeric: oldstyle-nums tabular-nums;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
   color: hsl(var(--kaos-foreground));
+  max-width: 72ch;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  hyphenate-limit-chars: 6 3 3;
 }
-.kaos-md > * + * {
-  margin-top: 0.875em;       /* default vertical rhythm */
-}
-.kaos-md > h1 + *,
-.kaos-md > h2 + *,
-.kaos-md > h3 + * {
-  margin-top: 0.5em;         /* tighten after headings */
-}
-.kaos-md > * + h1,
-.kaos-md > * + h2,
-.kaos-md > * + h3 {
-  margin-top: 1.5em;         /* breathing room before headings */
-}
-.kaos-md h1,
-.kaos-md h2,
-.kaos-md h3 {
+
+/* ─── Headings ─────────────────────────────────────────────────────
+ * Modular scale 1.125 → 1.125² → 1.125³ so h3 still distinguishes
+ * from body, h2 has presence, h1 anchors a section. Tight line-height
+ * (1.2) and subtle negative letter-spacing (-0.011em) follow Inter
+ * type designer's guidance for display sizes; text-wrap:balance gives
+ * multi-line headings a more centered visual weight.
+ *
+ * Vertical rhythm: significant top margin (breathing room INTO a
+ * heading), tight bottom margin (heading owns the paragraph that
+ * follows it — LaTeX article-class behavior). first-child resets
+ * the top margin so the response doesn't start with a void. */
+.kaos-md :where(h1, h2, h3, h4, h5, h6) {
   font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.005em;
+  line-height: 1.2;
+  letter-spacing: -0.011em;
   color: hsl(var(--kaos-foreground));
+  text-wrap: balance;
+  text-align: left;
+  hyphens: manual;
+  -webkit-hyphens: manual;
 }
-.kaos-md h1 { font-size: 1.375em; }
-.kaos-md h2 { font-size: 1.1875em; }
-.kaos-md h3 { font-size: 1.0625em; }
+.kaos-md h1 { font-size: 1.5em;   margin: 2em 0 0.5em; }
+.kaos-md h2 { font-size: 1.25em;  margin: 1.75em 0 0.5em; }
+.kaos-md h3 { font-size: 1.125em; margin: 1.5em 0 0.4em; }
+.kaos-md h4 { font-size: 1em;     margin: 1.25em 0 0.35em; font-weight: 650; }
+.kaos-md h5 { font-size: 0.9375em; margin: 1em 0 0.3em; text-transform: uppercase; letter-spacing: 0.04em; }
+.kaos-md h6 { font-size: 0.875em; margin: 1em 0 0.3em; color: hsl(var(--kaos-muted-foreground)); }
+.kaos-md :where(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+/* ─── Paragraphs ───────────────────────────────────────────────────
+ * Justify + hyphenation + text-wrap:pretty is the LaTeX-style prose
+ * combo. text-wrap:pretty pulls the last line's orphans back into
+ * shape; inter-word justification (no letter-spacing tricks) avoids
+ * the "rivers of white" failure mode of pre-CSS3 justify.
+ *
+ * Margins use logical bottom-only so first-child has no surprise
+ * top gap and chained paragraphs space cleanly. */
 .kaos-md p {
-  margin: 0;
-  text-wrap: pretty;         /* better last-line orphan handling */
+  margin: 0 0 0.9em 0;
+  text-wrap: pretty;
+  text-align: justify;
+  text-justify: inter-word;
 }
-.kaos-md ul,
-.kaos-md ol {
-  padding-left: 1.5em;
-  margin: 0;
+.kaos-md p:last-child {
+  margin-bottom: 0;
+}
+.kaos-md > div > p:first-child,
+.kaos-md > p:first-child {
+  margin-top: 0;
+}
+
+/* ─── Emphasis ─────────────────────────────────────────────────────
+ * Bold is 700 (was 600) so it visually distinguishes from heading
+ * weight inside body prose. Inter Variable supports the full range. */
+.kaos-md strong, .kaos-md b { font-weight: 700; }
+.kaos-md em, .kaos-md i { font-style: italic; }
+.kaos-md mark {
+  background: hsl(var(--kaos-primary) / 0.18);
+  color: inherit;
+  padding: 0 0.1em;
+  border-radius: 2px;
+}
+
+/* ─── Lists ────────────────────────────────────────────────────────
+ * Marker padding tuned so the bullet/number sits in the gutter and
+ * the text aligns with the surrounding paragraph baseline. Item-to-
+ * item gap is small (0.3em) but item-to-list gap matches paragraph
+ * rhythm (0.9em) so a list reads as one block, not as N paragraphs. */
+.kaos-md ul, .kaos-md ol {
+  margin: 0 0 0.9em 0;
+  padding-left: 1.625em;
 }
 .kaos-md ul { list-style: disc; }
 .kaos-md ol { list-style: decimal; }
-.kaos-md li + li {
-  margin-top: 0.375em;
+.kaos-md li { margin: 0; padding-left: 0.25em; }
+.kaos-md li + li { margin-top: 0.3em; }
+.kaos-md li > p { margin: 0 0 0.5em 0; }
+.kaos-md li > p:last-child { margin-bottom: 0; }
+.kaos-md li > ul, .kaos-md li > ol {
+  margin: 0.3em 0 0 0;
 }
-.kaos-md li > ul,
-.kaos-md li > ol {
-  margin-top: 0.375em;
-}
-.kaos-md strong { font-weight: 600; }
-.kaos-md em { font-style: italic; }
+.kaos-md ol ol { list-style: lower-alpha; }
+.kaos-md ol ol ol { list-style: lower-roman; }
+.kaos-md ul ul { list-style: circle; }
 
-/* Inline code — subtle bg, hairline-ish chip. */
+/* ─── Inline code ──────────────────────────────────────────────────
+ * Subtle muted background, no border (border + bg is double chrome).
+ * Slightly smaller than body (0.875em) compensates for monospace
+ * x-height running larger than the proportional body font. */
 .kaos-md code {
   font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco,
     Consolas, monospace;
   font-size: 0.875em;
   font-feature-settings: "ss02", "calt";
   padding: 0.125em 0.375em;
-  border-radius: 4px;
-  background: hsl(var(--kaos-muted));
-  border: 1px solid hsl(var(--kaos-border));
+  border-radius: 3px;
+  background: hsl(var(--kaos-muted) / 0.6);
   color: hsl(var(--kaos-foreground));
 }
 
-/* Code blocks — hairline border, slightly larger padding, no
- * background shouting. Inspired by Stripe docs + Anthropic console. */
+/* ─── Code blocks ──────────────────────────────────────────────────
+ * No border — let the background carry the "this is a different
+ * register" signal. Matches Stripe/Anthropic console aesthetic. */
 .kaos-md pre {
   font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco,
     Consolas, monospace;
   font-size: 0.875em;
-  line-height: 1.55;
+  line-height: 1.5;
   padding: 0.875em 1em;
-  border-radius: 8px;
-  background: hsl(var(--kaos-muted) / 0.6);
-  border: 1px solid hsl(var(--kaos-border));
+  border-radius: 6px;
+  background: hsl(var(--kaos-muted) / 0.7);
   overflow-x: auto;
-  margin: 0;
+  margin: 0 0 0.9em 0;
+  text-align: left;
+  hyphens: manual;
+  -webkit-hyphens: manual;
 }
 .kaos-md pre code {
   padding: 0;
   background: transparent;
   border: 0;
   font-size: inherit;
+  font-feature-settings: "calt";  /* drop the "ss02" inline-only feature */
 }
 
-/* Blockquotes — left rule + slightly muted body, NOT italic by
- * default (italic blockquotes read like dramatic pull-quotes; we
- * want them to feel like asides). */
+/* ─── Blockquote ───────────────────────────────────────────────────
+ * 3px rule (was 2px) in muted-foreground for a more deliberate aside
+ * marker. NOT italic — italic blockquotes read as pull-quotes; legal
+ * notes / asides should stay roman. */
 .kaos-md blockquote {
-  margin: 0;
-  padding: 0.125em 0 0.125em 1em;
-  border-left: 2px solid hsl(var(--kaos-border));
+  margin: 0 0 0.9em 0;
+  padding: 0.125em 0 0.125em 1.125em;
+  border-left: 3px solid hsl(var(--kaos-muted-foreground) / 0.35);
   color: hsl(var(--kaos-muted-foreground));
 }
+.kaos-md blockquote > :last-child { margin-bottom: 0; }
+.kaos-md blockquote p {
+  text-align: left;
+  hyphens: manual;
+  -webkit-hyphens: manual;
+}
 
-/* Tables — hairline-only, generous padding, header weight matches
- * body. Numeric alignment is up to the cell content (no opinionated
- * default since markdown doesn't carry type metadata). */
+/* ─── Tables ───────────────────────────────────────────────────────
+ * Tufte-style: heavier rule below the header (2px) than between
+ * body rows (1px @ 0.5 opacity). Header uses small caps + letter-
+ * spacing for a print-y feel; body cells stay roman. tabular-nums
+ * already inherited from the container so numeric columns align. */
 .kaos-md table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.9375em;       /* slightly tighter inside a body block */
+  margin: 0 0 1em 0;
+  font-size: 0.9375em;
 }
 .kaos-md thead th {
-  background: hsl(var(--kaos-muted) / 0.5);
   font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   text-align: left;
-  border-bottom: 1px solid hsl(var(--kaos-border));
-  padding: 0.5em 0.75em;
+  border-bottom: 2px solid hsl(var(--kaos-border));
+  padding: 0.625em 0.875em;
   color: hsl(var(--kaos-foreground));
+  background: transparent;
 }
 .kaos-md tbody td {
-  border-bottom: 1px solid hsl(var(--kaos-border) / 0.6);
-  padding: 0.5em 0.75em;
+  border-bottom: 1px solid hsl(var(--kaos-border) / 0.5);
+  padding: 0.5em 0.875em;
   vertical-align: top;
+  text-align: left;
+  hyphens: manual;
+  -webkit-hyphens: manual;
 }
-.kaos-md tbody tr:last-child td {
-  border-bottom: 0;
-}
+.kaos-md tbody tr:last-child td { border-bottom: 0; }
+.kaos-md tbody tr:hover { background: hsl(var(--kaos-muted) / 0.3); }
+.kaos-md td p, .kaos-md th p { margin: 0; }
 
-/* Links — accent on hover, never bright on rest. Underline always
- * present (a11y); thicker than browser default for legibility. */
+/* ─── Links ────────────────────────────────────────────────────────
+ * Underline always present (a11y); thicker than browser default
+ * (1.5px) and pushed down (0.18em offset) so it reads as deliberate
+ * typography rather than dragged-through-text. Subtle on rest, the
+ * primary color brightens the rule on hover (the link text already
+ * IS the primary color, so this is the affordance signal). */
 .kaos-md a {
   color: hsl(var(--kaos-primary));
   text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-  text-decoration-color: hsl(var(--kaos-border));
-  transition: color 0.1s, text-decoration-color 0.1s;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.18em;
+  text-decoration-color: hsl(var(--kaos-primary) / 0.35);
+  transition: text-decoration-color 0.12s ease;
 }
 .kaos-md a:hover {
-  color: hsl(var(--kaos-primary));
   text-decoration-color: hsl(var(--kaos-primary));
 }
 
-/* Horizontal rule — hairline, never the heavy default. */
+/* ─── Horizontal rule ──────────────────────────────────────────────
+ * Short centered rule (8em) instead of full-width — feels more like
+ * a section break in a Medium long-read than a UI divider. */
 .kaos-md hr {
   border: 0;
   border-top: 1px solid hsl(var(--kaos-border));
-  margin: 1.5em 0;
+  width: 8em;
+  margin: 2em auto;
 }
+
+/* ─── Definition lists, keyboard, samp, kbd ────────────────────────
+ * Markdown rarely emits these, but rendered HTML can; keep them in
+ * the same visual register so they don't stand out as un-styled. */
+.kaos-md dl { margin: 0 0 0.9em 0; }
+.kaos-md dt { font-weight: 600; margin-top: 0.6em; }
+.kaos-md dt:first-child { margin-top: 0; }
+.kaos-md dd { margin: 0 0 0.6em 1.5em; }
+.kaos-md kbd {
+  font-family: var(--font-mono, ui-monospace), monospace;
+  font-size: 0.8125em;
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  background: hsl(var(--kaos-muted));
+  border: 1px solid hsl(var(--kaos-border));
+  box-shadow: inset 0 -1px 0 hsl(var(--kaos-border));
+}
+
+/* ─── Sup/Sub — footnote refs ──────────────────────────────────────
+ * Browser default sup/sub fonts oversize and break baseline. Trim. */
+.kaos-md sup, .kaos-md sub {
+  font-size: 0.75em;
+  line-height: 0;
+  vertical-align: baseline;
+  position: relative;
+}
+.kaos-md sup { top: -0.45em; }
+.kaos-md sub { bottom: -0.2em; }

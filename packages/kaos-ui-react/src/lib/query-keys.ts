@@ -15,6 +15,12 @@ export const kaosQueryKeys = {
   files: (sessionId: string) => [PREFIX, "session", sessionId, "files"] as const,
   /** Per-session citations cache (currently driven by useCitations React state). */
   citations: (sessionId: string) => [PREFIX, "session", sessionId, "citations"] as const,
+  /**
+   * Per-session active-run pointer. The SPA polls this on session mount
+   * to decide whether to open the SSE resume endpoint instead of waiting
+   * for the user to send a new message. See `useActiveRun`.
+   */
+  activeRun: (sessionId: string) => [PREFIX, "session", sessionId, "activeRun"] as const,
 };
 
 export type KaosQueryKey = ReturnType<(typeof kaosQueryKeys)[keyof typeof kaosQueryKeys]>;

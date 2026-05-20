@@ -54,26 +54,47 @@ dependencies = [
     # Promotes result_summary_max_chars / eval_result_max_chars /
     # rerank_passage_max_chars to env-overridable KaosAgentSettings
     # fields (KAOS_AGENT_*). No behavior change at default values.
-    "kaos-agents>=0.1.0a12,<0.2",
-    # 2026-05-17 (Stage A): bumped to 0.1.0a8 — adds
-    # ArtifactStore.create_from_bytes + ArtifactManifest.source_uri +
-    # KaosCoreArtifactSettings (env-overridable tier thresholds via
-    # KAOS_CORE_ARTIFACT_INLINE_THRESHOLD / _SUMMARY_THRESHOLD).
-    # Required for Stage C ArtifactCard rendering to receive source_uri.
-    "kaos-core>=0.1.0a8,<0.2",
+    # 2026-05-19: bumped kaos-agents floor to 0.1.0a16 — adds the
+    # verify-before-answer policy: IntentSignature rules 8/9
+    # (factual-entity bias + clarification-loop ceiling),
+    # GoalCheckSignature critic rules (claimed-fetch fabrication,
+    # factual-entity-no-tool-call, clarification-loop, announce-
+    # and-quit), plus the tool_bridge ToolReportedError switch that
+    # propagates is_error=true through ReAct.
+    "kaos-agents>=0.1.0a16,<0.2",
+    # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
+    # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
+    # app/main.py:64-96 requires to route bare-name tool inputs to the
+    # session VFS prefix. Without this floor the monkey-patch silent-
+    # skips the kwarg (see sessions 01KRXPNQ0X0AXQGE7JYBM8E3Y1 and
+    # 01KRXQ46675V6X19C6V3X5YX7M — both shipped "Unable to determine"
+    # because kaos-core 0.1.0a8 was still installed despite a stale
+    # wheel claim of 0.1.0a11). Earlier comment about a8 + Stage A
+    # artifact features superseded — those landed in a8 and remain
+    # available in a10+.
+    "kaos-core>=0.1.0a10,<0.2",
     "kaos-ui>=0.1.0a2,<0.2",
-    # NOT transitive from kaos-agents — declare explicitly. 2026-05-17:
-    # bumped kaos-llm-core floor to 0.1.0a12 (3 minor releases ahead of
-    # 0.1.0a9 — picks up the cumulative Call/ReAct/grounding fixes
-    # those releases shipped) and kaos-llm-client floor to 0.1.0a4.
-    "kaos-llm-core>=0.1.0a12,<0.2",
+    # 2026-05-18: bumped kaos-llm-core floor to 0.1.0a15 — adds the
+    # single-field Signature auto-unwrap that lets `@llm_call(... -> str)`
+    # return a real `str` instead of `SignatureOutput` (the cause of
+    # the `'SignatureOutput' has no attribute 'strip'` titler crash
+    # at /home/mjbommar/projects/273v/kaos-modules/docs/plans/
+    # persona-matrix-followups.md § 5 Stage 2).
+    "kaos-llm-core>=0.1.0a15,<0.2",
     "kaos-llm-client>=0.1.0a4,<0.2",
-    # Optional content/extraction tools — only invoked when a session
-    # has tools_enabled=True. kaos_ui.agents.build_chat_runtime
-    # registers these conditionally via contextlib.suppress(ImportError).
-    "kaos-content[markdown]>=0.1.0a8,<0.2",
-    "kaos-pdf>=0.1.0a4,<0.2",
-    "kaos-office>=0.1.0a4,<0.2",
+    # 2026-05-18: kaos-content >= a12 / kaos-pdf >= a7 / kaos-office
+    # >= a7 — all carry the Stage 1 `path` field on snippet tool
+    # results (per persona-matrix-followups.md). kaos-office a7
+    # ships the numbering-label resolution port from kelvin-office
+    # (legacy walked Word's numbering.xml + running counters to emit
+    # `"11. GOVERNING LAW. ..."`; pre-a7 kaos-office stripped the
+    # visible numeral — the cause of the NDA matrix section-number
+    # fabrication P0). kaos-content a12 ships the corresponding
+    # DocumentView numbering-label preservation; kaos-pdf a7 ships
+    # the structural-breadcrumbs path field on search-document hits.
+    "kaos-content[markdown]>=0.1.0a12,<0.2",
+    "kaos-pdf>=0.1.0a7,<0.2",
+    "kaos-office>=0.1.0a7,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
     "kaos-citations>=0.1.0a3,<0.2",
     # P2-1b: source discovery + materialization. Federal Register / eCFR /
@@ -83,7 +104,9 @@ dependencies = [
     # 2026-05-17 (Stage B2): bumped to 0.1.0a7 — FRGetContent + ECFRContent
     # migrated off max_chars=50_000 truncation to ArtifactStore.create_from_bytes.
     # Full bodies now addressable via structured_content.artifact_id.
-    "kaos-source>=0.1.0a7,<0.2",
+    # 2026-05-18: bumped to 0.1.0a9 — VFS-FIX Stage 4 (path-resolution
+    # helper + SES2 fetch-url remediation hint) now on PyPI.
+    "kaos-source>=0.1.0a9,<0.2",
     # P2-1c: web fetch + browser (Playwright) + netinfra (DNS / WHOIS /
     # TLS / TCP / UDP). 45 tools; browser tagged ["browser"], netinfra
     # tagged ["netinfra"] for the SessionPolicy derivation.
@@ -120,19 +143,18 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
-# kaos-agents now resolves to its 0.1.0a8 PyPI wheel (2026-05-17 —
-# the prior `feat/signature-evals-thin-prompt` branch override that
-# carried the M2 docstring rules ahead of merge has been dropped now
-# that PR #25 (and the 0.1.0a6 release that bundled it) shipped, and
-# 0.1.0a7 + 0.1.0a8 add the SPA-relevant synthesis branch / replan
-# loop / corpus_attached signal / Windows VFS fix on top.
 [tool.uv.sources]
 # Local editable install for kaos-ui so changes to
 # `kaos_ui.agents.augment_instructions` (system-prompt composition,
 # date preamble, search-before-answer rule) reach the running
-# backend without a publish cycle. Drop this once kaos-ui 0.1.0a8
-# is on PyPI.
+# backend without a publish cycle. This package is the parent of
+# this example; the editable override is the canonical dev loop.
 kaos-ui = { path = "../../../", editable = true }
+# 2026-05-18: kaos-core 0.1.0a10, kaos-content 0.1.0a12, kaos-pdf
+# 0.1.0a7, kaos-office 0.1.0a7, kaos-agents 0.1.0a15, kaos-llm-core
+# 0.1.0a15 and kaos-source 0.1.0a9 all reached PyPI — editable
+# overrides removed. All kaos-* dependencies now resolve to their
+# published wheels.
 
 [tool.pytest.ini_options]
 minversion = "8.0"

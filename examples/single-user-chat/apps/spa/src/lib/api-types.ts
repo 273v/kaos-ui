@@ -120,6 +120,19 @@ export interface SessionSummary {
   archived: boolean;
   starred: boolean;
   title_source: "manual" | "auto";
+  // P3-10 stale-session marker — short SHA stamped at session-create
+  // time from the backend's `current_build_sha()`. Sessions where this
+  // differs from `/v1/health.build_sha` predate the current build and
+  // may exhibit fixed-in-newer-release behavior. `null` on sessions
+  // created before P3-10 shipped — UI treats that as "pre-tracking;
+  // build identity unknown" rather than as "stale".
+  build_sha?: string | null;
+  // P1-3 cost telemetry. `null` on pre-fix sessions or before the
+  // first turn completes; populated from the BackgroundTask after
+  // each turn finishes (see `app/services/persist_turn.py`).
+  last_turn_cost_usd?: number | null;
+  total_cost_usd?: number | null;
+  total_tokens?: number | null;
 }
 
 export interface SessionListResponse {

@@ -45,11 +45,20 @@ interface Props {
   defaultOpen?: boolean;
 }
 
-function StatusIcon({ status }: { status: ToolCallSummary["status"] }) {
+function StatusIcon({
+  status,
+  errorEnvelope,
+}: {
+  status: ToolCallSummary["status"];
+  errorEnvelope?: boolean;
+}) {
   if (status === "running") {
     return <Loader2 className="h-3.5 w-3.5 mt-0.5 shrink-0 animate-spin text-muted-foreground" />;
   }
-  if (status === "error") {
+  // Treat ``{"error": true, ...}`` payloads as errors even though the
+  // wire ``status`` is ``"done"`` — the tool returned a failure, not
+  // a successful result.
+  if (status === "error" || errorEnvelope) {
     return <X className="h-3.5 w-3.5 mt-0.5 shrink-0 text-destructive" />;
   }
   return <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-foreground" />;
@@ -93,8 +102,14 @@ function CopyJsonButton({ payload }: { payload: unknown }) {
 }
 
 function FrSearchResultCard({ record }: { record: Record<string, unknown> }) {
-  const title = (record.title as string | undefined) ?? "(untitled)";
+  const rawTitle = (record.title as string | undefined) ?? "";
   const docNumber = (record.document_number as string | undefined) ?? "";
+  // When the wire preview was truncated mid-title, the repair drops
+  // the broken value and we end up with `title = ""`. Showing
+  // "(untitled)" is misleading — the document HAS a title, we just
+  // couldn't reconstruct it. Use the document_number (or a short
+  // placeholder) instead so the card reads honestly.
+  const title = rawTitle || (docNumber ? `FR ${docNumber}` : "Title truncated in wire preview");
   const type = (record.type as string | undefined) ?? "";
   const date = (record.publication_date as string | undefined) ?? "";
   const htmlUrl = (record.html_url as string | undefined) ?? "";
@@ -333,21 +348,47 @@ function StructuredResultBody({
     // we could only reconstruct N of them).
     const missingFromDisplay =
       found != null && found > result_records.length ? found - result_records.length : 0;
+    // True when the records we DID reconstruct are obviously partial
+    // (e.g. only document_number survived the truncation). In that case
+    // we should lead with the lead-text + counts and demote the
+    // partial records to a footnote, because rendering 1 card that
+    // says "FR 2026-02331" + nothing else is more misleading than
+    // useful on its own.
+    const firstRecord = result_records[0];
+    const recordsAreSparse =
+      result_records.length <= 1 &&
+      firstRecord !== undefined &&
+      !((firstRecord.title as string | undefined) ?? "");
     return (
-      <div className="space-y-1">
-        {result_records.slice(0, 6).map((r, i) => (
-          <FrSearchResultCard key={`${i}-${(r.document_number as string) ?? i}`} record={r} />
-        ))}
-        {result_records.length > 6 && (
+      <div className="space-y-1.5">
+        {result_lead && (
+          <div className="rounded border border-border/60 bg-background px-2 py-1.5 text-xs leading-relaxed">
+            {result_lead}
+          </div>
+        )}
+        {!recordsAreSparse &&
+          result_records
+            .slice(0, 6)
+            .map((r, i) => (
+              <FrSearchResultCard key={`${i}-${(r.document_number as string) ?? i}`} record={r} />
+            ))}
+        {!recordsAreSparse && result_records.length > 6 && (
           <div className="text-[10px] text-muted-foreground italic">
             …and {result_records.length - 6} more recovered records below
           </div>
         )}
-        {missingFromDisplay > 0 && (
+        {!recordsAreSparse && missingFromDisplay > 0 && (
           <div className="text-[10px] text-muted-foreground italic">
             Showing {shown} of {found} results — the agent saw all {found}, but kaos-agents caps the
             wire preview at ~200 chars so only the first {result_records.length} reconstructed here.
             The agent's answer still drew on the full set.
+          </div>
+        )}
+        {recordsAreSparse && (
+          <div className="text-[10px] text-muted-foreground italic">
+            The wire preview was truncated mid-record at ~200 chars, so the per-document detail
+            isn't reconstructable here. The agent's answer drew on the full result set above; use{" "}
+            <span className="underline">show raw</span> to inspect the bytes that did arrive.
           </div>
         )}
       </div>
@@ -413,7 +454,7 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
             <ChevronRight className="h-3.5 w-3.5" />
           )}
         </span>
-        <StatusIcon status={call.status} />
+        <StatusIcon status={call.status} errorEnvelope={presentation.is_error_envelope} />
         <span className="flex-1 min-w-0">
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="font-medium text-[13px]">{label}</span>
@@ -426,7 +467,11 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
           {call.status === "running" ? (
             <span className="block mt-0.5 text-xs text-muted-foreground italic">running…</span>
           ) : result_summary ? (
-            <span className="block mt-0.5 text-xs text-muted-foreground leading-snug">
+            <span
+              className={`block mt-0.5 text-xs leading-snug ${
+                presentation.is_error_envelope ? "text-destructive" : "text-muted-foreground"
+              }`}
+            >
               → {result_summary}
             </span>
           ) : null}
@@ -464,32 +509,71 @@ export function ToolCallBlock({ call, defaultOpen = false }: Props) {
               )}
             </div>
           )}
-          {!showRaw && presentation.result_records.length > 0 && (
+          {/*
+            Error envelope: when the tool returned ``{"error": true,
+            ...}`` render a dedicated error card with the message +
+            locator instead of letting the JsonView dump the raw
+            payload. The raw JSON is still one click away via "show
+            raw".
+          */}
+          {!showRaw && presentation.is_error_envelope && presentation.error && (
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                result
+              <div className="text-[10px] uppercase tracking-wider text-destructive mb-1">
+                error
               </div>
-              <StructuredResultBody presentation={presentation} />
+              <div className="rounded border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-relaxed">
+                <div className="text-foreground whitespace-pre-wrap break-words">
+                  {presentation.error.message}
+                </div>
+                {(presentation.error.locator ||
+                  presentation.error.http_status ||
+                  presentation.error.reason) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                    {presentation.error.locator && (
+                      <span className="font-mono break-all">{presentation.error.locator}</span>
+                    )}
+                    {presentation.error.http_status && (
+                      <span>· HTTP {presentation.error.http_status}</span>
+                    )}
+                    {presentation.error.reason && !presentation.error.http_status && (
+                      <span>· {presentation.error.reason}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
-          {!showRaw && presentation.result_records.length === 0 && presentation.result_lead && (
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                result
+          {!showRaw &&
+            !presentation.is_error_envelope &&
+            presentation.result_records.length > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  result
+                </div>
+                <StructuredResultBody presentation={presentation} />
               </div>
-              <div className="rounded border border-border/60 bg-background px-2 py-1.5 text-xs leading-relaxed">
-                {presentation.result_lead}
+            )}
+          {!showRaw &&
+            !presentation.is_error_envelope &&
+            presentation.result_records.length === 0 &&
+            presentation.result_lead && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  result
+                </div>
+                <div className="rounded border border-border/60 bg-background px-2 py-1.5 text-xs leading-relaxed">
+                  {presentation.result_lead}
+                </div>
+                {presentation.result_raw_json && (
+                  <p className="mt-1 text-[10px] text-muted-foreground italic">
+                    The agent's tool returned a longer payload, but kaos-agents truncated the wire
+                    preview at ~200 chars and the remaining fragment didn't contain a parseable
+                    record. Use <span className="underline">show raw</span> for the bytes that did
+                    arrive, or copy the call JSON.
+                  </p>
+                )}
               </div>
-              {presentation.result_raw_json && (
-                <p className="mt-1 text-[10px] text-muted-foreground italic">
-                  The agent's tool returned a longer payload, but kaos-agents truncated the wire
-                  preview at ~200 chars and the remaining fragment didn't contain a parseable
-                  record. Use <span className="underline">show raw</span> for the bytes that did
-                  arrive, or copy the call JSON.
-                </p>
-              )}
-            </div>
-          )}
+            )}
           {showRaw && call.result_preview && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">

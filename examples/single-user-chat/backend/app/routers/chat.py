@@ -13,6 +13,7 @@ Routes:
 from __future__ import annotations
 
 import json
+import os
 from typing import Annotated, cast
 
 import httpx
@@ -409,16 +410,70 @@ async def send_message(
     # derived from the pre-stream message_count (each turn = 2
     # messages: user + assistant), which is what touch(increment=2)
     # writes into the next session state.
+    import secrets
     from typing import Any
     from urllib.parse import quote
 
     from starlette.background import BackgroundTask
 
     from app.services.persist_turn import persist_turn_completion
+    from app.services.run_log import RunEventLog, read_active_pointer
     from app.services.tool_call_recorder import TurnToolCallRecorder
 
     recorder = TurnToolCallRecorder()
     turn_index = meta.message_count // 2
+
+    # SSE resume Stage 1: refuse a second concurrent POST. If
+    # ``runs/active.json`` still says ``running`` for this session, the
+    # SPA should be calling ``GET /runs/{run_id}/events`` instead. The
+    # 409 body carries enough information for the SPA to open the
+    # resume stream without re-querying ``runs/active``.
+    if runtime is not None:
+        try:
+            active = await read_active_pointer(vfs=runtime.vfs, session_id=session_id)
+        except Exception:  # noqa: BLE001 — never let pointer reads block the turn
+            active = None
+        if active is not None and active.get("status") == "running":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "run_in_progress",
+                    "what": "Another turn is still streaming for this session.",
+                    "how_to_fix": (
+                        "Wait for the existing run to finish or open "
+                        "GET /v1/chat/sessions/{id}/runs/{run_id}/events to resume it."
+                    ),
+                    "run_id": active.get("run_id"),
+                    "started_at": active.get("started_at"),
+                    "alternative_tool": (
+                        f"GET /v1/chat/sessions/{session_id}/runs/{active.get('run_id', '')}/events"
+                    ),
+                },
+            )
+
+    # Run id: deterministic ``turn-{idx:04d}`` prefix + 6 hex chars of
+    # randomness. The prefix keeps log files sortable per session; the
+    # suffix prevents collisions when the same turn index reruns (e.g.
+    # after a soft retry that abandoned an earlier run). See design
+    # §3.1.
+    run_id = f"turn-{turn_index:04d}-{secrets.token_hex(3)}"
+
+    # Open the durable run log BEFORE the upstream POST. ``run_log`` is
+    # ``None`` only when the runtime isn't attached (test stubs); the
+    # SSE generator below treats that as best-effort (no resume log).
+    run_log: RunEventLog | None = None
+    if runtime is not None:
+        try:
+            run_log = await RunEventLog.open(
+                runtime=runtime,
+                session_id=session_id,
+                run_id=run_id,
+                model=meta.model,
+                turn_index=turn_index,
+            )
+        except Exception:  # noqa: BLE001 — log open failures must not break the turn
+            logger.exception("failed to open run_log session=%s run=%s", session_id, run_id)
+            run_log = None
 
     # Shared container for hand-off from the SSE generator to the
     # BackgroundTask. The generator populates ``records`` in its
@@ -427,7 +482,7 @@ async def send_message(
     # sent. Mutable list rather than a Future so we don't pay for
     # cross-task synchronization on a single-producer / single-
     # consumer hand-off.
-    persist_snapshot: dict[str, Any] = {"records": [], "captured": False}
+    persist_snapshot: dict[str, Any] = {"records": [], "captured": False, "errored": False}
 
     async def _fetch_history(sid: str) -> list[HistoryMessage]:
         r = await upstream.get(
@@ -471,21 +526,53 @@ async def send_message(
         property the 2026-05-18 persona matrix found missing in the
         prior finally-block implementation.
         """
-        if not persist_snapshot["captured"]:
-            # Defensive: the generator should always populate the
-            # snapshot in its ``finally:`` block, but a synchronous
-            # exception before the first yield could skip it.
-            return
-        await persist_turn_completion(
-            store=store,
-            session_id=session_id,
-            is_first_turn=is_first_turn,
-            user_message=body.message,
-            sidecar_records=persist_snapshot["records"],
-            runtime=runtime,
-            turn_index=turn_index,
-            fetch_history=_fetch_history,
-        )
+        try:
+            if not persist_snapshot["captured"]:
+                # Defensive: the generator should always populate the
+                # snapshot in its ``finally:`` block, but a synchronous
+                # exception before the first yield could skip it.
+                return
+            await persist_turn_completion(
+                store=store,
+                session_id=session_id,
+                is_first_turn=is_first_turn,
+                user_message=body.message,
+                sidecar_records=persist_snapshot["records"],
+                runtime=runtime,
+                turn_index=turn_index,
+                fetch_history=_fetch_history,
+            )
+        finally:
+            # SSE resume Stage 1: flip the active-pointer to a terminal
+            # state so the SPA's ``runs/active`` poll stops returning
+            # ``running`` for this run. We do this AFTER
+            # ``persist_turn_completion`` so that anything depending on
+            # the still-running pointer (none today, but reserved) sees
+            # a coherent ordering. ``errored`` is set by the SSE
+            # generator's exception handler.
+            if run_log is not None:
+                status_str: Any = "error" if persist_snapshot.get("errored") else "done"
+                try:
+                    await run_log.mark_done(status=status_str)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "failed to mark run done session=%s run=%s",
+                        session_id,
+                        run_id,
+                    )
+
+    # Per-run sequence fallback used when an event payload doesn't
+    # carry ``payload["sequence"]`` (defensive — every kaos-agents
+    # KaosEvent does today, but SPA-side envelopes and any future
+    # synthetic frames may not). Starts at 0 so the leading
+    # ``run_started`` envelope (id=-1) is strictly below the first
+    # real event id.
+    fallback_seq = {"value": 0}
+
+    def _next_fallback_seq() -> int:
+        v = fallback_seq["value"]
+        fallback_seq["value"] = v + 1
+        return v
 
     async def event_generator():
         # AgenticLoop wire-up: drive plan → elevate → execute → check →
@@ -498,7 +585,34 @@ async def send_message(
         from kaos_agents.patterns.agentic_loop import run_agentic_turn
         from kaos_agents.registry import default_tool_group_registry
 
-        from app.services.agentic_worker import make_worker
+        from app.services.agentic_worker import make_worker, persist_canonical_turn
+
+        # SSE resume (Stage 1): emit a leading ``run_started`` envelope
+        # so resume clients pulling from the JSONL log learn the
+        # run_id, session_id, and started_at WITHOUT having to wait
+        # for the first kaos-agents event. ``id: -1`` is intentionally
+        # below any kaos-agents ``sequence`` (which starts at 0) so a
+        # client reconnecting with ``Last-Event-ID: -1`` replays from
+        # the very start. Written to the JSONL FIRST so it shows up at
+        # the head of any resume stream.
+        run_started_payload = {
+            "type": "run_started",
+            "run_id": run_id,
+            "session_id": session_id,
+            "turn_index": turn_index,
+            "started_at": run_log.started_at if run_log is not None else None,
+            "model": meta.model,
+        }
+        if run_log is not None:
+            try:
+                await run_log.append("run_started", run_started_payload, sequence=-1)
+            except Exception:  # noqa: BLE001
+                pass
+        yield {
+            "event": "run_started",
+            "data": json.dumps(run_started_payload),
+            "id": "-1",
+        }
 
         # The planner Signature owns the kept_groups decision (see
         # kaos-agents `_TurnToolPolicySignature` docstring — its
@@ -511,23 +625,57 @@ async def send_message(
         # See kaos-modules/docs/plans/thin-worker-prompt.md M1.
         session_policy = meta.policy.to_session_policy()
         available_groups = sorted(default_tool_group_registry.list_names())
+        # #446 cost-guard fix: the per-iteration worker cap MUST defer
+        # to the session policy's `max_loop_cost_usd` (which is the
+        # user-set per-turn budget) rather than the env-default
+        # `settings.turn_budget_usd`. Pre-fix, a session with a
+        # `$0.25` policy was being given a `$5.00` worker cap, and a
+        # single iteration could spend $12+ before the AgenticLoop's
+        # cumulative `_budget_exceeded` check (which only fires AFTER
+        # the iteration completes) saw the overrun. Use the smaller of
+        # the two so the env-default still serves as a hard ceiling
+        # for sessions whose policy is intentionally unbounded.
+        per_iteration_budget = min(settings.turn_budget_usd, meta.policy.max_loop_cost_usd)
         worker = make_worker(
             client=upstream,
             bearer_token=bearer,
             meta=meta,
-            max_cost_usd=settings.turn_budget_usd,
+            max_cost_usd=per_iteration_budget,
             available_tool_names=available_tool_names or None,
             corpus_markdown=corpus_markdown,
         )
 
+        # Iteration-leak fix (task #458, plan
+        # docs/plans/2026-05-19-agentic-loop-honesty.md §3.1.a). The
+        # worker tagged every upstream POST with
+        # ``is_internal_iteration=True`` on iteration > 1 so kaos-agents
+        # skipped the user + intermediate-assistant memory writes. We
+        # accumulate the final iteration's assistant text from the
+        # streamed text_deltas here and POST the canonical (user, final)
+        # pair to /v1/sessions/{id}/memory/messages/turn after the loop
+        # terminates so SessionMemory.MESSAGES has exactly one user
+        # entry + one assistant entry per turn no matter how many
+        # critic iterations the loop ran.
+        iter_text_parts: list[str] = []
+        last_iter_text: str = ""
         try:
+            # M2 reasoning-action consistency critic — gates the
+            # ``satisfied`` verdict on whether the worker's response
+            # contradicts its own body or the tool results. When it
+            # fires, the loop force-iterates with an M2-derived
+            # thinking_note directive. Off when env var unset so
+            # operators can toggle without a code change.
+            m2_consistency_model = os.environ.get(
+                "KAOS_AGENT_M2_CONSISTENCY_MODEL",
+                "anthropic:claude-haiku-4-5",
+            ) or None
             async for ev in run_agentic_turn(
                 user_message=body.message,
                 policy=session_policy,
                 worker=worker,
                 available_groups=available_groups,
                 session_id=session_id,
-                run_id=f"turn-{turn_index}",
+                run_id=run_id,
                 # corpus_kinds: future magika-classified content-type
                 # labels for uploaded files (kaos-nlp-core P2-1d). Empty
                 # for now — planner gracefully handles missing values.
@@ -537,18 +685,82 @@ async def send_message(
                 # recent_turns: deferred to TR-13 (deeper context). The
                 # planner tolerates an empty string.
                 recent_turns="",
+                m2_consistency_model=m2_consistency_model,
             ):
                 sse_event = _to_sse_event(ev)
                 if sse_event is None:
                     continue
-                # Best-effort tap: parsing failures must not corrupt the
-                # stream. The recorder ignores events it doesn't know.
+                # SSE resume Stage 1: stamp every frame with ``id:``
+                # so EventSource clients can ``Last-Event-ID``-resume.
+                # kaos-agents events carry a per-run monotonic counter
+                # at ``payload["sequence"]`` (``EventEmitter._sequence``);
+                # use that when present and fall back to a local
+                # counter so frames without ``sequence`` still get a
+                # unique, ordered id.
+                payload: Any = None
+                event_name = sse_event.get("event", "")
                 try:
                     payload = json.loads(sse_event["data"]) if "data" in sse_event else None
-                    recorder.observe(sse_event.get("event", ""), payload)
+                except Exception:
+                    payload = None
+                seq_raw = payload.get("sequence") if isinstance(payload, dict) else None
+                if isinstance(seq_raw, int):
+                    sequence = seq_raw
+                else:
+                    sequence = _next_fallback_seq()
+                sse_event["id"] = str(sequence)
+                # Persist BEFORE yielding so resume clients connecting
+                # the instant after the live consumer drops the frame
+                # still see it. The append is best-effort; a write
+                # failure logs internally and the live stream keeps
+                # flowing.
+                if run_log is not None and isinstance(payload, dict):
+                    try:
+                        await run_log.append(event_name, payload, sequence=sequence)
+                    except Exception:
+                        pass
+                # Best-effort tap: parsing failures must not corrupt
+                # the stream. The recorder ignores events it doesn't
+                # know.
+                try:
+                    recorder.observe(event_name, payload)
                 except Exception:
                     pass
+
+                # Iteration-leak fix companion accumulator. Each worker
+                # iteration emits a stream of ``text_delta`` events
+                # followed by a single ``turn_summary``. Reset the
+                # per-iteration accumulator on ``turn_summary`` so the
+                # final value of ``last_iter_text`` after the loop is
+                # the LAST iteration's assistant text (the one the
+                # critic accepted — or the one we ended on if the loop
+                # terminated for budget / insufficient-evidence /
+                # max-iterations). See plan §3.1.a.
+                if isinstance(payload, dict):
+                    ptype = payload.get("type")
+                    if ptype == "text_delta":
+                        content = payload.get("content")
+                        if isinstance(content, str):
+                            iter_text_parts.append(content)
+                    elif ptype == "turn_summary":
+                        candidate = "".join(iter_text_parts)
+                        # Prefer the worker's own concatenated text
+                        # field when populated; the SSE deltas are the
+                        # ground truth otherwise.
+                        summary_text = payload.get("text")
+                        if isinstance(summary_text, str) and summary_text:
+                            candidate = summary_text
+                        if candidate:
+                            last_iter_text = candidate
+                        iter_text_parts.clear()
+
                 yield sse_event
+        except Exception:
+            # Any uncaught exception in the loop means the turn
+            # errored. Flag it so ``_do_persist`` marks the run as
+            # ``error`` in the active pointer.
+            persist_snapshot["errored"] = True
+            raise
         finally:
             # All we do here is snapshot the recorder state so the
             # BackgroundTask attached to the response below can read
@@ -562,10 +774,37 @@ async def send_message(
             )
             persist_snapshot["captured"] = True
 
+            # Iteration-leak fix (task #458). Companion to the
+            # worker's per-iteration ``is_internal_iteration=True``
+            # flag — POST the canonical (user, final-assistant) pair
+            # to kaos-agents' new /memory/messages/turn endpoint so
+            # SessionMemory.MESSAGES has exactly one user entry + one
+            # assistant entry for this turn (no matter how many critic
+            # iterations the loop ran). Best-effort: a failure here
+            # degrades the next turn's context assembly but must not
+            # break the turn the user just observed succeed.
+            if last_iter_text:
+                try:
+                    await persist_canonical_turn(
+                        client=upstream,
+                        bearer_token=bearer,
+                        session_id=session_id,
+                        user_message=body.message,
+                        assistant_message=last_iter_text,
+                    )
+                except Exception:
+                    logger.exception(
+                        "persist_canonical_turn failed session=%s",
+                        session_id,
+                    )
+
     return EventSourceResponse(
         event_generator(),
         ping=15,
-        headers={"X-Accel-Buffering": "no"},
+        # ``X-Kaos-Run-Id`` lets the SPA stash the run id synchronously
+        # off the response headers without waiting for the leading
+        # ``run_started`` envelope — see design §3.1.
+        headers={"X-Accel-Buffering": "no", "X-Kaos-Run-Id": run_id},
         # Starlette runs ``_do_persist`` AFTER the response body is
         # fully sent. The framework owns the lifetime, so a client
         # disconnect during streaming doesn't cancel these writes —

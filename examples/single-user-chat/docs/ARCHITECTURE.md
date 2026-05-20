@@ -361,7 +361,9 @@ class AppSettings(BaseSettings):
     env: Literal["development", "production", "test"] = "development"
 
     # Defaults used when a new session is created without explicit overrides.
-    default_model: str = "anthropic:claude-haiku-4-5"
+    # Audience is attorneys; default to a frontier reasoning tier. Do NOT
+    # downshift to "haiku" / "mini" / "nano" — see docs/PRD.md § 6.
+    default_model: str = "anthropic:claude-opus-4-7"
     default_system_prompt: str = DEFAULT_INSTRUCTIONS
     default_tools_enabled: bool = False
     turn_budget_usd: float = 0.50
@@ -697,7 +699,7 @@ KAOS_AGENTS_API_API_CORS_ALLOW_ORIGINS=http://localhost:5173
 
 # example-specific defaults
 APP_ENV=development
-APP_DEFAULT_MODEL=anthropic:claude-haiku-4-5
+APP_DEFAULT_MODEL=anthropic:claude-opus-4-7
 APP_TURN_BUDGET_USD=0.50
 
 # LLM provider keys

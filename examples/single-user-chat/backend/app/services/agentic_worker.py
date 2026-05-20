@@ -131,6 +131,23 @@ def make_worker(
             augmented_meta = meta
 
         # ── 3. Pump the upstream stream + collect ────────────────────
+        # Iteration-leak fix (task #458, plan
+        # docs/plans/2026-05-19-agentic-loop-honesty.md §3.1.a):
+        # **every** critic-driven iteration (including iteration 1)
+        # sets ``is_internal_iteration=True`` on the upstream POST so
+        # the kaos-agents BaseAgent skips writing user + intermediate
+        # assistant messages to SessionMemory.MESSAGES. After the loop
+        # terminates, the SPA's ``send_message`` finally-block POSTs
+        # the canonical (user_message, final_worker_text) pair to
+        # ``/v1/sessions/{id}/memory/messages/turn`` via
+        # :func:`persist_canonical_turn` — the post-loop write is the
+        # SINGLE source of truth for persisted messages, so memory has
+        # exactly one user entry + one assistant entry per user turn
+        # no matter how many iterations the loop ran. Previously the
+        # iter-1 path passed False and the post-loop write added a
+        # second pair (4 entries persisted for a 3-iter turn); fixed
+        # 2026-05-20 (task #498).
+        is_internal = True
         t_start = time.monotonic()
         text_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
@@ -149,6 +166,7 @@ def make_worker(
             available_tool_names=available_tool_names,
             corpus_markdown=corpus_markdown,
             tool_set_override=per_iter_tool_set,
+            is_internal_iteration=is_internal,
         ):
             captured_events.append(record)
             payload = _parse_payload(record)
@@ -184,6 +202,48 @@ def make_worker(
         )
 
     return _worker
+
+
+async def persist_canonical_turn(
+    *,
+    client: httpx.AsyncClient,
+    bearer_token: str,
+    session_id: str,
+    user_message: str,
+    assistant_message: str,
+) -> bool:
+    """POST the canonical (user, final-assistant) pair to the new
+    ``/v1/sessions/{id}/memory/messages/turn`` endpoint.
+
+    Called by the SPA's ``send_message`` handler exactly once at the
+    end of an AgenticLoop turn — companion to the
+    ``is_internal_iteration=True`` flag the worker sets on every
+    upstream POST (see task #458 / plan
+    docs/plans/2026-05-19-agentic-loop-honesty.md §3.1.a).
+
+    Returns True on a 2xx response, False otherwise. Failures are
+    logged but never re-raised — losing the canonical write degrades
+    the next turn's context assembly but must not break the turn the
+    user just observed succeed.
+    """
+    body = {
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+    }
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    try:
+        resp = await client.post(
+            f"/v1/sessions/{session_id}/memory/messages/turn",
+            headers=headers,
+            json=body,
+        )
+    except httpx.HTTPError:
+        return False
+    return 200 <= resp.status_code < 300
 
 
 def _parse_payload(record: dict[str, str]) -> dict[str, Any] | None:

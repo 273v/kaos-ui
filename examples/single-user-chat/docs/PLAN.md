@@ -19,7 +19,7 @@ These came out of running real `uv run --with kaos-agents …` snippets against 
 - **Backend strategy:** mount `kaos_agents.api.server.create_app()` and add a thin extension layer (`/v1/models`, `/v1/chat/*`). See `ARCHITECTURE.md` § 4.
 - **`packages/ui` consumption:** sync-on-install via `scripts/sync-ui.sh` that stamps placeholders. `packages/ui/` is `.gitignore`d. See `ARCHITECTURE.md` § 2.
 - **`kaos-llm-core`** is NOT transitive from `kaos-agents==0.1.0a1`; must be in `[project].dependencies`.
-- **Default model**: `anthropic:claude-haiku-4-5` (`KaosAgentSettings().default_llm_model`).
+- **Default model**: `anthropic:claude-opus-4-7` (`AppSettings.default_model` in this SPA — overrides the kaos-agents library default of `claude-haiku-4-5`). The library default is a routing/classification baseline; this SPA ships to attorneys, so it overrides to a frontier reasoning tier.
 - **VFS path**: `.kaos-vfs/kaos-agents/sessions/{id}/memory.json` (note the `sessions/` segment), with `graph.ttl` alongside.
 - **Wire event taxonomy**: 15 event classes; `span` carries `(subject, phase)`. Frontend dispatches on both.
 - **Env literal**: `"development"` not `"dev"` (matches the template).
@@ -104,17 +104,19 @@ make doctor                                    # all green
   ```python
   from kaos_llm_client.cost import MODEL_PRICING, PRICING_LAST_UPDATED
 
+  # Audience: attorneys billing $hundreds to $thousands/hour. Floor:
+  # gpt ≥ 5.4, claude ≥ 4.5, gemini ≥ 2.5. Cheap mini / nano / older
+  # tiers + xAI/Grok are deliberately excluded — the inference cost
+  # delta is rounding error against the liability of a wrong answer.
   _CURATED = (
-      ("anthropic:claude-haiku-4-5",  "Claude Haiku 4.5",   "Fast everyday chat"),
+      ("anthropic:claude-opus-4-7",   "Claude Opus 4.7",    "Maximum reasoning — default for legal work"),
       ("anthropic:claude-sonnet-4-6", "Claude Sonnet 4.6",  "Balanced reasoning"),
-      ("anthropic:claude-opus-4-7",   "Claude Opus 4.7",    "Maximum reasoning"),
-      ("openai:gpt-5",                "GPT-5",              "OpenAI flagship"),
-      ("openai:gpt-5.5",              "GPT-5.5",            "Latest OpenAI"),
-      ("openai:gpt-4.1-mini",         "GPT-4.1 mini",       "Cheap, capable"),
+      ("anthropic:claude-haiku-4-5",  "Claude Haiku 4.5",   "Fast classification / routing"),
+      ("openai:gpt-5.5",              "GPT-5.5",            "OpenAI flagship — alternate default"),
+      ("openai:gpt-5.4",              "GPT-5.4",            "OpenAI frontier"),
+      ("openai:gpt-5.4-mini",         "GPT-5.4 mini",       "Fast OpenAI"),
+      ("google:gemini-2.5-pro",       "Gemini 2.5 Pro",     "Long context, deep reasoning"),
       ("google:gemini-2.5-flash",     "Gemini 2.5 Flash",   "Long context, fast"),
-      ("google:gemini-2.5-pro",       "Gemini 2.5 Pro",     "Long context, deep"),
-      ("xai:grok-3",                  "Grok 3",             "Real-time leaning"),
-      ("xai:grok-3-mini",             "Grok 3 mini",        "Cheap Grok"),
   )
 
   def build_models() -> list[ModelEntry]:
