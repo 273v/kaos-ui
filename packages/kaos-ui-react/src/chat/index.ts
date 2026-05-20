@@ -17,6 +17,8 @@ export { CitationsPanel } from "./CitationsPanel.js";
 export { DocumentExplorer } from "./DocumentExplorer.js";
 export type { AskAboutSelection } from "./DocumentExplorer.js";
 export { EmptyState } from "./EmptyState.js";
+export { ErrorBanner } from "./ErrorBanner.js";
+export { SkeletonLine, SkeletonRow } from "./Skeleton.js";
 export { ModelPicker } from "./ModelPicker.js";
 export type { ModelEntry } from "./ModelPicker.js";
 export { ToolPolicyBadge } from "./ToolPolicyBadge.js";

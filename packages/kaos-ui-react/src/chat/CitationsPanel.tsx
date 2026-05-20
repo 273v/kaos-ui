@@ -15,6 +15,7 @@ import { useState } from "react";
 
 import type { Citation } from "../lib/citations.js";
 import { EmptyState } from "./EmptyState.js";
+import { ErrorBanner } from "./ErrorBanner.js";
 
 interface Props {
   open: boolean;
@@ -238,11 +239,8 @@ export function CitationsPanel({
       </header>
 
       {error && (
-        <div
-          role="alert"
-          className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-        >
-          {error}
+        <div className="mx-3 mt-3">
+          <ErrorBanner message={error} />
         </div>
       )}
 
