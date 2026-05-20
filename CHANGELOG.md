@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a12] — 2026-05-20
+
+The Stable+1 sweep release. Closes 8 backlog items spanning architectural
+debt (#447), UX polish (#341, #309, #310, #313, #314, #315, #316, #317),
+and follow-on documentation. Ships shared primitives in the
+`@273v/kaos-ui-react` package so future surfaces have a consistent
+visual language for empty / loading / error states.
+
+### Added — Shared UI primitives in `@273v/kaos-ui-react/chat`
+
+- **`<EmptyState>`** — single visual treatment for "nothing here yet"
+  panels: optional icon + headline + description + CTA, with default
+  + compact size variants. Replaces the three+ ad-hoc empty-state
+  implementations across the panels. (#315)
+- **`<SkeletonLine>` / `<SkeletonRow>`** — Tailwind-pulse loading
+  primitives with `motion-reduce` discipline + sr-only AT
+  announcement. (#316)
+- **`<ErrorBanner>`** — destructive/warning two-tone banner with
+  optional retry + dismiss, `role="alert" aria-live="polite"`. (#317)
+
+### Added — Audit-trace endpoint
+
+- `GET /v1/chat/sessions/{id}/audit-trace` proxies kaos-agents'
+  canonical `/v1/sessions/{id}/memory/actions` so external consumers
+  (kaos-audit-session CLI, debug overlays, downstream analytics) have
+  one SPA-side URL pointing at the authoritative full action trace.
+  Closes the architectural confusion that the SPA sidecar JSONL was
+  the right audit source — it isn't, by design. The sidecar is the
+  wire-level chip-UI subset; this endpoint is the canonical trace. (#447)
+
+### Added — Document remove affordance
+
+- `DocumentExplorer` now accepts `onRemove(filename)` + `removing`
+  props. Renders a trash icon on each file card with a two-click
+  confirm pattern (first click → Check icon + destructive styling;
+  second click → commit; auto-resets after 4s of inactivity). Wired
+  through to `useDeleteFile(sessionId)` in the SPA host. The backend
+  DELETE endpoint already existed. (#309 / #341)
+
+### Added — Citations panel grouping toggle
+
+- Per-message vs per-kind grouping toggle in the panel header (2-button
+  segmented control). New `KindBadge` component with coarse category
+  coloring (legal=blue, finance=green, accounting=amber, identifier=zinc)
+  so users can scan a mixed-kind list and see the dominant domain. (#310)
+
+### Added — Session kebab export submenu
+
+- The session list-item kebab now exposes three Export entries
+  (Markdown / JSON / DOCX) wired to the existing `/transcript?format=...`
+  backend endpoint via an `ExportMenuItem` helper that does
+  authenticated fetch + blob + browser save. (#313)
+
+### Changed — AgenticLoop UX composition + spacing pass
+
+- `Message.tsx` article wrapper now uses `space-y-3` so the AgenticLoop
+  per-message primitives (ToolPolicyBadge, ElevationPill, ReasoningSummary,
+  PlanCard, ToolCallTimeline, body, CapabilityApproval, GoalCheckBadge,
+  LoopTerminatedBanner, UsageChip) get consistent vertical rhythm
+  instead of each component managing its own ad-hoc `mb-3`. Removed
+  the redundant wrapper around PlanCard. (#314)
+
+### Changed — Recorder scope documentation
+
+- `TurnToolCallRecorder` docstring now explicitly documents the
+  wire-level-only scope: chips show user-visible tool activity
+  (`Span(TOOL_CALL, ...)` events); planner / critic / Signature /
+  auto-titler internal LLM calls land in `SessionMemory.ACTIONS` only.
+  Two surfaces, two consumers, both correct. Pairs with the new
+  audit-trace endpoint above. (#447)
+
 ## [0.1.0a11] — 2026-05-20
 
 The 0.1.0b1-followup patch. Fixes the two P0s surfaced during the
