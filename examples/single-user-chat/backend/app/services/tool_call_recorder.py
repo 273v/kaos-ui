@@ -21,6 +21,35 @@ wins on duplicate `call_id` so re-runs are idempotent.
 The recorder is intentionally pure — it doesn't reach into kaos-agents
 internals or the VFS. The caller hands it events one by one and then
 asks it to flush to a path.
+
+### Scope — wire-level only (#447 documented limitation)
+
+The sidecar captures the **wire-level subset** of tool calls — the ones
+that fire ``Span(TOOL_CALL, ...)`` SSE events because they emit chips
+into the UI. It does NOT capture:
+
+- Planner Signature LLM calls
+- Critic / GoalCheck / M2-Consistency Signature LLM calls
+- IntentSignature classification calls
+- Auto-titler LLM calls
+- Other internal agent reasoning calls that don't surface as
+  user-visible tool activity
+
+Those internal calls land in ``SessionMemory.ACTIONS`` (kaos-agents'
+own action trace) but never as ``Span(TOOL_CALL, ...)`` because they
+aren't tools — they're internal reasoning steps. This means:
+
+- For **live chip UI rendering**: the sidecar is correct + sufficient.
+  Chips show user-visible tool activity, which is what users want.
+- For **full agent activity audit**: ALWAYS read kaos-agents' own
+  ``/v1/sessions/{id}/memory/actions`` endpoint. That's the canonical
+  source. The ``kaos-audit-session`` CLI (#441) routes here.
+
+Persona-matrix audits that compared sidecar.jsonl vs memory.json on
+2026-05-19 flagged this as "recorder undercount" (#447) — that was
+correct as a finding but the SPA recorder behavior is by-design.
+The audit CLI is the right consumer for the full trace; the sidecar
+is the right consumer for the chip UI. Two surfaces, two consumers.
 """
 
 from __future__ import annotations

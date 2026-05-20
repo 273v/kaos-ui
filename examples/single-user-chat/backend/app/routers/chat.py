@@ -1244,3 +1244,65 @@ async def transcript_export(
             "Content-Disposition": f'attachment; filename="{meta.title}.docx"',
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Audit trace — #447 closes the recorder vs memory.json undercount confusion.
+#
+# The per-turn sidecar at ``sessions/{id}/toolcalls/turn-NNNN.jsonl`` is the
+# wire-level subset (chip UI surface). The canonical full trace lives in
+# kaos-agents' ``SessionMemory.ACTIONS`` and is reachable via the upstream
+# ``/v1/sessions/{id}/memory/actions`` endpoint. This SPA-side endpoint
+# proxies that canonical source so external consumers (kaos-audit-session
+# CLI, debug overlays, downstream analytics) have one URL to hit without
+# needing to know about the upstream kaos-agents API or fetching the bearer
+# token themselves.
+#
+# Semantics:
+#   GET /v1/chat/sessions/{id}/audit-trace -> JSON {"items": [...]}
+#   Each item is one MemoryActions row: tool_name, args, result_summary,
+#   duration_ms, is_error, added_at, plan_id, step_id, etc.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions/{session_id}/audit-trace")
+async def get_audit_trace(
+    session_id: str,
+    request: Request,
+    store: StoreDep,
+    upstream: UpstreamDep,
+) -> Response:
+    """#447 — canonical full action trace for one session.
+
+    Reads ``SessionMemory.ACTIONS`` via the upstream kaos-agents endpoint
+    and returns it verbatim. This is the authoritative source for full
+    agent activity (including planner / critic / Signature LLM calls
+    that don't surface as wire-level tool chips).
+
+    External consumers that need to audit an agent run should hit THIS
+    endpoint, not the per-turn sidecar JSONL. The sidecar is the wire-
+    level subset for chip-UI rendering only.
+    """
+    try:
+        await store.get(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    bearer = _bearer_from_request(request)
+    r = await upstream.get(
+        f"/v1/sessions/{session_id}/memory/actions",
+        headers={"Authorization": f"Bearer {bearer}"},
+    )
+    if r.status_code >= 400:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "what": f"upstream returned {r.status_code} fetching memory/actions",
+                "how_to_fix": "retry; if persistent, check kaos-agents API health",
+                "alternative": "read the per-turn sidecar JSONL for the wire-level subset",
+            },
+        )
+    return Response(
+        content=r.text,
+        media_type="application/json",
+    )
