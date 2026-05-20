@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FileMeta } from "../lib/files.js";
+import { EmptyState } from "./EmptyState.js";
 
 /**
  * Payload for the "Ask about this" affordance — the doc-explorer's
@@ -419,9 +420,11 @@ export function DocumentExplorer({
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {files.length === 0 && !loading ? (
-          <p className="text-xs text-muted-foreground italic">
-            No documents uploaded yet. Drag a PDF, DOCX, or PPTX into the chat to add one.
-          </p>
+          <EmptyState
+            icon={<FileText className="h-6 w-6" />}
+            title="No documents yet"
+            description="Drag a PDF, DOCX, or PPTX into the chat to add one."
+          />
         ) : (
           <ul className="space-y-2 list-none p-0 m-0">
             {files.map((f) => (

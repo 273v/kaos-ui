@@ -14,6 +14,7 @@ import { ExternalLink, Hash, Loader2, MessageSquare, Quote, X } from "lucide-rea
 import { useState } from "react";
 
 import type { Citation } from "../lib/citations.js";
+import { EmptyState } from "./EmptyState.js";
 
 interface Props {
   open: boolean;
@@ -247,10 +248,11 @@ export function CitationsPanel({
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {visibleTotal === 0 && !pending && (
-          <p className="text-xs text-muted-foreground italic">
-            No citations detected yet. Citations appear here after the agent's response is
-            extracted.
-          </p>
+          <EmptyState
+            icon={<Quote className="h-6 w-6" />}
+            title="No citations yet"
+            description="Citations appear here after the agent's response is extracted."
+          />
         )}
         {groupMode === "kind" &&
           kindKeys.map((kind) => (

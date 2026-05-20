@@ -16,6 +16,7 @@ export { FileChips } from "./FileChips.js";
 export { CitationsPanel } from "./CitationsPanel.js";
 export { DocumentExplorer } from "./DocumentExplorer.js";
 export type { AskAboutSelection } from "./DocumentExplorer.js";
+export { EmptyState } from "./EmptyState.js";
 export { ModelPicker } from "./ModelPicker.js";
 export type { ModelEntry } from "./ModelPicker.js";
 export { ToolPolicyBadge } from "./ToolPolicyBadge.js";
