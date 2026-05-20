@@ -10,11 +10,13 @@
 import {
   ChevronDown,
   ChevronRight,
+  Check,
   Download,
   FileText,
   Loader2,
   MessageSquareQuote,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -81,6 +83,15 @@ interface Props {
    * (typically a search-param-driven route navigation).
    */
   onAskAboutSelection?: (payload: AskAboutSelection) => void;
+  /**
+   * Per-file: remove a file from the session corpus. The trash icon
+   * uses a two-click confirm pattern (first click reveals a Check
+   * icon, second click commits). When omitted, the trash icon does
+   * not render. Closes #341 UX-A3.
+   */
+  onRemove?: (filename: string) => void | Promise<void>;
+  /** Filenames currently mid-remove — renders a spinner on those cards. */
+  removing?: ReadonlySet<string>;
 }
 
 function formatSize(bytes: number): string {
@@ -102,6 +113,8 @@ function FileCard({
   downloadUrl,
   onDownload,
   onAskAboutSelection,
+  onRemove,
+  removing,
 }: {
   file: FileMeta;
   onResummarize?: (filename: string) => void;
@@ -109,10 +122,21 @@ function FileCard({
   downloadUrl?: string | null;
   onDownload?: (filename: string) => void | Promise<void>;
   onAskAboutSelection?: (payload: AskAboutSelection) => void;
+  onRemove?: (filename: string) => void | Promise<void>;
+  removing?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const failed = file.parse.status === "failed";
   const hasSummary = !!file.summary;
+
+  // Auto-reset the confirm state after 4s of no second click — prevents
+  // a half-armed "delete" button from sitting around indefinitely.
+  useEffect(() => {
+    if (!confirmRemove) return;
+    const t = window.setTimeout(() => setConfirmRemove(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [confirmRemove]);
 
   // Highlight-to-Ask state. We track the most recent selection scoped
   // to *this card's* summary container; cross-card selections are
@@ -249,6 +273,36 @@ function FileCard({
               )}
             </button>
           )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirmRemove) {
+                  setConfirmRemove(false);
+                  void onRemove(file.filename);
+                } else {
+                  setConfirmRemove(true);
+                }
+              }}
+              disabled={removing}
+              title={confirmRemove ? `Click again to confirm removing ${file.filename}` : `Remove ${file.filename}`}
+              aria-label={confirmRemove ? `Confirm remove ${file.filename}` : `Remove ${file.filename}`}
+              className={`p-1 disabled:opacity-60 disabled:cursor-not-allowed ${
+                confirmRemove
+                  ? "text-destructive hover:text-destructive/80"
+                  : "text-muted-foreground hover:text-destructive"
+              }`}
+            >
+              {removing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : confirmRemove ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+            </button>
+          )}
         </div>
       </div>
       {open && (
@@ -310,6 +364,8 @@ export function DocumentExplorer({
   getDownloadUrl,
   onDownload,
   onAskAboutSelection,
+  onRemove,
+  removing,
 }: Props) {
   if (!open) return null;
   const needsBackfill = files.some(
@@ -377,6 +433,8 @@ export function DocumentExplorer({
                 downloadUrl={getDownloadUrl?.(f.filename)}
                 onDownload={onDownload}
                 onAskAboutSelection={onAskAboutSelection}
+                onRemove={onRemove}
+                removing={removing?.has(f.filename)}
               />
             ))}
           </ul>

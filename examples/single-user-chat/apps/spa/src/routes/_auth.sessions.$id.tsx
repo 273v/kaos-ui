@@ -691,6 +691,12 @@ function ChatDetail() {
             ? new Set([backfill.variables.filename])
             : undefined
         }
+        onRemove={(filename) => removeFile.mutate(filename)}
+        removing={
+          removeFile.variables && removeFile.isPending
+            ? new Set([removeFile.variables])
+            : undefined
+        }
         onAskAboutSelection={onAskAboutSelection}
         onDownload={async (filename) => {
           // Authenticated fetch → blob → trigger save. A plain <a href>
