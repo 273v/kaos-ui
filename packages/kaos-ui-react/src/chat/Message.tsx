@@ -329,6 +329,11 @@ function ToolCallTimeline({
   const groupable = calls.length > 1 && !verboseTools && !anyRunning && !anyErrored;
   const [userExpanded, setUserExpanded] = useState(false);
   const showExpanded = !groupable || userExpanded;
+  // #507: group-level expand-all / collapse-all. `null` means the
+  // user hasn't clicked the master toggle yet — each card honors its
+  // own per-card state. `true` / `false` propagates to every card via
+  // the `forceOpen` prop.
+  const [forceAllOpen, setForceAllOpen] = useState<boolean | null>(null);
 
   // Compact summary names — dedupe + cap at first 3 for the chip,
   // suffix with "+N more" when there are extras. Reads like the
@@ -414,6 +419,31 @@ function ToolCallTimeline({
             </button>
           </>
         )}
+        {/* #507: per-card expand-all / collapse-all. Visible when the
+            group is expanded AND has more than one call. Click sets
+            `forceAllOpen` which each card mirrors via the `forceOpen`
+            prop. */}
+        {calls.length > 1 && (
+          <>
+            <span aria-hidden className="text-foreground/30">·</span>
+            <button
+              type="button"
+              onClick={() => setForceAllOpen((prev) => !prev)}
+              className="text-foreground/50 hover:text-foreground transition-colors normal-case tracking-normal"
+              aria-label={
+                forceAllOpen === true ? "Collapse all tool cards" : "Expand all tool cards"
+              }
+              aria-pressed={forceAllOpen === true}
+              title={
+                forceAllOpen === true
+                  ? "Collapse all (every card shows just the header)"
+                  : "Expand all (every card shows the full args + result)"
+              }
+            >
+              {forceAllOpen === true ? "collapse all" : "expand all"}
+            </button>
+          </>
+        )}
       </div>
       {calls.map((tc, i) => (
         <div key={tc.id} className="flex items-stretch gap-2">
@@ -439,6 +469,7 @@ function ToolCallTimeline({
                 tc.status === "error" ||
                 tc.status === "running"
               }
+              forceOpen={forceAllOpen ?? undefined}
             />
           </div>
         </div>

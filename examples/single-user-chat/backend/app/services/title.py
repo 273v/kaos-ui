@@ -153,11 +153,38 @@ async def maybe_retitle_session(
 
         model = _resolve_title_model()
         if model == _BASELINE_TITLE_MODEL:
-            title = (await summarize_session_title(conversation=conversation)).strip()
+            raw = await summarize_session_title(conversation=conversation)
         else:
             sig_cls = summarize_session_title._signature_class  # type: ignore[attr-defined]
             call = Call(sig_cls, model=model, max_retries=1)
-            title = (await call(conversation=conversation)).strip()
+            raw = await call(conversation=conversation)
+        # #428: kaos-llm-core's single-field Signature auto-unwrap
+        # (introduced in 0.1.0a15) returns a plain ``str`` for
+        # Signatures whose @llm_call return type is ``str``. Older
+        # versions — and the ``Call(sig_cls, ...)`` direct path — can
+        # still hand back a ``SignatureOutput``-shaped wrapper. Both
+        # need to coerce to ``str`` BEFORE ``.strip()`` so titler does
+        # not silently die with ``AttributeError: 'SignatureOutput'
+        # object has no attribute 'strip'``.
+        if isinstance(raw, str):
+            title = raw.strip()
+        else:
+            # SignatureOutput exposes the single declared output field
+            # at index 0 of ``raw.outputs`` OR as an attribute named
+            # after the Signature's field. Fall back to ``str(raw)``
+            # when neither shape matches — better a stringified
+            # wrapper than no title at all.
+            outputs = getattr(raw, "outputs", None)
+            if outputs:
+                first = outputs[0] if isinstance(outputs, (list, tuple)) else None
+                value = getattr(first, "value", None) if first is not None else None
+                title = str(value).strip() if value is not None else str(raw).strip()
+            else:
+                # @llm_call str-typed Signatures use a `title` or
+                # generic single-field name. Use the only attribute
+                # that isn't reserved.
+                attr = getattr(raw, "title", None) or getattr(raw, "value", None)
+                title = str(attr).strip() if attr is not None else str(raw).strip()
     except Exception as exc:
         logger.warning("title summarize failed for %s: %s", session_id, exc)
         return

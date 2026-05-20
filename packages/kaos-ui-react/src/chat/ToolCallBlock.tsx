@@ -43,6 +43,15 @@ interface Props {
   call: ToolCallSummary;
   /** Start expanded. Default false. */
   defaultOpen?: boolean;
+  /**
+   * Group-level override (#507): when set, the card MIRRORS this
+   * value and ignores its internal toggle. The parent `<ToolCallTimeline>`
+   * uses this to drive expand-all / collapse-all in one click without
+   * losing the per-card click handler when the override is cleared.
+   * Default ``undefined`` — each card manages its own state from
+   * ``defaultOpen``.
+   */
+  forceOpen?: boolean;
 }
 
 function StatusIcon({
@@ -417,12 +426,21 @@ function StructuredResultBody({
   return <JsonView value={result_records[0]} maxHeight={240} truncated={!rawRoundTrips} />;
 }
 
-export function ToolCallBlock({ call, defaultOpen = false }: Props) {
+export function ToolCallBlock({ call, defaultOpen = false, forceOpen }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [showRaw, setShowRaw] = useState(false);
   useEffect(() => {
     setOpen(defaultOpen);
   }, [defaultOpen]);
+  // #507: group-level expand-all / collapse-all override. When the
+  // parent timeline toggles its master state, propagate to every card
+  // by re-running the effect on `forceOpen` change. Clearing `forceOpen`
+  // (parent sets to `undefined`) returns control to the per-card click.
+  useEffect(() => {
+    if (forceOpen !== undefined) {
+      setOpen(forceOpen);
+    }
+  }, [forceOpen]);
 
   const presentation = formatToolCall(call);
   const { label, args_summary, result_summary } = presentation;

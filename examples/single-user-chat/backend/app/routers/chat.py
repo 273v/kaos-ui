@@ -532,6 +532,31 @@ async def send_message(
                 # snapshot in its ``finally:`` block, but a synchronous
                 # exception before the first yield could skip it.
                 return
+            # UX-D1 (#427): the canonical-turn POST was previously in
+            # the SSE generator's ``finally:`` block alongside the
+            # snapshot capture, which made it vulnerable to
+            # client-disconnect cancellation (the same failure mode the
+            # 2026-05-18 persona matrix found for ``persist_turn_completion``).
+            # Move it INTO the BackgroundTask so Starlette's
+            # response-lifetime contract protects it. The snapshot
+            # captures ``last_iter_text`` for hand-off.
+            canonical_text = persist_snapshot.get("last_iter_text") or ""
+            if canonical_text:
+                try:
+                    from app.services.agentic_worker import persist_canonical_turn
+
+                    await persist_canonical_turn(
+                        client=upstream,
+                        bearer_token=bearer,
+                        session_id=session_id,
+                        user_message=body.message,
+                        assistant_message=canonical_text,
+                    )
+                except Exception:
+                    logger.exception(
+                        "persist_canonical_turn failed session=%s",
+                        session_id,
+                    )
             await persist_turn_completion(
                 store=store,
                 session_id=session_id,
@@ -585,7 +610,7 @@ async def send_message(
         from kaos_agents.patterns.agentic_loop import run_agentic_turn
         from kaos_agents.registry import default_tool_group_registry
 
-        from app.services.agentic_worker import make_worker, persist_canonical_turn
+        from app.services.agentic_worker import make_worker
 
         # SSE resume (Stage 1): emit a leading ``run_started`` envelope
         # so resume clients pulling from the JSONL log learn the
@@ -665,10 +690,13 @@ async def send_message(
             # fires, the loop force-iterates with an M2-derived
             # thinking_note directive. Off when env var unset so
             # operators can toggle without a code change.
-            m2_consistency_model = os.environ.get(
-                "KAOS_AGENT_M2_CONSISTENCY_MODEL",
-                "anthropic:claude-haiku-4-5",
-            ) or None
+            m2_consistency_model = (
+                os.environ.get(
+                    "KAOS_AGENT_M2_CONSISTENCY_MODEL",
+                    "anthropic:claude-haiku-4-5",
+                )
+                or None
+            )
             async for ev in run_agentic_turn(
                 user_message=body.message,
                 policy=session_policy,
@@ -780,23 +808,29 @@ async def send_message(
             # to kaos-agents' new /memory/messages/turn endpoint so
             # SessionMemory.MESSAGES has exactly one user entry + one
             # assistant entry for this turn (no matter how many critic
-            # iterations the loop ran). Best-effort: a failure here
-            # degrades the next turn's context assembly but must not
-            # break the turn the user just observed succeed.
-            if last_iter_text:
-                try:
-                    await persist_canonical_turn(
-                        client=upstream,
-                        bearer_token=bearer,
-                        session_id=session_id,
-                        user_message=body.message,
-                        assistant_message=last_iter_text,
-                    )
-                except Exception:
-                    logger.exception(
-                        "persist_canonical_turn failed session=%s",
-                        session_id,
-                    )
+            # iterations the loop ran).
+            #
+            # #504 follow-up: if the loop terminated without a closing
+            # ``turn_summary`` event for the final iteration (abrupt
+            # client disconnect, upstream stream truncation, a
+            # terminator that emits text_delta + LoopTerminated without
+            # the wrapping turn_summary), the unflushed
+            # ``iter_text_parts`` still represent the most-recent text
+            # the user saw. Merge them in BEFORE the persist so memory
+            # captures the same final text as the UI rendered.
+            if iter_text_parts:
+                tail = "".join(iter_text_parts)
+                if tail and tail != last_iter_text:
+                    last_iter_text = tail
+                iter_text_parts.clear()
+            # UX-D1 (#427): hand off ``last_iter_text`` to the
+            # BackgroundTask via ``persist_snapshot`` instead of
+            # awaiting ``persist_canonical_turn`` here. Awaiting INSIDE
+            # the SSE generator's ``finally:`` block is vulnerable to
+            # client-disconnect cancellation. Starlette's
+            # ``BackgroundTask`` is the safe place — it runs after the
+            # response body is fully sent regardless of client state.
+            persist_snapshot["last_iter_text"] = last_iter_text
 
     return EventSourceResponse(
         event_generator(),
