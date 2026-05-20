@@ -4,7 +4,13 @@ on:
   push:
     tags:
       - "v*"
+      - "kaos-ui-react@*"
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: "Run publish-kaos-ui-react against the current ref (no tag required)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -181,3 +187,60 @@ jobs:
             $PRERELEASE_FLAG \
             dist/* \
             sbom/*
+
+  publish-kaos-ui-react:
+    name: Publish @273v/kaos-ui-react to npm
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.ref, 'refs/tags/kaos-ui-react@') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build kaos-ui-react
+        run: pnpm --filter @273v/kaos-ui-react run build
+
+      - name: Verify package.json version matches tag (when triggered by tag)
+        if: startsWith(github.ref, 'refs/tags/kaos-ui-react@')
+        run: |
+          PKG_VER=$(node -p "require('./packages/kaos-ui-react/package.json').version")
+          TAG_VER=${GITHUB_REF_NAME#kaos-ui-react@}
+          if [ "$PKG_VER" != "$TAG_VER" ]; then
+            echo "::error::Tag '$TAG_VER' does not match package.json '$PKG_VER'"
+            exit 1
+          fi
+
+      - name: Publish to npm (Trusted Publishing OIDC + provenance)
+        working-directory: packages/kaos-ui-react
+        run: |
+          set -euo pipefail
+          PKG_VER=$(node -p "require('./package.json').version")
+          # Choose dist-tag from version: alpha/beta/rc → prerelease channel; else latest.
+          case "$PKG_VER" in
+            *alpha*) DIST_TAG=alpha ;;
+            *beta*)  DIST_TAG=beta  ;;
+            *rc*)    DIST_TAG=rc    ;;
+            *)       DIST_TAG=latest ;;
+          esac
+          echo "Publishing $PKG_VER on dist-tag $DIST_TAG"
+          npm publish --provenance --access public --tag "$DIST_TAG"
