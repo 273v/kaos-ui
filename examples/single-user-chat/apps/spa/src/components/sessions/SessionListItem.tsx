@@ -1,11 +1,22 @@
 import { Link } from "@tanstack/react-router";
-import { Archive, Check, MoreHorizontal, Pencil, Star, X } from "lucide-react";
+import {
+  Archive,
+  Check,
+  Download,
+  FileJson,
+  FileText,
+  MoreHorizontal,
+  Pencil,
+  Star,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useArchiveSession } from "@/hooks/use-archive-session";
 import { useHealth } from "@/hooks/use-health";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
 import type { SessionSummary } from "@/lib/api-types";
+import { apiFetch } from "@/lib/api-fetch";
 
 interface Props {
   session: SessionSummary;
@@ -215,7 +226,7 @@ export function SessionListItem({ session, active }: Props) {
         <div
           ref={menuRef}
           role="menu"
-          className="absolute right-2 top-9 z-10 bg-card border border-border rounded-md min-w-[140px] py-1 text-sm"
+          className="absolute right-2 top-9 z-10 bg-card border border-border rounded-md min-w-[160px] py-1 text-sm"
         >
           <button
             type="button"
@@ -230,6 +241,35 @@ export function SessionListItem({ session, active }: Props) {
             <Pencil className="h-3.5 w-3.5" />
             Rename
           </button>
+          {/* #313 Export submenu — flat for now (3 visible items keeps
+              the menu under typical fit-on-screen). The transcript
+              endpoint already supports markdown/json/docx; we just
+              wire them to authenticated downloads. */}
+          <ExportMenuItem
+            sessionId={session.id}
+            title={session.title}
+            format="markdown"
+            label="Export as Markdown"
+            icon={<FileText className="h-3.5 w-3.5" />}
+            onClose={() => setMenuOpen(false)}
+          />
+          <ExportMenuItem
+            sessionId={session.id}
+            title={session.title}
+            format="json"
+            label="Export as JSON"
+            icon={<FileJson className="h-3.5 w-3.5" />}
+            onClose={() => setMenuOpen(false)}
+          />
+          <ExportMenuItem
+            sessionId={session.id}
+            title={session.title}
+            format="docx"
+            label="Export as DOCX"
+            icon={<Download className="h-3.5 w-3.5" />}
+            onClose={() => setMenuOpen(false)}
+          />
+          <div className="h-px bg-border my-1" aria-hidden="true" />
           <button
             type="button"
             role="menuitem"
@@ -245,5 +285,70 @@ export function SessionListItem({ session, active }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Authenticated transcript download for one session. Fetches via
+ * `apiFetch` (carries the bearer token), reads the blob, dispatches
+ * a browser save with a Content-Disposition-derived filename.
+ *
+ * Used by the session kebab menu's three export entries (#313).
+ * Each format hits the same `/transcript?format=...` endpoint —
+ * markdown / json / docx — and downloads the response body.
+ */
+function ExportMenuItem({
+  sessionId,
+  title,
+  format,
+  label,
+  icon,
+  onClose,
+}: {
+  sessionId: string;
+  title: string;
+  format: "markdown" | "json" | "docx";
+  label: string;
+  icon: React.ReactNode;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const path = `/v1/chat/sessions/${encodeURIComponent(sessionId)}/transcript?format=${format}`;
+          const res = await apiFetch(path);
+          if (!res.ok) throw new Error(`export failed: ${res.status}`);
+          const blob = await res.blob();
+          const ext = format === "markdown" ? "md" : format;
+          const safeTitle = title.replace(/[^a-z0-9-_]+/gi, "-") || "session";
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${safeTitle}.${ext}`;
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch {
+          // Non-fatal: a toast surface would be ideal but the SPA
+          // doesn't have one wired here. The user can retry from
+          // the menu — exports are cheap.
+        } finally {
+          setBusy(false);
+          onClose();
+        }
+      }}
+      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
