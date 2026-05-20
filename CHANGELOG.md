@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a10] — 2026-05-20
+
+The "chat-stack honesty" release. Lands the P0 final-synthesis fix,
+the per-turn cost telemetry, the build-SHA stale-session badge, the
+removal of the Runner monkey-patch, and the kaos-ui-react chronological
+chat-transcript redesign. Bumps the kaos-llm-core pin to 0.1.0a17 in
+the SPA backend's `uv.lock`. Cuts npm `@273v/kaos-ui-react@0.1.0-alpha.9`
+alongside (see `packages/kaos-ui-react/CHANGELOG.md`).
+
+The release is the Stage 0b output of the stable-release plan
+(`kaos-modules/docs/plans/2026-05-20-stable-release-plan.md`).
+Following the A3 path: ship the in-flight snapshot as a single
+thematic release rather than splitting into per-group PRs.
+
 ### Fixed — Final-synthesis truncation on attorney-grade deliverables (P0-1)
 
 Closes `kaos-modules/docs/plans/2026-05-18-cross-layer-issue-inventory.md` § P0-1.

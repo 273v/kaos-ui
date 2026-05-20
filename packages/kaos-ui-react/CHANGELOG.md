@@ -6,6 +6,57 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] — 2026-05-20
+
+The chronological chat-transcript redesign. Lands the
+intra-turn tool-cards-above-prose layout, the sticky role header,
+the `useAutoScroll(...)` FOLLOW / PAUSED / LOCKED state machine, and
+the `<JumpToLatestPill>` floating cluster. Constants:
+`NEAR_BOTTOM_PX=64`, `RESUME_FOLLOW_PX=24`. Keyboard: End / Home / Esc.
+
+Co-released with `kaos-ui` 0.1.0a10 — see top-level `CHANGELOG.md`
+and the stable-release plan
+(`kaos-modules/docs/plans/2026-05-20-stable-release-plan.md`)
+Stage 0b for context.
+
+### Added
+
+- **`useAutoScroll(scrollContainerRef, ...)` hook**
+  (`src/chat/use-auto-scroll.ts`). Returns the FOLLOW / PAUSED /
+  LOCKED state plus a `scrollToBottom()` imperative handle. Used by
+  the `Transcript` component to decide whether to auto-follow
+  streaming deltas vs. respect a user-initiated scroll-up.
+
+- **`<JumpToLatestPill>` floating cluster**
+  (`src/chat/JumpToLatestPill.tsx`). Renders when the user scrolls
+  away from the bottom mid-stream. Clicking re-enters FOLLOW. End /
+  Home / Esc keyboard shortcuts wire to the same handle.
+
+- **`useActiveRun(...)` hook**
+  (`src/hooks/use-active-run.ts`). Surfaces the in-flight run's
+  metadata (turn index, intent, tool-call count) to header /
+  transcript consumers without re-deriving from raw SSE events.
+
+### Changed
+
+- **Chronological event ordering inside a turn.** Previously,
+  tool-call rows appeared in chat order (which mixed streaming
+  prose with tool cards confusingly). The new ordering surfaces all
+  tool activity ABOVE the assistant's prose response within a single
+  turn block — the human-readable answer is the visual climax of
+  the turn. Implemented as a sort pass over the per-turn event list
+  in `<Transcript>`.
+
+- **Tool-call default-collapsed on complete.** Once a tool-call
+  reaches `phase=complete`, the card auto-collapses to a one-line
+  summary (icon + name + result preview). Expand on click. A new
+  per-turn group summary chip shows total tool count + total
+  duration. Width toggle (compact / wide) supported.
+
+- **Message role differentiation.** User vs. assistant turns now
+  carry distinct visual treatments (border, background, icon) so
+  the eye can scan the transcript without reading every block.
+
 ## [0.1.0-alpha.8] — 2026-05-17
 
 ### Added
