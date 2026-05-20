@@ -1,6 +1,6 @@
 {
   "name": "@273v/kaos-ui-react",
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "description": "React UI primitives for kaos-agents-powered chat surfaces — chat composer, transcript, file upload, citations panel, and a live run inspector.",
   "license": "Apache-2.0",
   "author": "273 Ventures, LLC <contact@273ventures.com>",

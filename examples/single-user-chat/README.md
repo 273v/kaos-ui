@@ -106,7 +106,7 @@ Live LLM tests are gated on `ANTHROPIC_API_KEY` (or legacy provider keys honored
 
 ## Verified end-to-end
 
-- ✅ Real `anthropic:claude-haiku-4-5` and `openai:gpt-5` calls return through our SSE proxy with full event stream (`span/turn.start`, `intent_classified`, `text_delta`, `usage_observed`, `span/turn.complete`, `turn_summary`).
+- ✅ Real `openai:gpt-5.4-mini` (current default), `anthropic:claude-opus-4-7`, and `openai:gpt-5.5` calls return through our SSE proxy with full event stream (`span/turn.start`, `intent_classified`, `text_delta`, `usage_observed`, `span/turn.complete`, `turn_summary`).
 - ✅ Metadata sidecar bumps `message_count` and `last_message_at` after each turn.
 - ✅ System prompt override threads through to the agent: `"Respond ONLY with the literal word PINEAPPLE"` caused the assistant to reply with exactly `"PINEAPPLE"`.
 - ✅ Model switch via PATCH `/v1/chat/sessions/{id}/meta` reflected in the next turn's `turn_summary`.

@@ -16,21 +16,24 @@ from app.models import ModelEntry
 
 # (id, label, recommended_for). `id` is the `provider:model` string we
 # pass to kaos-agents. `model` part must appear in MODEL_PRICING.
+#
+# Audience: attorneys billing $hundreds to $thousands/hour. Cheap / older
+# tiers are deliberately EXCLUDED — the cost of a wrong answer dwarfs
+# the inference-cost delta between frontier and "mini" tiers. Floor:
+# gpt ≥ 5.4, claude ≥ 4.5, gemini ≥ 2.5. xAI / Grok intentionally
+# omitted (not certified for legal-research use here).
 _CURATED: tuple[tuple[str, str, str], ...] = (
-    # Default — fastest, cheapest current-gen Anthropic.
-    ("anthropic:claude-haiku-4-5", "Claude Haiku 4.5", "Fast everyday chat"),
+    # Anthropic — frontier first; ordering puts the default on top.
+    ("anthropic:claude-opus-4-7", "Claude Opus 4.7", "Maximum reasoning — default for legal work"),
     ("anthropic:claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced reasoning"),
-    ("anthropic:claude-opus-4-7", "Claude Opus 4.7", "Maximum reasoning"),
-    # OpenAI flagship + cheap.
-    ("openai:gpt-5", "GPT-5", "OpenAI flagship"),
-    ("openai:gpt-5.5", "GPT-5.5", "Latest OpenAI"),
-    ("openai:gpt-4.1-mini", "GPT-4.1 mini", "Cheap, capable"),
+    ("anthropic:claude-haiku-4-5", "Claude Haiku 4.5", "Fast classification / routing"),
+    # OpenAI flagship.
+    ("openai:gpt-5.5", "GPT-5.5", "OpenAI flagship — alternate default"),
+    ("openai:gpt-5.4", "GPT-5.4", "OpenAI frontier"),
+    ("openai:gpt-5.4-mini", "GPT-5.4 mini", "Fast OpenAI"),
     # Google long-context.
+    ("google:gemini-2.5-pro", "Gemini 2.5 Pro", "Long context, deep reasoning"),
     ("google:gemini-2.5-flash", "Gemini 2.5 Flash", "Long context, fast"),
-    ("google:gemini-2.5-pro", "Gemini 2.5 Pro", "Long context, deep"),
-    # xAI.
-    ("xai:grok-3", "Grok 3", "Real-time leaning"),
-    ("xai:grok-3-mini", "Grok 3 mini", "Cheap Grok"),
 )
 
 

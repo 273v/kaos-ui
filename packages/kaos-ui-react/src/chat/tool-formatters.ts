@@ -54,6 +54,25 @@ export interface FormattedToolCall {
   result_lead: string;
   /** Raw JSON tail (string) when present, for the "Show raw" affordance. */
   result_raw_json?: string;
+  /**
+   * True when the tool's payload was an ``{"error": true, ...}``
+   * envelope. The wire ``status`` is still ``"done"`` for tools that
+   * returned an error envelope rather than raising, so callers should
+   * branch on this flag (not ``call.status``) when deciding whether to
+   * render the destructive icon + clean failure label in the chip
+   * header.
+   */
+  is_error_envelope?: boolean;
+  /** Structured error fields recovered from ``{"error": true, ...}``. */
+  error?: {
+    message: string;
+    locator?: string;
+    http_status?: number;
+    /** Short host-style label for the chip header, e.g. "finance.yahoo.com". */
+    locator_host?: string;
+    /** One-word reason like "retryable HTTP", "404", "blocked". */
+    reason?: string;
+  };
 }
 
 export type ResultKind =
@@ -379,9 +398,7 @@ function formatFrSearch(
     .replace(/Federal Register document\(s\)/, "documents")
     .replace(/\s+/g, " ")
     .trim();
-  const summary = top
-    ? `${condensed} — top: ${topTitle} (${topDoc})`
-    : condensed || "no results";
+  const summary = top ? `${condensed} — top: ${topTitle} (${topDoc})` : condensed || "no results";
   return {
     args: "",
     summary,
@@ -496,7 +513,121 @@ function formatArgsPreview(args: string | undefined): string {
 // Top-level format
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect a kaos error envelope in the wire preview.
+ *
+ * KAOS tools that fail without raising return a JSON payload shaped
+ * ``{"error": true, "message": "<human msg>", "locator"?: "<url|path>",
+ * "http_status"?: 404, ...}`` on the result wire. The wire ``status``
+ * stays ``"done"`` because the tool returned successfully — it just
+ * returned a failure. Detect this so the chip can render a clean
+ * "FAILED · <host> · <reason>" header instead of dumping the raw
+ * JSON into the title.
+ *
+ * Returns ``null`` when the preview is not a recognisable error
+ * envelope (covers both successful tool calls and old wire formats).
+ */
+export function extractErrorEnvelope(preview: string | undefined): {
+  message: string;
+  locator?: string;
+  http_status?: number;
+  locator_host?: string;
+  reason?: string;
+} | null {
+  if (!preview) return null;
+  const trimmed = preview.trim();
+  if (!trimmed.startsWith("{")) return null;
+  // Cheap pre-check to avoid parsing every payload.
+  if (!trimmed.includes('"error"')) return null;
+  let payload: Record<string, unknown> | null = null;
+  try {
+    payload = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    // Preview is often truncated mid-JSON / mid-string (kaos-agents
+    // chops at ~200 chars without quote-balancing). First try a strict
+    // match for a closed string, then fall back to "everything from
+    // the opening quote to end of preview" so we still surface the
+    // first chunk of the human message + locator in the chip header.
+    const closedMessage = trimmed.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    const closedLocator = trimmed.match(/"locator"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    const openMessage = trimmed.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)$/);
+    const openLocator = trimmed.match(/"locator"\s*:\s*"((?:[^"\\]|\\.)*)$/);
+    const statusMatch = trimmed.match(/"http_status"\s*:\s*(\d+)/);
+    const messageRaw = closedMessage?.[1] ?? openMessage?.[1];
+    if (!messageRaw) return null;
+    payload = { error: true, message: messageRaw.replace(/\\"/g, '"') };
+    const locatorRaw = closedLocator?.[1] ?? openLocator?.[1];
+    if (locatorRaw) payload.locator = locatorRaw.replace(/\\"/g, '"');
+    const statusRaw = statusMatch?.[1];
+    if (statusRaw) payload.http_status = Number(statusRaw);
+  }
+  if (!payload || payload.error !== true) return null;
+  const message = typeof payload.message === "string" ? payload.message : "";
+  if (!message) return null;
+  const locator =
+    typeof payload.locator === "string"
+      ? payload.locator
+      : (() => {
+          // Some tools nest the locator inside the message blob; pull
+          // it back out so the chip header can render a host token.
+          const m = message.match(/['"]([a-z]+:\/\/[^'"\s)]+)['"]/i);
+          return m ? m[1] : undefined;
+        })();
+  const http_status = typeof payload.http_status === "number" ? payload.http_status : undefined;
+  let locator_host: string | undefined;
+  if (locator) {
+    try {
+      locator_host = new URL(locator).host;
+    } catch {
+      // Non-URL locators (filesystem paths, kaos:// uris): use the
+      // first segment after the scheme as the locator token.
+      const m = locator.match(/^([a-z]+):\/\/([^/]+)/i);
+      locator_host = m ? m[2] : locator.slice(0, 32);
+    }
+  }
+  let reason: string | undefined;
+  if (http_status) {
+    if (http_status === 404) reason = "404 Not Found";
+    else if (http_status >= 500) reason = `${http_status} server error`;
+    else if (http_status >= 400) reason = `${http_status} blocked`;
+    else reason = `HTTP ${http_status}`;
+  } else if (/retryable status/i.test(message)) {
+    reason = "retryable HTTP";
+  } else if (/not found/i.test(message)) {
+    reason = "not found";
+  } else if (/must use http or https/i.test(message)) {
+    reason = "unsupported scheme";
+  } else if (/timeout|timed out/i.test(message)) {
+    reason = "timeout";
+  } else if (/validation error/i.test(message)) {
+    reason = "validation error";
+  }
+  return { message, locator, http_status, locator_host, reason };
+}
+
 export function formatToolCall(call: ToolCallSummary): FormattedToolCall {
+  // Error envelope short-circuit: when the tool returned an
+  // ``{"error": true, ...}`` payload, skip the per-tool formatter
+  // (which would otherwise dump the raw JSON into the chip header)
+  // and synthesise a clean "FAILED · <host> · <reason>" summary.
+  const errorEnvelope = extractErrorEnvelope(call.result_preview);
+  if (errorEnvelope) {
+    const headerBits = ["FAILED"];
+    if (errorEnvelope.locator_host) headerBits.push(errorEnvelope.locator_host);
+    if (errorEnvelope.reason) headerBits.push(errorEnvelope.reason);
+    return {
+      label: toolLabel(call.name),
+      args_summary: formatArgsPreview(call.args_preview),
+      result_summary: headerBits.join(" · "),
+      result_records: [],
+      result_kind: "unknown",
+      result_lead: "",
+      result_raw_json: call.result_preview,
+      is_error_envelope: true,
+      error: errorEnvelope,
+    };
+  }
+
   const { lead, raw } = splitResultPreview(call.result_preview);
   let kind: ResultKind = "unknown";
   let inner: { args: string; summary: string; records: Record<string, unknown>[] };

@@ -134,11 +134,16 @@ describe("<ToolCallBlock>", () => {
   });
 
   it("renders fetch-url result as a clickable link card", () => {
+    // Fixture uses the canonical artifact-metadata key `source_uri`
+    // (matches `kaos_core.artifacts.models.ArtifactManifest.source_uri`,
+    // which kaos-source-fetch-url populates). The new ArtifactCard
+    // renders this as an <a> link; an earlier fixture used `url` which
+    // is not a recognized artifact-record key.
     const call = makeCall({
       name: "kaos-source-fetch-url",
       args_preview: undefined,
       result_preview:
-        'Fetched regulation-s-p.html (10.3 KB)\n\n{"artifact_id":"abc","url":"https://www.federalregister.gov/x"}',
+        'Fetched regulation-s-p.html (10.3 KB)\n\n{"artifact_id":"abc","mime_type":"text/html","size":10500,"source_uri":"https://www.federalregister.gov/x"}',
     });
     render(<ToolCallBlock call={call} defaultOpen />);
     const links = screen.getAllByRole("link");

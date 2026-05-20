@@ -74,6 +74,8 @@ async def persist_turn_completion(
     runtime: Any | None,
     turn_index: int,
     fetch_history: Callable[[str], Awaitable[list[HistoryMessage]]],
+    turn_cost_usd: float = 0.0,
+    turn_tokens: int = 0,
 ) -> None:
     """Run every post-turn durable side effect as a detached task.
 
@@ -113,14 +115,27 @@ async def persist_turn_completion(
                 turn_index,
             )
 
-    # Step 2: heuristic title + message-count touch.
+    # Step 2: heuristic title + message-count touch + cost/token rollup.
+    #
+    # Cost telemetry (P1-3 / UX-A4 #342): we receive the per-turn
+    # cost+tokens from the SSE-stream recorder. ``last_turn_*`` are
+    # set verbatim; ``total_*`` accumulate by reading the prior
+    # SessionMeta and adding the turn delta. None → 0 + delta when
+    # the session predates this fix.
     try:
+        meta_before = await store.get(session_id)
+        prior_total_cost = meta_before.total_cost_usd or 0.0
+        prior_total_tokens = meta_before.total_tokens or 0
+        patch_kwargs: dict[str, Any] = {
+            "last_turn_cost_usd": turn_cost_usd,
+            "last_turn_tokens": turn_tokens,
+            "total_cost_usd": prior_total_cost + turn_cost_usd,
+            "total_tokens": prior_total_tokens + turn_tokens,
+        }
         if is_first_turn:
-            await store.patch(
-                session_id,
-                title=_derive_title(user_message),
-                title_source="auto",
-            )
+            patch_kwargs["title"] = _derive_title(user_message)
+            patch_kwargs["title_source"] = "auto"
+        await store.patch(session_id, **patch_kwargs)
         await store.touch(session_id, increment_messages=2)
     except SessionNotFoundError:
         return

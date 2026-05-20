@@ -183,14 +183,23 @@ def _build_forward_body(
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
     tool_set_override: SessionToolSetWire | None = None,
+    is_internal_iteration: bool = False,
 ) -> dict[str, Any]:
-    return {
+    body: dict[str, Any] = {
         "message": message,
         "model": meta.model,
         "instructions": _instructions_with_corpus(meta, corpus_markdown),
         "tools": _tool_patterns(meta, available_tool_names, tool_set_override),
         "max_cost_usd": max_cost_usd,
     }
+    # AgenticLoop iteration-leak fix (task #458). Only set the flag
+    # when True so a stale upstream that hasn't picked up the
+    # MessageRequest field still accepts the body (the upstream
+    # ignores unknown fields by default, but keeping the wire minimal
+    # is the smaller-blast-radius choice).
+    if is_internal_iteration:
+        body["is_internal_iteration"] = True
+    return body
 
 
 async def stream_chat(
@@ -203,12 +212,23 @@ async def stream_chat(
     available_tool_names: Sequence[str] | None = None,
     corpus_markdown: str = "",
     tool_set_override: SessionToolSetWire | None = None,
+    is_internal_iteration: bool = False,
 ) -> AsyncIterator[dict[str, str]]:
     """Yield `{event, data}` records ready for `sse_starlette`.
 
     Each iteration corresponds to one SSE event from kaos-agents.
     Pure pass-through — the frontend dispatches on the 15 wire types
     per ARCHITECTURE.md § 5.3.
+
+    ``is_internal_iteration`` is forwarded to the upstream
+    ``MessageRequest`` shape. When True, kaos-agents skips persisting
+    both the user message and the intermediate assistant draft to
+    ``SessionMemory.MESSAGES`` — used by the AgenticLoop worker for
+    iterations 2+ to avoid the per-iteration leak documented in
+    ``kaos-modules/docs/plans/2026-05-19-agentic-loop-honesty.md``
+    §3.1.a. The companion canonical write goes through
+    :func:`app.services.agentic_worker.persist_canonical_turn` once at
+    loop exit.
     """
     body = _build_forward_body(
         meta,
@@ -217,6 +237,7 @@ async def stream_chat(
         available_tool_names=available_tool_names,
         corpus_markdown=corpus_markdown,
         tool_set_override=tool_set_override,
+        is_internal_iteration=is_internal_iteration,
     )
     headers = {
         "Authorization": f"Bearer {bearer_token}",
@@ -235,6 +256,19 @@ async def stream_chat(
     # inside the JSON payload as `type`, so we don't need the SSE
     # `event:` field for routing — we recover it from `data["type"]`
     # and forward both for sse-starlette compatibility.
+    #
+    # SSE resume (Stage 1, 2026-05-19): ``parse_sse_stream`` drops the
+    # upstream ``id:`` field — it returns only the decoded ``data:``
+    # JSON dict. The resume design requires every emitted SSE frame to
+    # carry ``id: {sequence}`` so EventSource clients can reconnect
+    # with ``Last-Event-ID``. We keep the parser as-is here and
+    # synthesize ``id`` downstream in ``chat.py`` from
+    # ``payload["sequence"]`` (kaos-agents ``EventEmitter._sequence``
+    # already stamps a per-run monotonic counter on every event), which
+    # avoids touching kaos-llm-client's transport.
+    # TODO(stage-2): if we ever need to surface the upstream ``id:``
+    # directly (e.g. for nested-run replay), replace this call with a
+    # small inline parser that yields ``(event, data, id)`` triples.
     from kaos_llm_client.transport import parse_sse_stream
 
     async with client.stream(

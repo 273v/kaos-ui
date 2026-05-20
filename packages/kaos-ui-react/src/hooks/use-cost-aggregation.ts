@@ -16,7 +16,7 @@ import { useMemo } from "react";
 import type { KaosAgentEvent } from "../lib/events.js";
 
 export interface ModelUsage {
-  /** Model id, e.g. `claude-haiku-4-5` (kaos-agents reports unprefixed). */
+  /** Model id, e.g. `claude-opus-4-7` (kaos-agents reports unprefixed). */
   model: string;
   /** Number of usage_observed events seen for this model. */
   calls: number;

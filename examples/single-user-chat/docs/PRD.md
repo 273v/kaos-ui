@@ -58,10 +58,10 @@ Explicitly out of scope. Listed because each is the kind of thing a reviewer mig
 ## 5. Success metrics
 
 - **Time-to-first-message** ≤ 5 minutes from `git clone` on a fresh Ubuntu 26.04 box with Python 3.13+ and Node 24+.
-- **First-delta latency** < 2 s on `anthropic:claude-haiku-4-5` from a US-East dev machine on warm import.
+- **First-delta latency** < 4 s on the production default `anthropic:claude-opus-4-7` from a US-East dev machine on warm import.
 - **Event coverage** — 15 of 15 `kaos-agents` event types covered by a render-path unit test.
 - **Documentation coverage** — every file in the example has a top-of-file docstring or block comment explaining its role.
-- **CI gates green** — `ruff`, `ty`, `pytest`, `biome`, `tsc`, `vitest` all pass on every commit. Live LLM tests run against the cheapest current-generation model (`anthropic:claude-haiku-4-5`).
+- **CI gates green** — `ruff`, `ty`, `pytest`, `biome`, `tsc`, `vitest` all pass on every commit. Live LLM tests are pinned to `anthropic:claude-haiku-4-5` purely for CI-cost reasons; the SHIPPED product MUST default to a frontier model (`claude-opus-4-7` or `gpt-5.5`) because the audience is attorneys for whom a wrong answer is a malpractice exposure, not a latency budget.
 
 ## 6. Constraints
 
@@ -71,7 +71,7 @@ Explicitly out of scope. Listed because each is the kind of thing a reviewer mig
 - **Auth.** Bearer token from `.env`. v1 stashes the token in browser `localStorage` for dev simplicity — this is the kaos-agents bundled-API contract (no cookie-issuing endpoint ships with kaos-agents 0.1.0a1). Phase 4+ adds a cookie wrapper around `create_app()` that exchanges the bearer for an HttpOnly+Secure+SameSite=Strict cookie so XSS can't lift the token. The trade-off is documented in `apps/spa/src/auth/storage.ts` and surfaced on the login page so a deploying operator sees it. Do not ship single-user-chat to a public-facing host in v1 without putting it behind a trusted-network gate.
 - **Streaming.** `sse-starlette.EventSourceResponse` on the backend, `eventsource-parser` via `readSseStream` on the frontend. Same primitives as the template — no `EventSource`, no Server-Sent-Events polyfill, no `WebSocket`.
 - **Frontend components.** Consume `packages/ui` from the web:spa template via pnpm workspace resolution. Do not fork shadcn primitives into this example.
-- **Models.** Use the `provider:model` string format from `kaos-llm-client`. Default to `anthropic:claude-haiku-4-5` per `KaosAgentSettings().default_llm_model` (verified on PyPI install). The model catalog is a static list in code — `kaos-llm-client` has no `list_models()` (verified). The authoritative model-id registry on PyPI is `kaos_llm_client.cost.MODEL_PRICING` (18 entries as of `kaos-llm-client==0.1.0a3`, `PRICING_LAST_UPDATED == '2026-05'`); the example's catalog is curated from it and lives in `backend/app/services/catalog.py`. **Never paste model ids from memory** — they rot. Verify against `MODEL_PRICING` immediately before any code edit that adds an id.
+- **Models.** Use the `provider:model` string format from `kaos-llm-client`. The shipped SPA defaults to `anthropic:claude-opus-4-7` (per `AppSettings.default_model`) — NOT the kaos-agents library default of `claude-haiku-4-5`, which is appropriate for routine classification but is **not safe** to ship to attorneys as a generation model. The catalog in `backend/app/services/catalog.py` is restricted to `gpt ≥ 5.4`, `claude ≥ 4.5`, `gemini ≥ 2.5`: cheap "mini" / "nano" / older-generation models are deliberately excluded because the inference-cost delta is rounding error against the cost of a wrong citation. The authoritative model-id registry on PyPI is `kaos_llm_client.cost.MODEL_PRICING`; the catalog is curated from it. **Never paste model ids from memory** — they rot. Verify against `MODEL_PRICING` immediately before any code edit that adds an id.
 - **Persistence boundary.** `kaos-agents` persists `SessionMemory` to VFS at `.kaos-vfs/kaos-agents/sessions/{session_id}/memory.json` (verified — note the `sessions/` segment) alongside a `graph.ttl` per session for the GRAPH memory section. Our app-level session metadata (title, model, custom prompt, created_at) lives under a separate VFS namespace — see `ARCHITECTURE.md` § Persistence.
 - **Same dependency hygiene as `web:spa`.** `minimumReleaseAge: 4320`, exact pins, `blockExoticSubdeps: true`, `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`. Lifted verbatim from `templates/web/spa/pnpm-workspace.yaml`.
 
@@ -109,17 +109,15 @@ What the user sees on screen, in order of priority:
 
 Layout per `UX-LANGUAGE.md` § 4.7 (right-side sheet, no tabs, single scrollable column, trigger = avatar at bottom-left of sidebar).
 
-- **Model picker** — popover from a chip in the composer chip row (per UX-LANGUAGE § 4.3) AND a default selector in the drawer. Populated from a static catalog matching `kaos_llm_client.cost.MODEL_PRICING`. Initial catalog (verified 2026-05):
-  - `anthropic:claude-haiku-4-5` (default, recommended for everyday chat)
-  - `anthropic:claude-sonnet-4-6`
-  - `anthropic:claude-opus-4-7` (latest Opus — NOT `4-6`)
-  - `openai:gpt-5`
-  - `openai:gpt-5.5`
-  - `openai:gpt-4.1-mini`
-  - `google:gemini-2.5-flash` (dot, not dash)
-  - `google:gemini-2.5-pro`
-  - `xai:grok-3`
-  - `xai:grok-3-mini`
+- **Model picker** — popover from a chip in the composer chip row (per UX-LANGUAGE § 4.3) AND a default selector in the drawer. Populated from a static catalog matching `kaos_llm_client.cost.MODEL_PRICING`. The shipped catalog is restricted to frontier tiers because the audience is attorneys; cheap "mini" / "nano" / older-gen models and xAI / Grok are deliberately omitted (verified 2026-05):
+  - `anthropic:claude-opus-4-7` (default — Maximum reasoning)
+  - `anthropic:claude-sonnet-4-6` (Balanced reasoning)
+  - `anthropic:claude-haiku-4-5` (Fast classification / routing only)
+  - `openai:gpt-5.5` (OpenAI flagship — alternate default)
+  - `openai:gpt-5.4` (OpenAI frontier)
+  - `openai:gpt-5.4-mini` (Fast OpenAI)
+  - `google:gemini-2.5-pro` (Long context, deep reasoning)
+  - `google:gemini-2.5-flash` (Long context, fast)
 - **System prompt** — multi-line textarea; pre-filled with the default; per-session.
 - **Tool policy** (TR-1..TR-13) — per-category checkboxes + preset picker + auto-narrow toggle, replacing the legacy single "Enable read-only tools" checkbox. Categories are populated from `GET /v1/chat/categories` (sourced from `kaos_agents.registry.default_tool_group_registry` which `kaos_ui.agents.register_kaos_tool_groups` populates at startup).
   - **Categories shipped**: `documents` (kaos-pdf, kaos-office-parse, kaos-content), `citations` (kaos-citations), `vfs` (kaos-core-vfs, kaos-core-artifacts), `web` (kaos-source-*).

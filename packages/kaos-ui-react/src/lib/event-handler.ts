@@ -202,10 +202,20 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
       if (!target) return state;
       const cleaned = stripScratchpadTags(event.content);
       if (!cleaned) return state;
+      // #508: if the streaming message already had a turn_summary
+      // fire (streaming === false), this delta is starting a NEW
+      // phase — most commonly the AgenticLoop's refusal lead text
+      // after a max_iterations / cost_exceeded / wall_clock_exceeded
+      // terminator. REPLACE content rather than concatenate, so the
+      // user sees only the refusal not "rejected iteration text +
+      // refusal". The matching turn_summary handler below also
+      // replaces; this just keeps the transient state honest.
+      const replacing = target.streaming === false;
       return {
         ...state,
         messages: patchAssistant(state.messages, {
-          content: target.content + cleaned,
+          content: replacing ? cleaned : target.content + cleaned,
+          streaming: true,
         }),
       };
     }

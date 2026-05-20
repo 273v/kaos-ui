@@ -58,7 +58,7 @@ from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
-from app.routers import chat, citations, files, health, models
+from app.routers import chat, citations, files, health, models, runs
 from app.settings import AppSettings
 
 if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
@@ -160,6 +160,10 @@ def create_app(settings: AppSettings | None = None):
     app.include_router(health.router, prefix="/v1")
     app.include_router(models.router, prefix="/v1")
     app.include_router(chat.router, prefix="/v1/chat")
+    # SSE resume endpoints (Stage 1) — share the /v1/chat prefix so the
+    # ``require_auth`` dependency on every chat route also covers
+    # ``/runs/active`` and ``/runs/{run_id}/events``.
+    app.include_router(runs.router, prefix="/v1/chat")
     app.include_router(files.router, prefix="/v1/chat")
     app.include_router(citations.router, prefix="/v1/chat")
 
