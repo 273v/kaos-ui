@@ -969,12 +969,63 @@ async def get_history(
             turn_sidecar_path,
         )
 
+        # #401 (SES1): legacy sessions created against kaos-agents pre-a18
+        # have N assistant messages per logical turn (one per AgenticLoop
+        # iteration) because the per-iteration persist landed before the
+        # #458 / #504 canonical-turn fix. The sidecar at
+        # ``toolcalls/turn-{N:04d}.jsonl`` was always written ONCE per
+        # logical turn — keyed by the user-message count at the time of
+        # the SSE stream. Using ``assistant_index`` as the sidecar key
+        # mis-aligns: assistant[0]=iter1 looks up turn-0000.jsonl, gets
+        # the chips, then assistant[1]=iter2 looks up turn-0001.jsonl
+        # which doesn't exist, falls back to memory/actions, and the
+        # chips "bleed" across turns.
+        #
+        # Fix: derive turn_index from the count of *user* messages that
+        # precede each assistant message. Two assistants in a row (same
+        # logical turn) get the same turn_index — only the LAST one in
+        # the group should claim the sidecar to avoid double-attaching.
         assistant_msgs = [m for m in parsed if m.role == "assistant"]
-        assistant_indices: dict[int, int] = {id(m): i for i, m in enumerate(assistant_msgs)}
+        turn_index_by_msg: dict[int, int] = {}
+        sidecar_owner_by_msg: dict[int, bool] = {}
+        user_seen = 0
+        last_assistant_in_group: HistoryMessage | None = None
+        for m in parsed:
+            if m.role == "user":
+                # Close any open assistant group: the previous final
+                # assistant message owns its turn's sidecar.
+                if last_assistant_in_group is not None:
+                    sidecar_owner_by_msg[id(last_assistant_in_group)] = True
+                    last_assistant_in_group = None
+                user_seen += 1
+            elif m.role == "assistant":
+                # turn_index is 0-based count of user messages BEFORE
+                # this assistant — i.e. (user_seen - 1) for the typical
+                # "user → assistant" cadence.
+                turn_index_by_msg[id(m)] = max(user_seen - 1, 0)
+                # Mark not-owner; the last assistant in this group wins.
+                sidecar_owner_by_msg[id(m)] = False
+                last_assistant_in_group = m
+        # Close the trailing group (final turn).
+        if last_assistant_in_group is not None:
+            sidecar_owner_by_msg[id(last_assistant_in_group)] = True
+
+        # Back-compat: legacy sessions where the only assistant per turn
+        # ALSO has a sidecar — assistant_indices == turn_index_by_msg
+        # for sessions that never iterated. The dedup only kicks in for
+        # the pathological pre-a18 case.
+        assistant_indices: dict[int, int] = dict(turn_index_by_msg)
 
         # Per-message sidecar hydration first (the rich path — has args).
         msgs_needing_fallback: list[HistoryMessage] = []
         for msg in assistant_msgs:
+            if not sidecar_owner_by_msg.get(id(msg), True):
+                # Iteration leaf within a multi-iteration turn: do not
+                # claim a sidecar (the final assistant in the group
+                # does). Leaves tool_calls empty for the leaf, which is
+                # correct — the leaf was an intermediate critic-rejected
+                # response, not the user-facing answer.
+                continue
             path = turn_sidecar_path(session_id, assistant_indices[id(msg)])
             try:
                 blob = await runtime.vfs.read(path)

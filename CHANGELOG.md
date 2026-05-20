@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The 0.1.0b1-followup patch. Fixes the two P0s surfaced during the
 0.1.0b1 Chrome MCP Stage 7 acceptance against freshly-published PyPI
-artifacts. Both are SPA-backend bugs in the chat router; the kaos-ui
-Python distribution is the host package.
+artifacts, plus #401 (legacy-session tool-chip bleed) and #342
+(tool-call persistence enrichment with cost/timing/plan-linkage).
+All four are SPA-backend changes in the chat router and recorder;
+the kaos-ui Python distribution is the host package.
 
 ### Fixed — Memory ≠ UI (#519)
 
@@ -30,6 +32,34 @@ across the event loop; when the next text_delta arrives after a
 `turn_summary`, RESET the iter accumulator + last_iter_text before
 appending. Result: persisted text exactly matches the UI's final
 rendered content.
+
+### Fixed — Legacy-session tool-chip bleed (#401)
+
+History hydration's sidecar lookup used `enumerate(assistant_msgs)`
+as the turn-index key, which assumes one assistant message per logical
+turn. Legacy sessions created against kaos-agents pre-a18 (before the
+#458 / #504 canonical-turn persist) have N assistant messages per
+turn — one per AgenticLoop iteration — and the assumption broke:
+`turn-0000.jsonl` attached to iteration-1's message, `turn-0001.jsonl`
+didn't exist for iteration-2 so it fell back to memory/actions with
+the wrong time window, and chips bled across turns. The new logic
+computes `turn_index` from the count of preceding user messages and
+identifies the LAST assistant in each consecutive-assistant group as
+the sidecar owner. Leaf iterations (critic-rejected intermediates)
+get no chips — correct, because they're not the user-facing answer.
+New sessions are unaffected (one assistant per turn → owner mark
+always True for the single assistant).
+
+### Enhanced — Tool-call sidecar persistence enrichment (#342)
+
+`ToolCallRecord` now carries `duration_ms` (wall-clock from
+`Span(TOOL_CALL, COMPLETE).duration_ms`), `cost_usd` (from
+`ToolCallSummary.cost_usd` — non-zero when the tool itself drove
+an LLM call, e.g. RAG verifier or delegated sub-agent), `plan_id`,
+and `step_id`. All four are optional; older kaos-agents versions
+that don't emit them leave the fields `None`, so legacy sidecars
+still parse cleanly. Unblocks downstream UX work that wants to show
+per-call timing chips and surface cost contribution per tool.
 
 ### Fixed — Cost telemetry zero in SessionMeta (#520)
 

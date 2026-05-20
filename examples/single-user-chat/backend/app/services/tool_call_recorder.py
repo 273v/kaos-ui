@@ -59,6 +59,29 @@ class ToolCallRecord(BaseModel):
     can render the file inline. ``None`` for tools that don't ship
     structured output."""
 
+    # #342 enrichment fields. All optional so legacy sidecars without
+    # them still parse cleanly.
+    duration_ms: float | None = None
+    """Wall-clock time the tool call took. From ``Span(TOOL_CALL,
+    COMPLETE).duration_ms`` if the wire payload carries it, else
+    derived from start/end timestamps. ``None`` when the recorder
+    saw only the complete phase (start was already lost)."""
+
+    cost_usd: float | None = None
+    """LLM cost attributable to this tool call when the tool itself
+    drove an LLM call (RAG's rag-query verifier, delegated sub-agent).
+    From ``ToolCallSummary.cost_usd``. ``0.0`` for plain tools that
+    don't call an LLM; ``None`` when the wire didn't surface the
+    field at all (older kaos-agents versions)."""
+
+    plan_id: str | None = None
+    """Plan ID when the call ran inside a plan-execute pattern; ``None``
+    for chat / research / direct-respond turns."""
+
+    step_id: str | None = None
+    """Plan step ID when the call ran inside a plan-execute pattern;
+    correlated with ``plan_id``."""
+
 
 class TurnUsageRecorder:
     """Stateful tap for ``usage_observed`` + ``turn_summary`` SSE events.
@@ -183,6 +206,22 @@ class TurnToolCallRecorder:
                 result_preview = None
             raw_structured = attrs.get("structured_content")
             structured_content = raw_structured if isinstance(raw_structured, dict) else None
+            # #342 enrichment: pull cost, timing, plan linkage from the
+            # span's attributes + payload. All are optional — older
+            # kaos-agents versions don't emit them, and chat/research
+            # turns won't have plan_id/step_id even on current versions.
+            duration_ms = payload.get("duration_ms")
+            if not isinstance(duration_ms, int | float):
+                duration_ms = None
+            cost_usd = attrs.get("cost_usd")
+            if not isinstance(cost_usd, int | float):
+                cost_usd = None
+            plan_id = attrs.get("plan_id")
+            if not isinstance(plan_id, str):
+                plan_id = None
+            step_id = attrs.get("step_id")
+            if not isinstance(step_id, str):
+                step_id = None
             updates: dict[str, Any] = {
                 "name": tool_name,
                 "status": status,
@@ -191,6 +230,14 @@ class TurnToolCallRecorder:
                 updates["result_preview"] = result_preview
             if structured_content is not None:
                 updates["structured_content"] = structured_content
+            if duration_ms is not None:
+                updates["duration_ms"] = float(duration_ms)
+            if cost_usd is not None:
+                updates["cost_usd"] = float(cost_usd)
+            if plan_id is not None:
+                updates["plan_id"] = plan_id
+            if step_id is not None:
+                updates["step_id"] = step_id
             self._by_id[call_id] = (
                 existing.model_copy(update=updates)
                 if existing is not None
@@ -200,6 +247,10 @@ class TurnToolCallRecorder:
                     status=status,
                     result_preview=result_preview,
                     structured_content=structured_content,
+                    duration_ms=float(duration_ms) if duration_ms is not None else None,
+                    cost_usd=float(cost_usd) if cost_usd is not None else None,
+                    plan_id=plan_id,
+                    step_id=step_id,
                 )
             )
         elif phase == "error":
