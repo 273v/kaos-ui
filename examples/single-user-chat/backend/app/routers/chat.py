@@ -722,6 +722,21 @@ async def send_message(
                 )
                 or None
             )
+            # R1.5 (reliability roadmap #565): M3 document-grounding
+            # critic. Catches "I retrieved X" / "I read your PDF"
+            # claims when no fetch / parse succeeded (R1-REAL family,
+            # historically tasks #348 + #445). The critic is fully
+            # implemented in kaos-agents but was never invoked from
+            # the SPA pre-R1.5. Default: anthropic:claude-haiku-4-5
+            # — small, cheap, and the same family the M2 critic uses.
+            # Unset the env var to disable on a per-deployment basis.
+            m3_grounding_model = (
+                os.environ.get(
+                    "KAOS_AGENT_M3_GROUNDING_MODEL",
+                    "anthropic:claude-haiku-4-5",
+                )
+                or None
+            )
             async for ev in run_agentic_turn(
                 user_message=body.message,
                 policy=session_policy,
@@ -739,6 +754,7 @@ async def send_message(
                 # planner tolerates an empty string.
                 recent_turns="",
                 m2_consistency_model=m2_consistency_model,
+                m3_grounding_model=m3_grounding_model,
             ):
                 sse_event = _to_sse_event(ev)
                 if sse_event is None:
@@ -1078,6 +1094,13 @@ async def get_history(
             except Exception:
                 records = []
             if records:
+                # R2.1 (reliability roadmap #566): forward
+                # ``structured_content`` through the /messages
+                # serialization. Pre-R2.1 the field was defined on
+                # ``HistoryToolCall`` (models.py:728) but omitted at
+                # construction here, so kaos-source / kaos-pdf /
+                # kaos-content artifacts disappeared on history
+                # re-hydration (Artifact panel rehydrated empty).
                 msg.tool_calls = [
                     HistoryToolCall(
                         id=r.id,
@@ -1085,6 +1108,7 @@ async def get_history(
                         status=r.status,
                         args_preview=r.args_preview,
                         result_preview=r.result_preview,
+                        structured_content=r.structured_content,
                     )
                     for r in records
                 ]
@@ -1133,6 +1157,9 @@ async def get_history(
                     records = parse_actions_into_records(window)
                     if not records:
                         continue
+                    # R2.1 #566: forward structured_content in the
+                    # memory/actions fallback path too — same
+                    # rationale as the per-message sidecar path above.
                     msg.tool_calls = [
                         HistoryToolCall(
                             id=r.id,
@@ -1140,6 +1167,7 @@ async def get_history(
                             status=r.status,
                             args_preview=r.args_preview,
                             result_preview=r.result_preview,
+                            structured_content=r.structured_content,
                         )
                         for r in records
                     ]

@@ -130,23 +130,39 @@ class TurnUsageRecorder:
 
     def __init__(self) -> None:
         # Sum of every per-call ``usage_observed`` event seen this turn.
-        # Used as a fallback when the stream terminates before
-        # ``turn_summary`` fires (BudgetExceeded, network drop, etc.).
+        # Includes worker LLM calls + critic calls + planner calls —
+        # every Signature invocation that emits a UsageObserved event.
         self._usage_sum_cost_usd: float = 0.0
         self._usage_sum_input_tokens: int = 0
         self._usage_sum_output_tokens: int = 0
         # The final ``turn_summary`` aggregate, if it arrived. Tuple
         # of (cost_usd, total_tokens). None until the event fires.
+        # R2.3 #567: this is the WORKER iteration's aggregate (one per
+        # ReAct dispatch), NOT the whole turn — replaces on each
+        # iteration. Kept only as a non-fatal cross-check.
         self._final_summary: tuple[float, int] | None = None
+        # R2.3 #567: ``loop_terminated`` carries the orchestrator's
+        # authoritative aggregate across worker + planner + every critic
+        # call. Prefer this when it arrives — it's the same number
+        # ``state.cumulative_cost_usd`` reports in kaos-agents itself
+        # (see ``LoopTerminated.cost_usd`` docstring at
+        # ``kaos_agents/events/policy.py:219-227``).
+        self._loop_terminated_summary: tuple[float, int] | None = None
 
     def observe(self, event_name: str, payload: Any) -> None:
         """Inspect one SSE event and update the running totals.
 
         Recognized event shapes (per kaos_agents wire serializers):
         - ``turn_summary`` event: payload carries ``cost_usd`` (float)
-          and ``total_tokens`` (int).
+          and ``total_tokens`` (int). Per WORKER iteration aggregate.
         - ``usage_observed`` event: payload carries ``cost_usd``,
-          ``input_tokens``, ``output_tokens``.
+          ``input_tokens``, ``output_tokens``. Per LLM call —
+          including critics + planner.
+        - ``loop_terminated`` event (R2.3 #567): the orchestrator's
+          authoritative aggregate across every LLM call in the turn.
+          Wire shape carries ``cost_usd``; total_tokens is summed
+          from observed usage_observed events because LoopTerminated
+          doesn't carry token counts directly (only cost).
         """
         if not isinstance(payload, dict):
             return
@@ -155,6 +171,16 @@ class TurnUsageRecorder:
             total_tokens = payload.get("total_tokens")
             if isinstance(cost, int | float) and isinstance(total_tokens, int):
                 self._final_summary = (float(cost), int(total_tokens))
+            return
+        if event_name == "loop_terminated":
+            # R2.3 #567: authoritative whole-turn cost aggregate.
+            cost = payload.get("cost_usd")
+            if isinstance(cost, int | float):
+                # LoopTerminated doesn't ship token counts; pair with
+                # the running usage sum so the (cost, tokens) tuple
+                # stays usable downstream.
+                tokens = self._usage_sum_input_tokens + self._usage_sum_output_tokens
+                self._loop_terminated_summary = (float(cost), tokens)
             return
         if event_name == "usage_observed":
             cost = payload.get("cost_usd")
@@ -170,10 +196,31 @@ class TurnUsageRecorder:
     def snapshot(self) -> tuple[float, int]:
         """Return ``(cost_usd, total_tokens)`` for the completed turn.
 
-        Prefers the ``turn_summary`` aggregate (covers Signature-level
-        calls the SPA otherwise misses); falls back to the sum of
-        ``usage_observed`` events when the stream ended early.
+        Preference order (most authoritative first):
+
+        1. R2.3 #567: ``loop_terminated.cost_usd`` — the orchestrator's
+           aggregate across worker + planner + every critic. Matches
+           ``state.cumulative_cost_usd`` in kaos-agents. Required for
+           critic-heavy turns where the worker's ``turn_summary`` only
+           covers the ReAct dispatch and misses M2/M3/GoalCheck spend
+           (Agent 5's diary: meta reported $0.0014 vs true $0.0091, a
+           5-6× under-count pre-R2.3).
+        2. Sum of ``usage_observed`` events — covers every LLM call we
+           saw, including critic + planner calls between worker
+           iterations. Fires when ``loop_terminated`` doesn't arrive
+           (network drop, hard early exit).
+        3. The last ``turn_summary`` aggregate alone — least authoritative
+           because it's per-WORKER-ITERATION (clobbered on each iter)
+           and excludes critic costs entirely. Retained as a last-resort
+           fallback for streams that never emit either of the above.
         """
+        if self._loop_terminated_summary is not None:
+            return self._loop_terminated_summary
+        if self._usage_sum_cost_usd > 0:
+            return (
+                self._usage_sum_cost_usd,
+                self._usage_sum_input_tokens + self._usage_sum_output_tokens,
+            )
         if self._final_summary is not None:
             return self._final_summary
         return (
