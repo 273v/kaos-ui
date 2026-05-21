@@ -271,7 +271,7 @@ wheels = [
 
 [[package]]
 name = "kaos-agents"
-version = "0.1.2"
+version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-content", extra = ["html", "markdown"] },
@@ -281,9 +281,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/92/7099d22bf3c853cac4c0d310ee506452a7aba897615c00d637026f5e4c6a/kaos_agents-0.1.2.tar.gz", hash = "sha256:4a1c4d4333ab46064d03774a199d4e5c8ae9668e6548a3ae9935bfe726c51465", size = 3305625, upload-time = "2026-05-21T17:56:40.749Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/2a/2549a6366a1ecc351fb7edb7fa25e343b124f30975665a5da3281c8c4488/kaos_agents-0.1.7.tar.gz", hash = "sha256:118efd3e0ee1824034bdb4ef205c9490bc57693400b6b050138ad531d8bc1941", size = 3335583, upload-time = "2026-05-21T20:53:46.938Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/54/474e8f998065e6f3ebe78e22c9eec938c8ebd8b8b283ccbd853b08b58902/kaos_agents-0.1.2-py3-none-any.whl", hash = "sha256:13f2e3d1aaae30bc987e7cbae90e059784df15173d10b8a423cd6ee8b4af3a10", size = 931873, upload-time = "2026-05-21T17:56:38.49Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/0e/e8c9adfb279255bb389bf3bb0d52d3554cd1c550c45cac2dfb9fa8d13eeb/kaos_agents-0.1.7-py3-none-any.whl", hash = "sha256:5b369be244862043f776c92e3843e406166c3719b2fffb6d196fa55bd4e4e8b4", size = 947789, upload-time = "2026-05-21T20:53:44.893Z" },
 ]
 
 [[package]]
@@ -997,7 +997,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "kaos-agents", specifier = ">=0.1.2,<0.2" },
+    { name = "kaos-agents", specifier = ">=0.1.7,<0.2" },
     { name = "kaos-citations", specifier = ">=0.1.0,<0.2" },
     { name = "kaos-content", extras = ["markdown"], specifier = ">=0.1.0,<0.2" },
     { name = "kaos-core", specifier = ">=0.1.0,<0.2" },

@@ -64,9 +64,13 @@ dependencies = [
     # 2026-05-21: bumped floor to 0.1.2 — reliability roadmap layer 2
     # (R0.1 worker-draft preservation, R1.1 SSE-dict circuit breaker,
     # R1.2 M2/M3 override rationale, R1.3 per-iteration tool-call cap,
-    # R1.4 semantic stuck-detection). See
-    # kaos-modules/docs/plans/2026-05-21-reliability-roadmap.md.
-    "kaos-agents>=0.1.2,<0.2",
+    # R1.4 semantic stuck-detection). 2026-05-21 bump to 0.1.7 — the
+    # broad-reliability roadmap (2026-05-22) closure: B0.2 chat-ReAct
+    # tool timeout, B0.3 canonical-turn summarize, B0.7 PII scrubber,
+    # B0.8 citation verification (CourtListener), B0.9 injection
+    # envelope hoist. See
+    # kaos-modules/docs/plans/2026-05-22-broad-reliability-adaptability-roadmap.md.
+    "kaos-agents>=0.1.7,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the
