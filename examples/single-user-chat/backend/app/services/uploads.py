@@ -154,6 +154,20 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
     Returns whatever the parser returns. PDF/DOCX/PPTX return
     ``ContentDocument``; future XLSX support would return
     ``TabularDocument`` (different shape — not enabled in P1).
+
+    B0.4 / B0.5 — opted-in parser kwargs:
+    - PDF: ``ocr="auto"`` so scanned exhibits don't silently round-trip
+      with empty bodies (was the root cause of #406 / #407 NDA
+      hallucination — Haiku summarized "the document appears empty"
+      and the agent then confidently answered from a fabricated summary).
+    - DOCX: ``track_changes=True`` so M&A redlines preserve
+      insertions/deletions. Pre-fix, every redline workflow was broken —
+      the agent saw the final-accepted version and couldn't identify
+      what changed.
+
+    Both flags are detected after parse via :func:`_detect_parse_flags`
+    and persisted into :class:`FileMeta` so the UI can render banners
+    ("OCR'd PDF — text accuracy may vary" / "Tracked changes detected").
     """
     if ext == ".pdf":
         # kaos-pdf 0.1.0a2 exports `extract_pdf` (the ContentDocument-
@@ -162,11 +176,11 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
         # against the PyPI release we depend on.
         from kaos_pdf import extract_pdf
 
-        return extract_pdf(temp_path)
+        return extract_pdf(temp_path, ocr="auto")
     if ext == ".docx":
         from kaos_office import parse_docx
 
-        return parse_docx(temp_path)
+        return parse_docx(temp_path, track_changes=True)
     if ext == ".pptx":
         from kaos_office import parse_pptx
 
@@ -181,6 +195,60 @@ async def _parse_offloaded(temp_path: Path, ext: str) -> Any:
     """Run the sync parser inside the single-thread executor."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_PARSER_EXECUTOR, _parse_sync, temp_path, ext)
+
+
+def _detect_parse_flags(parsed_doc: Any, ext: str) -> dict[str, bool]:
+    """Inspect a parsed ContentDocument for honest parse-mode signals.
+
+    Returns ``{"ocr_applied": bool, "track_changes_detected": bool}``.
+
+    - **OCR**: kaos-pdf tags OCR'd paragraphs with
+      ``provenance.extractor = "kaos-pdf/ocr/<engine>"`` (see
+      ``kaos-pdf/kaos_pdf/extract.py:2595``). Walk the doc's blocks
+      and surface True if any provenance is OCR-tagged.
+    - **Tracked changes**: kaos-office emits
+      ``AnnotationType.TRACKED_CHANGE`` annotations when
+      ``track_changes=True`` and any ``w:ins`` / ``w:del`` revision
+      lives in the source DOCX (see
+      ``kaos-office/kaos_office/docx/reader.py:419-435``).
+
+    Best-effort: any introspection failure → both flags fall back to
+    False. The file upload still succeeds; the UI banner is the only
+    consumer of this signal.
+    """
+    ocr_applied = False
+    track_changes_detected = False
+    try:
+        blocks = getattr(parsed_doc, "blocks", None) or []
+        if ext == ".pdf":
+            for block in blocks:
+                attr = getattr(block, "attr", None)
+                if attr is None:
+                    continue
+                prov = getattr(attr, "provenance", None)
+                extractor = getattr(prov, "extractor", None) or ""
+                if extractor.startswith("kaos-pdf/ocr/"):
+                    ocr_applied = True
+                    break
+        elif ext == ".docx":
+            from kaos_content.model.annotation import AnnotationType
+
+            annotations = getattr(parsed_doc, "annotations", None) or []
+            for ann in annotations:
+                kind = getattr(ann, "kind", None)
+                if kind == AnnotationType.TRACKED_CHANGE:
+                    track_changes_detected = True
+                    break
+    except Exception as exc:
+        logger.debug(
+            "parse-flag detection failed for ext=%s: %s — defaulting to False",
+            ext,
+            exc,
+        )
+    return {
+        "ocr_applied": ocr_applied,
+        "track_changes_detected": track_changes_detected,
+    }
 
 
 def _resolve_summarizer_model() -> str:
@@ -381,9 +449,17 @@ async def store_and_parse(
     # 3. Persist the parsed AST sidecar (only on success).
     token_count: int | None = None
     summary: str | None = None
+    parse_flags: dict[str, bool] = {
+        "ocr_applied": False,
+        "track_changes_detected": False,
+    }
     if parsed_doc is not None and parse_status.status == "ready":
         ast_bytes = _serialize_doc(parsed_doc)
         await vfs.write(f"{vfs_path}.kaos.json", ast_bytes)
+        # B0.4 / B0.5: inspect the parsed doc for OCR provenance + DOCX
+        # tracked-change annotations so the UI can render an honest
+        # parse-mode banner.
+        parse_flags = _detect_parse_flags(parsed_doc, ext)
         # Token count + LLM summary are best-effort enrichments.
         # Failures leave them null but never block the upload.
         token_count, summary = await _enrich_parsed_doc(
@@ -401,6 +477,8 @@ async def store_and_parse(
         parse=parse_status,
         token_count=token_count,
         summary=summary,
+        ocr_applied=parse_flags["ocr_applied"],
+        track_changes_detected=parse_flags["track_changes_detected"],
     )
     meta_bytes = meta.model_dump_json().encode("utf-8")
     await vfs.write(f"{vfs_path}.meta.json", meta_bytes)
@@ -570,9 +648,7 @@ async def render_session_corpus_markdown(
     for back-compat with callers that pass it; it is no longer used
     because no body content is inlined.
     """
-    metas = await list_session_files(
-        runtime=runtime, session_id=session_id, tenant_id=tenant_id
-    )
+    metas = await list_session_files(runtime=runtime, session_id=session_id, tenant_id=tenant_id)
     if not metas:
         return ""
 
