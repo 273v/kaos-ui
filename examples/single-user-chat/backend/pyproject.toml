@@ -61,7 +61,12 @@ dependencies = [
     # factual-entity-no-tool-call, clarification-loop, announce-
     # and-quit), plus the tool_bridge ToolReportedError switch that
     # propagates is_error=true through ReAct.
-    "kaos-agents>=0.1.0a16,<0.2",
+    # 2026-05-21: bumped floor to 0.1.2 — reliability roadmap layer 2
+    # (R0.1 worker-draft preservation, R1.1 SSE-dict circuit breaker,
+    # R1.2 M2/M3 override rationale, R1.3 per-iteration tool-call cap,
+    # R1.4 semantic stuck-detection). See
+    # kaos-modules/docs/plans/2026-05-21-reliability-roadmap.md.
+    "kaos-agents>=0.1.2,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the
@@ -72,16 +77,19 @@ dependencies = [
     # wheel claim of 0.1.0a11). Earlier comment about a8 + Stage A
     # artifact features superseded — those landed in a8 and remain
     # available in a10+.
-    "kaos-core>=0.1.0a10,<0.2",
-    "kaos-ui>=0.1.0a2,<0.2",
+    "kaos-core>=0.1.0,<0.2",
+    "kaos-ui>=0.1.0a13,<0.2",
     # 2026-05-18: bumped kaos-llm-core floor to 0.1.0a15 — adds the
     # single-field Signature auto-unwrap that lets `@llm_call(... -> str)`
     # return a real `str` instead of `SignatureOutput` (the cause of
     # the `'SignatureOutput' has no attribute 'strip'` titler crash
     # at /home/mjbommar/projects/273v/kaos-modules/docs/plans/
     # persona-matrix-followups.md § 5 Stage 2).
-    "kaos-llm-core>=0.1.0a15,<0.2",
-    "kaos-llm-client>=0.1.0a4,<0.2",
+    "kaos-llm-core>=0.1.0,<0.2",
+    # 2026-05-21: bumped floor to 0.1.1 — reliability roadmap R0.3
+    # (Gemini tool-dispatch fix: JSON-schema transformer applied to
+    # tool parameter blocks, not just structured-output responseSchema).
+    "kaos-llm-client>=0.1.1,<0.2",
     # 2026-05-18: kaos-content >= a12 / kaos-pdf >= a7 / kaos-office
     # >= a7 — all carry the Stage 1 `path` field on snippet tool
     # results (per persona-matrix-followups.md). kaos-office a7
@@ -92,11 +100,11 @@ dependencies = [
     # fabrication P0). kaos-content a12 ships the corresponding
     # DocumentView numbering-label preservation; kaos-pdf a7 ships
     # the structural-breadcrumbs path field on search-document hits.
-    "kaos-content[markdown]>=0.1.0a12,<0.2",
-    "kaos-pdf>=0.1.0a7,<0.2",
-    "kaos-office>=0.1.0a7,<0.2",
+    "kaos-content[markdown]>=0.1.0,<0.2",
+    "kaos-pdf>=0.1.0,<0.2",
+    "kaos-office>=0.1.0,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
-    "kaos-citations>=0.1.0a3,<0.2",
+    "kaos-citations>=0.1.0,<0.2",
     # P2-1b: source discovery + materialization. Federal Register / eCFR /
     # EDGAR / GovInfo / GLEIF connectors + generic HTTP / archive / file
     # parsers. 30 tools; offline parsers carry tags=["forensics"] for
@@ -106,17 +114,17 @@ dependencies = [
     # Full bodies now addressable via structured_content.artifact_id.
     # 2026-05-18: bumped to 0.1.0a9 — VFS-FIX Stage 4 (path-resolution
     # helper + SES2 fetch-url remediation hint) now on PyPI.
-    "kaos-source>=0.1.0a9,<0.2",
+    "kaos-source>=0.1.0,<0.2",
     # P2-1c: web fetch + browser (Playwright) + netinfra (DNS / WHOIS /
     # TLS / TCP / UDP). 45 tools; browser tagged ["browser"], netinfra
     # tagged ["netinfra"] for the SessionPolicy derivation.
     # 2026-05-17 (Stage B3): bumped to 0.1.0a5 — crawl_tools fallback no
     # longer silently truncates at 5000 chars; full body returned (or
     # routed via artifact tier when runtime context available).
-    "kaos-web>=0.1.0a5,<0.2",
+    "kaos-web>=0.1.0,<0.2",
     # P2-1d: kaos-nlp-core content_type classifier — magic-byte
     # detection feeds the AgenticLoop's corpus_kinds Signature input.
-    "kaos-nlp-core>=0.1.0a8,<0.2",
+    "kaos-nlp-core>=0.1.0,<0.2",
     # FastAPI + SSE + multipart (UploadFile needs python-multipart)
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32,<1.0",
