@@ -30,6 +30,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from kaos_agents.api.settings import scope_session_id
 from kaos_core import KaosRuntime
 
 from app.exceptions import AppError
@@ -103,8 +104,45 @@ def _safe_filename(raw: str) -> str:
     return cleaned
 
 
-def _vfs_path(session_id: str, filename: str) -> str:
-    return f"sessions/{session_id}/files/{filename}"
+def _scoped_session_prefix(session_id: str, tenant_id: str | None) -> str:
+    """Resolve the on-disk session prefix for the upload pipeline.
+
+    R0.2 (reliability roadmap, kaos-modules/docs/plans/2026-05-21-reliability-roadmap.md):
+    every PDF / DOCX / PPTX upload + agent Q&A path was broken for any
+    authenticated user. The reader side (kaos-agents Runner, patched at
+    ``app/main.py:67``) sees the **tenant-scoped** session id —
+    kaos-agents' ``POST /v1/sessions/{sid}/messages`` route applies
+    ``scope_session_id(session_id, tenant_id)`` at ``server.py:393``
+    before passing it to ``Runner.run()``, so the SPA monkey-patch
+    builds a ``KaosContext`` with namespace ``sessions/{tenant}:{sid}/files/``.
+    Pre-fix, the writer side (this module) used the **raw URL session
+    id** straight off the route path, so files landed at
+    ``sessions/{sid}/files/`` — the agent's bare-name lookup never
+    found them and ReAct loops spiralled into "fix-the-path"
+    hallucinations.
+
+    In localhost-dev mode (``tenant_id is None``) the result equals the
+    raw session id, matching ``scope_session_id``'s no-op branch.
+    """
+    return scope_session_id(session_id, tenant_id)
+
+
+def _vfs_path(session_id: str, filename: str, *, tenant_id: str | None = None) -> str:
+    """Compute the on-disk VFS path for a session upload.
+
+    See :func:`_scoped_session_prefix` for the tenant-scoping rationale.
+    Callers that have not yet been migrated still pass ``tenant_id=None``
+    (matching localhost-dev mode); the route handlers (auth-gated) supply
+    the tenant.
+    """
+    scoped = _scoped_session_prefix(session_id, tenant_id)
+    return f"sessions/{scoped}/files/{filename}"
+
+
+def _vfs_prefix(session_id: str, tenant_id: str | None = None) -> str:
+    """Compute the on-disk VFS prefix for all uploads in one session."""
+    scoped = _scoped_session_prefix(session_id, tenant_id)
+    return f"sessions/{scoped}/files/"
 
 
 # ── parser dispatch ────────────────────────────────────────────────
@@ -285,6 +323,7 @@ async def store_and_parse(
     data: bytes,
     content_type: str | None = None,
     supported_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx"),
+    tenant_id: str | None = None,
 ) -> FileMeta:
     """Persist + parse one uploaded file. Caller validates size before
     handing us the bytes (route is the place to surface a 413 with the
@@ -304,7 +343,7 @@ async def store_and_parse(
             how_to_fix=f"upload one of: {', '.join(supported_extensions)}",
         )
 
-    vfs_path = _vfs_path(session_id, filename)
+    vfs_path = _vfs_path(session_id, filename, tenant_id=tenant_id)
     vfs = runtime.vfs
 
     # 1. Original bytes → VFS.
@@ -383,6 +422,7 @@ async def backfill_session_files(
     session_id: str,
     overwrite: bool = False,
     filename: str | None = None,
+    tenant_id: str | None = None,
 ) -> int:
     """Recompute token_count + summary for ready-parsed files that are
     missing them.
@@ -399,7 +439,7 @@ async def backfill_session_files(
     """
     from kaos_content import ContentDocument
 
-    prefix = f"sessions/{session_id}/files/"
+    prefix = _vfs_prefix(session_id, tenant_id)
     paths = sorted(await runtime.vfs.list(prefix))
     meta_paths = [p for p in paths if p.endswith(".meta.json")]
     updated = 0
@@ -439,7 +479,12 @@ async def backfill_session_files(
     return updated
 
 
-async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[FileMeta]:
+async def list_session_files(
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    tenant_id: str | None = None,
+) -> list[FileMeta]:
     """Return the FileMeta for every uploaded file in the session.
 
     Walks the VFS prefix ``sessions/{id}/files/`` and reads each
@@ -447,7 +492,7 @@ async def list_session_files(*, runtime: KaosRuntime, session_id: str) -> list[F
     unreadable are skipped (defensive — old or partially-written
     uploads shouldn't 500 the list endpoint).
     """
-    prefix = f"sessions/{session_id}/files/"
+    prefix = _vfs_prefix(session_id, tenant_id)
     paths = await runtime.vfs.list(prefix)
     out: list[FileMeta] = []
     for path in sorted(paths):
@@ -495,6 +540,7 @@ async def render_session_corpus_markdown(
     runtime: KaosRuntime,
     session_id: str,
     per_file_budget_chars: int | None = None,  # kept for back-compat — no longer used
+    tenant_id: str | None = None,
 ) -> str:
     """Render a metadata-only catalog of every file attached to the session.
 
@@ -524,13 +570,15 @@ async def render_session_corpus_markdown(
     for back-compat with callers that pass it; it is no longer used
     because no body content is inlined.
     """
-    metas = await list_session_files(runtime=runtime, session_id=session_id)
+    metas = await list_session_files(
+        runtime=runtime, session_id=session_id, tenant_id=tenant_id
+    )
     if not metas:
         return ""
 
     chunks: list[str] = []
     for meta in metas:
-        vfs_path = _vfs_path(session_id, meta.filename)
+        vfs_path = _vfs_path(session_id, meta.filename, tenant_id=tenant_id)
         ast_path = f"{vfs_path}.kaos.json"
 
         header_lines = [
@@ -563,7 +611,11 @@ class FileNotFoundError(UploadError):
 
 
 async def read_session_file(
-    *, runtime: KaosRuntime, session_id: str, filename: str
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    filename: str,
+    tenant_id: str | None = None,
 ) -> tuple[bytes, FileMeta]:
     """Return (original_bytes, meta) for one uploaded file.
 
@@ -571,7 +623,7 @@ async def read_session_file(
     delete route uses the same signal so 404 semantics are consistent.
     """
     safe = _safe_filename(filename)
-    base = _vfs_path(session_id, safe)
+    base = _vfs_path(session_id, safe, tenant_id=tenant_id)
     meta_path = f"{base}.meta.json"
     if not await runtime.vfs.exists(meta_path):
         raise FileNotFoundError(
@@ -588,7 +640,13 @@ async def read_session_file(
     return data, meta
 
 
-async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename: str) -> None:
+async def delete_session_file(
+    *,
+    runtime: KaosRuntime,
+    session_id: str,
+    filename: str,
+    tenant_id: str | None = None,
+) -> None:
     """Remove the original bytes + .kaos.json + .meta.json siblings.
 
     Raises ``FileNotFoundError`` (404 in the route) if the meta
@@ -598,7 +656,7 @@ async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename
     is normal when the parse failed).
     """
     safe = _safe_filename(filename)
-    base = _vfs_path(session_id, safe)
+    base = _vfs_path(session_id, safe, tenant_id=tenant_id)
     meta_path = f"{base}.meta.json"
 
     if not await runtime.vfs.exists(meta_path):

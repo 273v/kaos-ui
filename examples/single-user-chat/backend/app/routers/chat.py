@@ -345,6 +345,7 @@ async def send_message(
     settings: SettingsDep,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: Annotated[str | None, Depends(require_auth)],
 ) -> EventSourceResponse:
     """Stream SSE: forward to upstream + bump our metadata on completion."""
     try:
@@ -374,7 +375,7 @@ async def send_message(
 
         try:
             corpus_markdown = await render_session_corpus_markdown(
-                runtime=runtime, session_id=session_id
+                runtime=runtime, session_id=session_id, tenant_id=tenant_id
             )
         except Exception:
             logger.exception("failed to render corpus for session=%s", session_id)
@@ -400,7 +401,9 @@ async def send_message(
         try:
             from app.services.uploads import list_session_files
 
-            file_metas = await list_session_files(runtime=runtime, session_id=session_id)
+            file_metas = await list_session_files(
+                runtime=runtime, session_id=session_id, tenant_id=tenant_id
+            )
             corpus_headlines = "\n".join(
                 f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
                 for m in file_metas

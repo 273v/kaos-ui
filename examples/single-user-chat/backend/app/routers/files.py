@@ -39,12 +39,18 @@ from app.services.uploads import (
 )
 from app.settings import AppSettings
 
-router = APIRouter(tags=["files"], dependencies=[Depends(require_auth)])
+router = APIRouter(tags=["files"])
 logger = app_logger("files_router")
 
 SettingsDep = Annotated[AppSettings, Depends(get_settings)]
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
 RuntimeDep = Annotated[KaosRuntime, Depends(get_runtime)]
+# R0.2: capture the tenant id from ``require_auth`` per-route so we can
+# thread it into the uploads pipeline. The router-level
+# ``dependencies=[Depends(require_auth)]`` only gated the call without
+# yielding the tenant id; switching to a per-handler ``Annotated``
+# dependency keeps the gate AND lets the handler scope the VFS path.
+TenantDep = Annotated[str | None, Depends(require_auth)]
 
 
 def _validation_detail(exc: UploadValidationError | UploadParseError) -> dict[str, str]:
@@ -65,6 +71,7 @@ async def upload_file(
     settings: SettingsDep,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
 ) -> UploadResponse:
     """Accept one file, persist + parse, auto-flip tools_enabled."""
     try:
@@ -125,6 +132,7 @@ async def upload_file(
             data=data,
             content_type=file.content_type,
             supported_extensions=settings.supported_upload_extensions,
+            tenant_id=tenant_id,
         )
     except UploadValidationError as exc:
         raise HTTPException(
@@ -166,6 +174,7 @@ async def search_corpus(
     session_id: str,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
     q: str,
     top_k: int = 10,
 ) -> CorpusSearchResponse:
@@ -188,6 +197,7 @@ async def search_corpus(
         session_id=session_id,
         query=q,
         top_k=max(1, min(top_k, 50)),
+        tenant_id=tenant_id,
     )
     return CorpusSearchResponse(
         session_id=session_id,
@@ -213,6 +223,7 @@ async def list_files(
     session_id: str,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
 ) -> FileListResponse:
     """Return every uploaded file for this session, with parse status."""
     # Validate the session exists; if not, this is a 404, not an empty list
@@ -223,7 +234,9 @@ async def list_files(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    files = await list_session_files(runtime=runtime, session_id=session_id)
+    files = await list_session_files(
+        runtime=runtime, session_id=session_id, tenant_id=tenant_id
+    )
     return FileListResponse(session_id=session_id, files=files)
 
 
@@ -232,6 +245,7 @@ async def backfill_files(
     session_id: str,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
     overwrite: bool = False,
     filename: str | None = None,
 ) -> dict[str, int]:
@@ -252,6 +266,7 @@ async def backfill_files(
         session_id=session_id,
         overwrite=overwrite,
         filename=filename,
+        tenant_id=tenant_id,
     )
     return {"updated": updated}
 
@@ -265,6 +280,7 @@ async def download_file(
     filename: str,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
 ) -> Response:
     """Stream the original bytes of an uploaded file back to the caller.
 
@@ -279,7 +295,10 @@ async def download_file(
 
     try:
         data, meta = await read_session_file(
-            runtime=runtime, session_id=session_id, filename=filename
+            runtime=runtime,
+            session_id=session_id,
+            filename=filename,
+            tenant_id=tenant_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -308,6 +327,7 @@ async def delete_file(
     filename: str,
     store: StoreDep,
     runtime: RuntimeDep,
+    tenant_id: TenantDep,
 ) -> None:
     """Remove an uploaded file (bytes + AST sidecar + meta sidecar)."""
     try:
@@ -316,7 +336,12 @@ async def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     try:
-        await delete_session_file(runtime=runtime, session_id=session_id, filename=filename)
+        await delete_session_file(
+            runtime=runtime,
+            session_id=session_id,
+            filename=filename,
+            tenant_id=tenant_id,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

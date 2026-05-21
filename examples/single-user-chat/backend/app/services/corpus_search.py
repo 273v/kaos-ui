@@ -38,6 +38,7 @@ async def search_session_corpus(
     session_id: str,
     query: str,
     top_k: int = 10,
+    tenant_id: str | None = None,
 ) -> list[CorpusSearchHit]:
     """BM25-search the ready-parsed files in ``session_id``.
 
@@ -71,7 +72,9 @@ async def search_session_corpus(
     # paragraph becomes one DocumentCollection record so BM25 can
     # rank per-paragraph rather than per-file — granular hits make
     # the SPA's "jump to passage" UX feasible later.
-    prefix = f"sessions/{session_id}/files/"
+    from app.services.uploads import _vfs_prefix
+
+    prefix = _vfs_prefix(session_id, tenant_id)
     paths = await runtime.vfs.list(prefix)
     records: list[dict[str, str | int]] = []
     rec_id = 0
