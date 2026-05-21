@@ -906,6 +906,41 @@ async def get_history(
 
     Returns an empty list (not 404) when the session has no turns yet —
     the SPA seeds the transcript with whatever this returns on route mount.
+
+    **Response shape (P2-D, 0.1.1):**
+
+    The response is an OBJECT, NOT a bare list:
+
+    ```json
+    {
+      "session_id": "01KS5...",
+      "turn_count": 2,
+      "item_count": 4,
+      "messages": [
+        {"role": "user", "content": "...", "added_at": 1779375495.0, "tool_calls": []},
+        {"role": "assistant", "content": "...", "added_at": 1779375495.0,
+         "tool_calls": [{"id": "...", "name": "...", "status": "done", ...}]}
+      ]
+    }
+    ```
+
+    Common consumer mistakes:
+
+    - **Assuming the top level is a list**: it is not. Always read
+      `response.json()["messages"]` (Python) or
+      `(await resp.json()).messages` (TypeScript).
+    - **Assuming `tool_calls` lives on the response root**: tool calls
+      are scoped to the assistant message that emitted them and live
+      under `messages[i].tool_calls`.
+    - **Bearer auth**: every call must include
+      ``Authorization: Bearer <token>``. The dev token is
+      ``demo-token-must-be-at-least-32-chars-long-for-validation``;
+      production uses real OIDC.
+
+    The `tool_calls[]` entries follow the
+    :class:`~app.models.MessageToolCall` shape — fields include
+    ``id``, ``name``, ``status`` ("done" | "error" | "running"),
+    ``args_preview``, ``result_preview``, ``structured_content``.
     """
     # Ensure our metadata exists; if not, 404 here rather than letting
     # the upstream call leak a confusing message.

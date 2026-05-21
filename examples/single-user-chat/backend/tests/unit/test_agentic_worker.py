@@ -75,6 +75,40 @@ def _sse(event_type: str, **payload: Any) -> dict[str, str]:
     return {"event": event_type, "data": json.dumps(body)}
 
 
+def _tool_call_span(
+    *,
+    tool_name: str,
+    call_id: str,
+    is_error: bool = False,
+    result_summary: str = "",
+    structured_content: dict[str, Any] | None = None,
+    phase: str = "complete",
+) -> dict[str, str]:
+    """Build a `span` SSE record for a TOOL_CALL phase.
+
+    Mirrors the wire shape kaos-agents emits from
+    ``kaos_agents.patterns.chat`` — see chat.py:630-654 for the
+    upstream emitter. The SPA worker reads tool calls from these
+    span/complete events (post-#548 fix); see
+    ``app/services/agentic_worker.py:180``.
+    """
+    attrs: dict[str, Any] = {
+        "tool_name": tool_name,
+        "call_id": call_id,
+        "is_error": is_error,
+        "result_summary": result_summary,
+    }
+    if structured_content is not None:
+        attrs["structured_content"] = structured_content
+    body = {
+        "type": "span",
+        "subject": "tool_call",
+        "phase": phase,
+        "attributes": attrs,
+    }
+    return {"event": "span", "data": json.dumps(body)}
+
+
 def _stream_chat_stub(records: list[dict[str, str]]) -> _StreamChatStub:
     """Return a callable stub for stream_chat that captures kwargs + replays records."""
     return _StreamChatStub(records)
@@ -267,12 +301,34 @@ async def test_text_concatenation_from_text_deltas(
     assert result.text == "Hello world!"
 
 
-async def test_tool_calls_collected_from_summary_events(
+async def test_tool_calls_collected_from_span_complete_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Tool calls are read from `span` events with subject=tool_call, phase=complete.
+
+    Pre-#548 the worker listened for a `tool_call_summary` SSE event
+    that kaos-agents never emits as a standalone wire event (see
+    kaos_agents.events.tools.ToolCallSummary — it only ships inside
+    TurnSummary.tool_calls). The old branch was dead code so the
+    GoalChecker received an empty `tool_calls_made` list every turn,
+    triggering false "zero successful tool calls" refusals on the
+    matrix's 5 tool-dispatch cases (E1/E2/E4/C1/C3). The worker now
+    reads from the canonical `span` events instead. See
+    app/services/agentic_worker.py:180.
+    """
     records = [
-        _sse("tool_call_summary", tool_call_id="a", tool_name="kaos-pdf-extract"),
-        _sse("tool_call_summary", tool_call_id="b", tool_name="kaos-content-search"),
+        _tool_call_span(
+            tool_name="kaos-pdf-extract",
+            call_id="a",
+            is_error=False,
+            result_summary="extracted 12 pages from doc.pdf",
+        ),
+        _tool_call_span(
+            tool_name="kaos-content-search",
+            call_id="b",
+            is_error=False,
+            result_summary="3 matches for 'governing law'",
+        ),
         _sse("turn_summary", cost_usd=0.005),
     ]
     fake = _stream_chat_stub(records)
@@ -298,6 +354,157 @@ async def test_tool_calls_collected_from_summary_events(
         "kaos-pdf-extract",
         "kaos-content-search",
     }
+    # Per-row GoalChecker-contract keys must all be present.
+    assert {tc["name"] for tc in result.tool_calls_made} == {
+        "kaos-pdf-extract",
+        "kaos-content-search",
+    }
+    for tc in result.tool_calls_made:
+        assert tc["is_error"] is False
+        assert isinstance(tc["summary_excerpt"], str)
+        assert tc["summary_excerpt"]  # non-empty
+
+
+async def test_tool_call_summary_excerpt_normalized_for_goal_checker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each row in tool_calls_made carries the GoalChecker contract keys.
+
+    Regression for #548. The GoalCheckerSignature at
+    kaos_agents/planning/goal_check.py:483-489 documents the dict
+    shape as ``{name, is_error, summary_excerpt}`` and its rules at
+    lines 343/410/430 pattern-match on `is_error=false`
+    specifically. The SPA worker must emit those exact keys or the
+    LLM critic concludes "tool_calls_made is empty" even when N
+    tools succeeded — root cause of every WU-K v2 tool-dispatch
+    failure.
+    """
+    records = [
+        _tool_call_span(
+            tool_name="kaos-web-search",
+            call_id="c1",
+            is_error=False,
+            result_summary="10 results for 'SEC enforcement 2025'",
+        ),
+        _sse("turn_summary", cost_usd=0.005),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=_meta(),
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=["web"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert len(result.tool_calls_made) == 1
+    row = result.tool_calls_made[0]
+    # The three contract keys the GoalCheckerSignature pattern-matches on.
+    assert row["name"] == "kaos-web-search"
+    assert row["is_error"] is False
+    assert row["summary_excerpt"].startswith("10 results")
+
+
+async def test_tool_call_error_status_normalized_for_goal_checker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Errored tool calls land with is_error=True (not is_error=false).
+
+    Tests the inverse path of the previous test: when the tool
+    span's `attributes.is_error` is True (e.g. anti-bot 403 from
+    sec.gov), the normalized row must carry `is_error=True` so the
+    critic correctly classifies it as a failure rather than a
+    success. Regression for the E1/E2 SEC-RIA cases where the
+    critic over-refused on partial-fetch-coverage tool runs.
+    """
+    records = [
+        _tool_call_span(
+            tool_name="kaos-web-fetch-page",
+            call_id="c1",
+            is_error=True,
+            result_summary="403 Forbidden from sec.gov",
+        ),
+        _tool_call_span(
+            tool_name="kaos-web-search",
+            call_id="c2",
+            is_error=False,
+            result_summary="5 results found",
+        ),
+        _sse("turn_summary", cost_usd=0.003),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=_meta(),
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=["web"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert len(result.tool_calls_made) == 2
+    by_name = {tc["name"]: tc for tc in result.tool_calls_made}
+    assert by_name["kaos-web-fetch-page"]["is_error"] is True
+    assert by_name["kaos-web-search"]["is_error"] is False
+
+
+async def test_span_start_phase_is_ignored_only_complete_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`span` events with phase=start are not pushed into tool_calls_made.
+
+    The worker should only record completed tool calls (those carry
+    `is_error` + `result_summary`). Start-phase spans only carry
+    tool_name + call_id; counting them would double-count and the
+    GoalChecker would see ambiguous duplicates.
+    """
+    records = [
+        _tool_call_span(
+            tool_name="kaos-pdf-extract", call_id="a", phase="start"
+        ),
+        _tool_call_span(
+            tool_name="kaos-pdf-extract",
+            call_id="a",
+            is_error=False,
+            result_summary="ok",
+            phase="complete",
+        ),
+        _sse("turn_summary", cost_usd=0.001),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=_meta(),
+        max_cost_usd=0.10,
+    )
+    result = await worker(
+        user_message="hi",
+        allowed_groups=["documents"],
+        thinking_note="",
+        iteration=1,
+    )
+
+    assert len(result.tool_calls_made) == 1
+    assert result.tool_calls_made[0]["name"] == "kaos-pdf-extract"
 
 
 async def test_cost_prefers_turn_summary(monkeypatch: pytest.MonkeyPatch) -> None:
