@@ -825,12 +825,48 @@ class ExtractCitationsResponse(BaseModel):
 
 
 class CorpusSearchHitWire(BaseModel):
-    """One BM25 hit on the session's uploaded corpus."""
+    """One BM25 hit on the session's uploaded corpus.
+
+    B0.6 (broad-reliability roadmap §B0.6): citation grounding fields
+    flow through from kaos-content's ``SearchResult`` so the SPA UI
+    can render anchored "jump-to-passage" affordances and the agent
+    cannot fabricate "Section X" labels on paragraphs whose AST has
+    none. All new fields default to safe sentinels (``None`` / empty
+    tuple) so pre-fix consumers and older payloads parse cleanly.
+    """
 
     filename: str
     score: float
     snippet: str = Field(description="First ~300 chars of the matching passage.")
     char_offset: int = Field(description="Byte offset within the source file's markdown.")
+    # B0.6 — structural citation grounding. Empty / None means
+    # "no structural identifier available for this hit"; the agent
+    # MUST NOT invent one. Per kaos-content's contract: any
+    # "Section N" claim about a hit with empty ``path`` is a
+    # fabrication.
+    block_ref: str | None = Field(
+        default=None,
+        description=(
+            "JSON-pointer ref of the containing AST block (e.g. '#/body/12'). "
+            "Stable handle for the SPA's 'jump-to-passage' click target."
+        ),
+    )
+    page: int | None = Field(
+        default=None,
+        description="1-indexed page number from provenance, or null when not page-paginated.",
+    )
+    section_title: str | None = Field(
+        default=None,
+        description="Text of the immediate section heading enclosing the hit, or null.",
+    )
+    path: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Root-first structural breadcrumb (e.g. ['Article 3', 'Section 3.4']). "
+            "Empty when the hit has no enclosing heading — the agent must not "
+            "invent a citation in that case."
+        ),
+    )
 
 
 class CorpusSearchResponse(BaseModel):

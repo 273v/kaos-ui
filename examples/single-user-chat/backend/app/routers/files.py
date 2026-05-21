@@ -209,6 +209,13 @@ async def search_corpus(
                 score=h.score,
                 snippet=h.snippet,
                 char_offset=h.char_offset,
+                # B0.6 — structural citation grounding fields. Flow
+                # through from kaos-content's SearchResult so the SPA
+                # can render anchored citations.
+                block_ref=h.block_ref,
+                page=h.page,
+                section_title=h.section_title,
+                path=list(h.path),
             )
             for h in hits
         ],
@@ -234,9 +241,7 @@ async def list_files(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    files = await list_session_files(
-        runtime=runtime, session_id=session_id, tenant_id=tenant_id
-    )
+    files = await list_session_files(runtime=runtime, session_id=session_id, tenant_id=tenant_id)
     return FileListResponse(session_id=session_id, files=files)
 
 
