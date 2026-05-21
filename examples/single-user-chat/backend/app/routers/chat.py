@@ -43,13 +43,16 @@ from app.persistence.sessions import SessionStore
 from app.services.stream_proxy import _bearer_from_env
 from app.settings import AppSettings
 
-router = APIRouter(tags=["chat"], dependencies=[Depends(require_auth)])
+router = APIRouter(tags=["chat"])
 logger = app_logger("chat_router")
 
 
 SettingsDep = Annotated[AppSettings, Depends(get_settings)]
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
 UpstreamDep = Annotated[httpx.AsyncClient, Depends(get_upstream_client)]
+# B0.1 (#569): capture tenant id per-handler so SessionStore meta
+# paths can be tenant-scoped. Same pattern as R0.2 in files.py.
+TenantDep = Annotated[str | None, Depends(require_auth)]
 
 
 def _bearer_from_request(request: Request) -> str:
@@ -148,6 +151,7 @@ async def create_session(
     settings: SettingsDep,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> SessionMeta:
     """Create a new chat session.
 
@@ -170,6 +174,7 @@ async def create_session(
         tools_enabled=body.tools_enabled
         if body.tools_enabled is not None
         else settings.default_tools_enabled,
+        tenant_id=tenant_id,
     )
     logger.info("created session %s", sid)
     return meta
@@ -178,18 +183,23 @@ async def create_session(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     store: StoreDep,
+    tenant_id: TenantDep,
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = None,
     archived: bool = False,
 ) -> SessionListResponse:
-    summaries, next_cursor = await store.list(limit=limit, cursor=cursor, archived=archived)
+    summaries, next_cursor = await store.list(
+        limit=limit, cursor=cursor, archived=archived, tenant_id=tenant_id
+    )
     return SessionListResponse(sessions=summaries, next_cursor=next_cursor)
 
 
 @router.get("/sessions/{session_id}/meta", response_model=SessionMeta)
-async def get_meta(session_id: str, store: StoreDep) -> SessionMeta:
+async def get_meta(
+    session_id: str, store: StoreDep, tenant_id: TenantDep
+) -> SessionMeta:
     try:
-        return await store.get(session_id)
+        return await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -244,7 +254,9 @@ async def list_categories() -> CategoriesResponse:
 
 
 @router.patch("/sessions/{session_id}/tool-set", response_model=SessionMeta)
-async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreDep) -> SessionMeta:
+async def patch_tool_set(
+    session_id: str, body: ToolSetUpdateBody, store: StoreDep, tenant_id: TenantDep
+) -> SessionMeta:
     """Update a session's tool ceiling. Fields are partial — omit a
     dimension to keep the existing value.
 
@@ -256,7 +268,7 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
     from kaos_agents.registry import default_tool_group_registry
 
     try:
-        current = await store.get(session_id)
+        current = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -309,11 +321,13 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
     else:
         new_policy = current.policy
 
-    return await store.patch(session_id, policy=new_policy)
+    return await store.patch(session_id, policy=new_policy, tenant_id=tenant_id)
 
 
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)
-async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> SessionMeta:
+async def patch_meta(
+    session_id: str, body: PatchMetaBody, store: StoreDep, tenant_id: TenantDep
+) -> SessionMeta:
     if body.model is not None:
         _validate_model_id(body.model)
     try:
@@ -323,15 +337,18 @@ async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> S
             model=body.model,
             system_prompt=body.system_prompt,
             tools_enabled=body.tools_enabled,
+            tenant_id=tenant_id,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/archive", response_model=ArchiveResponse)
-async def archive_session(session_id: str, store: StoreDep) -> ArchiveResponse:
+async def archive_session(
+    session_id: str, store: StoreDep, tenant_id: TenantDep
+) -> ArchiveResponse:
     try:
-        archived_at = await store.archive(session_id)
+        archived_at = await store.archive(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ArchiveResponse(archived_at=archived_at)
@@ -349,7 +366,7 @@ async def send_message(
 ) -> EventSourceResponse:
     """Stream SSE: forward to upstream + bump our metadata on completion."""
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -584,6 +601,7 @@ async def send_message(
                 fetch_history=_fetch_history,
                 turn_cost_usd=float(persist_snapshot.get("turn_cost_usd") or 0.0),
                 turn_tokens=int(persist_snapshot.get("turn_tokens") or 0),
+                tenant_id=tenant_id,
             )
         finally:
             # SSE resume Stage 1: flip the active-pointer to a terminal
@@ -920,6 +938,7 @@ async def get_history(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> HistoryResponse:
     """Fetch prior conversation messages from kaos-agents SessionMemory.
 
@@ -964,7 +983,7 @@ async def get_history(
     # Ensure our metadata exists; if not, 404 here rather than letting
     # the upstream call leak a confusing message.
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1213,6 +1232,7 @@ async def transcript_export(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
     format: str = "markdown",
 ) -> Response:
     """P2-4 — server-side transcript export. Supports ``markdown``,
@@ -1234,7 +1254,7 @@ async def transcript_export(
     # directly because it's a FastAPI handler; pull the upstream call
     # inline instead.
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1344,6 +1364,7 @@ async def get_audit_trace(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> Response:
     """#447 — canonical full action trace for one session.
 
@@ -1357,7 +1378,7 @@ async def get_audit_trace(
     level subset for chip-UI rendering only.
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

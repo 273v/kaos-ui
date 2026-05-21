@@ -75,7 +75,7 @@ async def upload_file(
 ) -> UploadResponse:
     """Accept one file, persist + parse, auto-flip tools_enabled."""
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -152,7 +152,7 @@ async def upload_file(
         ) from exc
 
     if not meta.tools_enabled:
-        meta = await store.patch(session_id, tools_enabled=True)
+        meta = await store.patch(session_id, tools_enabled=True, tenant_id=tenant_id)
         logger.info(
             "auto-flipped tools_enabled=True for session=%s after upload",
             session_id,
@@ -186,7 +186,7 @@ async def search_corpus(
     bridged on the runtime.
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -230,7 +230,7 @@ async def list_files(
     # — the SPA needs to distinguish "session has no files" from "session
     # never existed."
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -258,7 +258,7 @@ async def backfill_files(
     Re-summarize action in DocumentExplorer uses this).
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     updated = await backfill_session_files(
@@ -289,7 +289,7 @@ async def download_file(
     so the browser saves rather than opens the file inline.
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -331,7 +331,7 @@ async def delete_file(
 ) -> None:
     """Remove an uploaded file (bytes + AST sidecar + meta sidecar)."""
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

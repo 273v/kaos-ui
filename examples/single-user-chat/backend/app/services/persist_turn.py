@@ -76,6 +76,7 @@ async def persist_turn_completion(
     fetch_history: Callable[[str], Awaitable[list[HistoryMessage]]],
     turn_cost_usd: float = 0.0,
     turn_tokens: int = 0,
+    tenant_id: str | None = None,
 ) -> None:
     """Run every post-turn durable side effect as a detached task.
 
@@ -123,7 +124,7 @@ async def persist_turn_completion(
     # SessionMeta and adding the turn delta. None → 0 + delta when
     # the session predates this fix.
     try:
-        meta_before = await store.get(session_id)
+        meta_before = await store.get(session_id, tenant_id=tenant_id)
         prior_total_cost = meta_before.total_cost_usd or 0.0
         prior_total_tokens = meta_before.total_tokens or 0
         patch_kwargs: dict[str, Any] = {
@@ -135,8 +136,8 @@ async def persist_turn_completion(
         if is_first_turn:
             patch_kwargs["title"] = _derive_title(user_message)
             patch_kwargs["title_source"] = "auto"
-        await store.patch(session_id, **patch_kwargs)
-        await store.touch(session_id, increment_messages=2)
+        await store.patch(session_id, tenant_id=tenant_id, **patch_kwargs)
+        await store.touch(session_id, increment_messages=2, tenant_id=tenant_id)
     except SessionNotFoundError:
         return
     except Exception:
@@ -148,6 +149,7 @@ async def persist_turn_completion(
             store=store,
             session_id=session_id,
             fetch_history=fetch_history,
+            tenant_id=tenant_id,
         )
     except SessionNotFoundError:
         return

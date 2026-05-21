@@ -115,6 +115,7 @@ async def maybe_retitle_session(
     store: SessionStore,
     session_id: str,
     fetch_history,
+    tenant_id: str | None = None,
 ) -> None:
     """Inspect session state and run the title Program when appropriate.
 
@@ -124,7 +125,7 @@ async def maybe_retitle_session(
     re-creating it here.
     """
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError:
         return
     if not _should_retitle(meta):
@@ -204,6 +205,7 @@ async def maybe_retitle_session(
             title=title,
             title_source="auto",
             title_updated_at=datetime.now(UTC),
+            tenant_id=tenant_id,
         )
         logger.info("auto-titled session=%s -> %r", session_id, title)
     except SessionNotFoundError:
