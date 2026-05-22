@@ -92,60 +92,6 @@ if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
     _Runner._spa_context_injection_patch_applied = True  # ty: ignore[unresolved-attribute]
 
 
-# B0/#582 — kaos-core path_resolver double-prefix workaround.
-# kaos-core 0.1.0's ``path_resolver._resolve`` non-idempotently
-# prepends ``context.default_vfs_namespace`` to bare names (see
-# ``path_resolver.py:406`` —
-# ``vfs_lookup = namespace + stripped if namespace else stripped``).
-# Our corpus catalog block in ``app/services/uploads.py:670`` advertises
-# the fully-qualified VFS path to the LLM ("- VFS bytes: `sessions/{sid}/
-# files/{name}`"); the model copies it into the tool call; the resolver
-# then double-prefixes it to ``sessions/{sid}/files/sessions/{sid}/files/{name}``,
-# which doesn't exist. Discovered via T6 in the broad-reliability Chrome
-# MCP matrix; will be fixed cleanly in a kaos-core release. Strip the
-# duplicate prefix at the public-entry preprocessing step here as the
-# interim workaround.
-import kaos_core.path_resolver as _kaos_core_path_resolver  # noqa: E402
-
-if not getattr(
-    _kaos_core_path_resolver, "_spa_double_prefix_workaround_applied", False
-):
-    _original_resolve_input_path = _kaos_core_path_resolver.resolve_input_path
-
-    def _strip_duplicate_namespace_prefix(path_or_uri, context):  # type: ignore[no-untyped-def]
-        """If ``path_or_uri`` already starts with the context's default
-        namespace, return it with the leading copy stripped — so the
-        downstream prepend produces a single prefix, not a double one.
-
-        Idempotent. Safe for URIs (``file://``, ``artifact://``, ...) —
-        those never start with the namespace and pass through unchanged.
-        """
-        if context is None or not isinstance(path_or_uri, str):
-            return path_or_uri
-        namespace = getattr(context, "default_vfs_namespace", "") or ""
-        if not namespace:
-            return path_or_uri
-        # Match the resolver's own normalization (strip leading "/")
-        stripped = path_or_uri.lstrip("/")
-        if stripped.startswith(namespace):
-            return stripped[len(namespace) :]
-        return path_or_uri
-
-    def _patched_resolve_input_path(
-        path_or_uri,
-        *,
-        context=None,
-        **kwargs,
-    ):  # type: ignore[no-untyped-def]
-        normalized = _strip_duplicate_namespace_prefix(path_or_uri, context)
-        return _original_resolve_input_path(
-            normalized, context=context, **kwargs
-        )
-
-    _kaos_core_path_resolver.resolve_input_path = _patched_resolve_input_path  # ty: ignore[invalid-assignment]
-    _kaos_core_path_resolver._spa_double_prefix_workaround_applied = True  # ty: ignore[unresolved-attribute]
-
-
 # #583 — Filter SPA sidecars from the agent-visible VFS listing.
 # ``app/services/uploads.py`` writes two sidecars next to every
 # uploaded file:
