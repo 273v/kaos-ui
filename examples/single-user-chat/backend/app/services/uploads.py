@@ -219,7 +219,11 @@ def _detect_parse_flags(parsed_doc: Any, ext: str) -> dict[str, bool]:
     ocr_applied = False
     track_changes_detected = False
     try:
-        blocks = getattr(parsed_doc, "blocks", None) or []
+        # ContentDocument stores its block sequence on `.body` (a tuple),
+        # not `.blocks`. Earlier code looked up `.blocks` and silently
+        # got None — both detection flags stayed False in production
+        # (found via T4/T5 broad-reliability Chrome MCP matrix).
+        blocks = getattr(parsed_doc, "body", None) or ()
         if ext == ".pdf":
             for block in blocks:
                 attr = getattr(block, "attr", None)
@@ -233,10 +237,11 @@ def _detect_parse_flags(parsed_doc: Any, ext: str) -> dict[str, bool]:
         elif ext == ".docx":
             from kaos_content.model.annotation import AnnotationType
 
+            # Annotation's discriminator is `.type`, not `.kind`. Same
+            # silent-False pathology as the `blocks`/`body` mismatch.
             annotations = getattr(parsed_doc, "annotations", None) or []
             for ann in annotations:
-                kind = getattr(ann, "kind", None)
-                if kind == AnnotationType.TRACKED_CHANGE:
+                if getattr(ann, "type", None) == AnnotationType.TRACKED_CHANGE:
                     track_changes_detected = True
                     break
     except Exception as exc:
