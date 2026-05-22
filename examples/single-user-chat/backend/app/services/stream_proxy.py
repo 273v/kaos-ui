@@ -25,6 +25,46 @@ from app.models import SessionMeta, SessionToolSetWire
 logger = app_logger("stream_proxy")
 
 
+# Plan Issue 6 acceptance — every ``run_error`` envelope carries a
+# typed ``error_category`` so the SPA UI can distinguish budget-exceeded
+# from provider-5xx from grounding-refusal without parsing free-text
+# error messages. Literal kept narrow on purpose; new categories
+# require an upstream RFC. Mirrors the field the plan asks kaos-agents
+# to put on ``RunError`` (which we eventually want to consume directly
+# when kaos-agents 0.1.8+ ships it). Until then, we classify
+# SPA-side from the HTTP status.
+RUN_ERROR_CATEGORIES: tuple[str, ...] = (
+    "budget",
+    "provider_5xx",
+    "provider_429",
+    "tool_timeout",
+    "grounding_refuse",
+    "circuit_breaker",
+    "internal",
+)
+
+
+def classify_upstream_error(status_code: int, body: str = "") -> str:
+    """Map an HTTP status code from the bundled kaos-agents API into a
+    plan-Issue-6 ``error_category``. Body is a fallback signal for
+    application-layer hints (e.g. ``BudgetExceeded`` text) that the
+    transport status alone can't distinguish from a generic 4xx.
+    """
+    if status_code == 429:
+        return "provider_429"
+    if 500 <= status_code < 600:
+        return "provider_5xx"
+    if status_code == 402 or "BudgetExceeded" in body or "budget" in body.lower():
+        return "budget"
+    if "circuit" in body.lower() and "break" in body.lower():
+        return "circuit_breaker"
+    if "tool" in body.lower() and "timeout" in body.lower():
+        return "tool_timeout"
+    if "ungrounded" in body.lower() or "no_evidence" in body.lower():
+        return "grounding_refuse"
+    return "internal"
+
+
 def _bearer_from_env() -> str:
     """Fallback bearer when a request didn't carry one.
 
@@ -279,16 +319,23 @@ async def stream_chat(
     ) as response:
         if response.status_code >= 400:
             err = await response.aread()
+            body_str = err.decode("utf-8", errors="replace")
             logger.warning("upstream %s for session=%s", response.status_code, meta.id)
             yield {
                 "event": "run_error",
                 "data": json.dumps(
                     {
                         "type": "run_error",
+                        # Plan Issue 6: typed category so the SPA UI can
+                        # branch without parsing free-text. Literal value
+                        # is one of ``RUN_ERROR_CATEGORIES``.
+                        "error_category": classify_upstream_error(
+                            response.status_code, body_str
+                        ),
                         "what": f"Upstream kaos-agents returned {response.status_code}",
                         "how_to_fix": (
                             "Check backend logs and KAOS_AGENTS_API_API_TOKEN. "
-                            f"Body: {err.decode('utf-8', errors='replace')[:300]}"
+                            f"Body: {body_str[:300]}"
                         ),
                     }
                 ),
