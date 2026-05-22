@@ -732,13 +732,29 @@ async def render_session_corpus_markdown(
         vfs_path = _vfs_path(session_id, meta.filename, tenant_id=tenant_id)
         ast_path = f"{vfs_path}.kaos.json"
 
+        # Intentionally do NOT advertise the ``.kaos.json`` AST sidecar
+        # path. Pre-fix the corpus markdown said
+        # ``- VFS AST: `{ast_path}` `` which led gpt-5.4-mini to feed
+        # the sidecar path to ``kaos-content-stats`` and other content
+        # tools as if it were an artifact_id. content-stats then
+        # rejected it with "Unknown artifact" because content tools
+        # take an ``artifact_id`` (returned by ``kaos-office-parse-*``
+        # / ``kaos-pdf-extract-parse``), not a VFS path. For xlsx the
+        # sidecar is a ``TabularDocument`` JSON anyway — content tools
+        # would still fail on schema mismatch. The right flow is:
+        # ``kaos-office-parse-docx(vfs_path)`` → artifact_id →
+        # ``kaos-content-stats(artifact_id)``. By only listing the bytes
+        # path, the corpus markdown nudges the agent into that chain
+        # instead of trying to shortcut through the sidecar. Same
+        # family as the #583 VFSList filter; this is the corpus-markdown
+        # surface the monkey-patch didn't cover.
+        _ = ast_path
         header_lines = [
             f"### {meta.filename}",
             f"- size: {meta.size_bytes} bytes"
             + (f" · ~{meta.token_count} tokens" if meta.token_count else ""),
             f"- content_type: {meta.content_type or 'unknown'}",
             f"- VFS bytes: `{vfs_path}`",
-            f"- VFS AST: `{ast_path}`",
         ]
         if meta.parse.status != "ready":
             header_lines.append(
