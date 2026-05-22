@@ -136,6 +136,66 @@ if not getattr(
     _kaos_core_path_resolver._spa_double_prefix_workaround_applied = True  # ty: ignore[unresolved-attribute]
 
 
+# #583 — Filter SPA sidecars from the agent-visible VFS listing.
+# ``app/services/uploads.py`` writes two sidecars next to every
+# uploaded file:
+#   - ``<file>.kaos.json`` — parsed ContentDocument AST sidecar
+#   - ``<file>.meta.json`` — FileMeta sidecar (size, parse status, etc.)
+# Both live in the same ``sessions/{sid}/files/`` namespace as the
+# original. When the agent calls ``kaos-core-vfs-list``, it sees ALL
+# three entries per uploaded file and picks the sidecar instead of
+# the original on retries — discovered via T6 in the broad-reliability
+# Chrome MCP matrix where the agent tried to parse
+# ``Toro....docx.kaos.json`` (application/json) with the PDF parser.
+# Strip sidecars from the agent-visible listing at the tool-result
+# post-processing step. The SPA reads sidecars directly via
+# ``runtime.vfs.read`` — bypasses the agent-facing tool surface — so
+# nothing internal breaks.
+import kaos_core.tools as _kaos_core_tools  # noqa: E402
+
+if not getattr(_kaos_core_tools.VFSListTool, "_spa_sidecar_filter_applied", False):
+    _original_vfs_list_execute = _kaos_core_tools.VFSListTool.execute
+
+    _SPA_SIDECAR_SUFFIXES: tuple[str, ...] = (".kaos.json", ".meta.json")
+
+    async def _patched_vfs_list_execute(self, inputs, context=None):  # type: ignore[no-untyped-def]
+        result = await _original_vfs_list_execute(self, inputs, context=context)
+        # Tool errors short-circuit — passthrough.
+        if result.isError:
+            return result
+        out = result.structuredContent
+        if not isinstance(out, dict):
+            return result
+        items = out.get("items")
+        if not isinstance(items, list):
+            return result
+        filtered = [
+            p for p in items
+            if not (isinstance(p, str) and p.endswith(_SPA_SIDECAR_SUFFIXES))
+        ]
+        if len(filtered) == len(items):
+            return result  # nothing to strip — passthrough
+        out["items"] = filtered
+        out["count"] = len(filtered)
+        # Re-render the agent-visible summary text (lives in
+        # ``content[0].text`` for dict-shaped tool results — see
+        # ``ToolResult.create_success``).
+        path_label = out.get("path") or "/"
+        new_summary = f"{len(filtered)} item(s) at '{path_label}'"
+        if out.get("has_more"):
+            new_summary += " (more available)"
+        if result.content and hasattr(result.content[0], "text"):
+            result.content[0].text = new_summary  # ty: ignore[invalid-assignment]
+        return result
+
+    # Method-level monkey-patch — `execute` is async on the class. Use
+    # ``setattr`` so the unbound function becomes a bound method on
+    # instances created later by ``register_kaos_tools``.
+
+    _kaos_core_tools.VFSListTool.execute = _patched_vfs_list_execute  # ty: ignore[invalid-assignment]
+    _kaos_core_tools.VFSListTool._spa_sidecar_filter_applied = True  # ty: ignore[unresolved-attribute]
+
+
 def create_app(settings: AppSettings | None = None):
     """Build the FastAPI app. Tests call this with a custom ``settings``."""
     settings = settings or AppSettings()
