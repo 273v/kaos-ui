@@ -456,6 +456,45 @@ async def send_message(
     usage_recorder = TurnUsageRecorder()
     turn_index = meta.message_count // 2
 
+    # B1.2 — Per-session asyncio.Lock for concurrent-POST protection.
+    # The ``runs/active.json`` check below is the *soft* guard against
+    # a stale pointer after a process restart. The lock below is the
+    # *hard* guard against the same-process race where two browser
+    # tabs both POST within milliseconds — without it, both POSTs
+    # would read ``active=None``, both proceed, both write SessionMemory.
+    # Acquire eagerly here so the second concurrent POST hits the
+    # 409 path before any side effects. Released in ``_do_persist``
+    # AFTER the SSE response body is fully sent (the lock lifetime
+    # must span the streaming response, not just the handler).
+    from app.services.locks import get_session_lock, is_session_running
+
+    if is_session_running(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "run_in_progress",
+                "what": (
+                    "Another turn is currently streaming for this session "
+                    "(detected via in-process lock)."
+                ),
+                "how_to_fix": (
+                    "Wait for the in-flight turn to complete, or open a "
+                    "new chat. Concurrent POSTs to the same session are "
+                    "not supported."
+                ),
+                "alternative_tool": None,
+            },
+        )
+    _session_lock = get_session_lock(session_id)
+    await _session_lock.acquire()
+    _lock_released = False
+
+    def _release_session_lock() -> None:
+        nonlocal _lock_released
+        if not _lock_released and _session_lock.locked():
+            _session_lock.release()
+            _lock_released = True
+
     # SSE resume Stage 1: refuse a second concurrent POST. If
     # ``runs/active.json`` still says ``running`` for this session, the
     # SPA should be calling ``GET /runs/{run_id}/events`` instead. The
@@ -467,6 +506,10 @@ async def send_message(
         except Exception:  # noqa: BLE001 — never let pointer reads block the turn
             active = None
         if active is not None and active.get("status") == "running":
+            # B1.2: release the lock we acquired above before raising the
+            # soft-409 — otherwise the next POST would deadlock on a
+            # never-released asyncio.Lock.
+            _release_session_lock()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -621,6 +664,13 @@ async def send_message(
                         session_id,
                         run_id,
                     )
+            # B1.2: release the per-session asyncio.Lock acquired at the
+            # top of the handler. Must run AFTER the SSE body is fully
+            # sent (Starlette's BackgroundTask contract) — releasing
+            # earlier would let a concurrent POST race the persist work.
+            # Idempotent: if the early-409 path already released, this
+            # is a no-op.
+            _release_session_lock()
 
     # Per-run sequence fallback used when an event payload doesn't
     # carry ``payload["sequence"]`` (defensive — every kaos-agents
