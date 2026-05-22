@@ -40,6 +40,7 @@ from app.models import (
     ToolSetUpdateBody,
 )
 from app.persistence.sessions import SessionStore
+from app.services.baa_gate import TenantPolicyError, assert_session_baa_compliance
 from app.services.stream_proxy import _bearer_from_env
 from app.settings import AppSettings
 
@@ -203,9 +204,7 @@ async def list_sessions(
 
 
 @router.get("/sessions/{session_id}/meta", response_model=SessionMeta)
-async def get_meta(
-    session_id: str, store: StoreDep, tenant_id: TenantDep
-) -> SessionMeta:
+async def get_meta(session_id: str, store: StoreDep, tenant_id: TenantDep) -> SessionMeta:
     try:
         return await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
@@ -390,6 +389,31 @@ async def send_message(
     if body.model is not None and body.model != meta.model:
         _validate_model_id(body.model)
         meta = meta.model_copy(update={"model": body.model})
+
+    # Plan §Issue 4 — BAA / tenant-policy enforcement.
+    # Refuse hipaa_required sessions targeting a non-BAA provider
+    # (and refuse any session whose model isn't on a non-empty
+    # ``allowed_providers`` list). Runs AFTER the per-turn override
+    # so the gate sees the model actually about to be billed, not the
+    # session's default.
+    try:
+        assert_session_baa_compliance(
+            model=meta.model,
+            hipaa_required=getattr(meta, "hipaa_required", False) or False,
+            allowed_providers=list(getattr(meta, "allowed_providers", None) or ()),
+        )
+    except TenantPolicyError as exc:
+        v = exc.violation
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "kind": "tenant_policy_violation",
+                "constraint": v.constraint,
+                "provider": v.provider,
+                "model": v.model,
+                "message": v.detail,
+            },
+        ) from exc
 
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)

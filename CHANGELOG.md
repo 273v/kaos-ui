@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — BAA / HIPAA enforcement gate in single-user-chat backend (Issue 4)
+
+Closes the SPA half of launch-blocker plan §Issue 4
+(`kaos-modules/docs/plans/2026-05-22-launch-blocker-top-10.md`).
+When a session is flagged `hipaa_required=True` and the resolved
+provider is not BAA-eligible, the chat router refuses the message
+turn at the edge with HTTP 403. When a non-empty
+`allowed_providers` list is configured, off-list providers are
+likewise refused — independent of `hipaa_required`.
+
+* **New service module** `app/services/baa_gate.py` —
+  `assert_session_baa_compliance(*, model, hipaa_required,
+  allowed_providers)` + typed `TenantPolicyError` /
+  `TenantPolicyViolation`. Conservative default: only Anthropic /
+  OpenAI / Google / Azure-OpenAI / AWS-Bedrock are flagged
+  BAA-eligible (operators verify their actual signed contract).
+* **Chat router wiring** — `POST /v1/chat/sessions/{id}/messages`
+  calls `assert_session_baa_compliance` AFTER the per-turn model
+  override but BEFORE the upstream POST, so the gate sees the model
+  about to be billed. On trip, raises `HTTPException(403,
+  detail={"kind": "tenant_policy_violation", "constraint": ...,
+  "provider": ..., "model": ..., "message": ...})` — typed body
+  for the UI to render a specific "BAA required" or
+  "off-allowlist" banner.
+* **13 unit tests** in `tests/unit/test_baa_gate.py` covering
+  provider inference from `provider:model` and bare-model shapes,
+  unknown-provider fail-closed, the `hipaa_required=False` bypass,
+  the five BAA-eligible providers, the explicit xAI refusal,
+  allowlist empty-vs-set semantics, allowlist precedence over the
+  BAA gate, and the violation payload contract.
+
+Vendored locally until kaos-llm-client 0.1.3+ ships
+`profiles.assert_baa_compliance` on PyPI; the helper has the same
+signature and will be swap-replaceable in one commit.
+
 ## [0.1.0a13] — 2026-05-20
 
 ### Added — SettingsSheet AgenticLoop budget caps (#312)
