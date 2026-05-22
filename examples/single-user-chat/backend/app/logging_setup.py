@@ -94,7 +94,29 @@ def configure(settings: AppSettings) -> None:
     if settings.env == "production":
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(_HumanFormatter("%(asctime)s %(levelname)-7s %(name)s — %(message)s"))
+        # Include session_id + trace_id in the dev format so
+        # ContextFilter-stamped records surface them. Records without
+        # these attributes (most stdlib + uvicorn logs) get the
+        # placeholder `-` from ContextFilter — no AttributeError.
+        # Audit ref: observability-operator-debug O0.1 — the
+        # `[session=- trace=-]` propagation contract.
+        handler.setFormatter(
+            _HumanFormatter(
+                "%(asctime)s %(levelname)-7s %(name)s "
+                "[s=%(session_id)s t=%(trace_id)s] %(message)s"
+            )
+        )
+    # #observability O0.1 — install ContextFilter so every log record
+    # carries `session_id` + `trace_id` attributes (defaulting to "-").
+    # Without this filter the format-string lookup raises KeyError on
+    # records that don't pass extras, and the previous behavior was
+    # silently dropping these fields. kaos_core's ContextFilter is the
+    # source of truth; we install it on the SPA's root handler so the
+    # filter applies to every log record going through the SPA's
+    # stream (kaos.* logs use the kaos_core handler in addition).
+    from kaos_core.logging import ContextFilter
+
+    handler.addFilter(ContextFilter())
     root.addHandler(handler)
     _CONFIGURED = True
 
