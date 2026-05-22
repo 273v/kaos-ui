@@ -58,7 +58,7 @@ from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
-from app.routers import chat, citations, files, health, models, runs
+from app.routers import chat, citations, feedback, files, health, models, runs
 from app.settings import AppSettings
 
 if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
@@ -280,6 +280,8 @@ def create_app(settings: AppSettings | None = None):
     app.include_router(runs.router, prefix="/v1/chat")
     app.include_router(files.router, prefix="/v1/chat")
     app.include_router(citations.router, prefix="/v1/chat")
+    # Plan Issue 10 layer 2 — message-level thumbs feedback.
+    app.include_router(feedback.router, prefix="/v1/chat")
 
     return app
 
