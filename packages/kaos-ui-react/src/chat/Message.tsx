@@ -22,7 +22,14 @@
  * populated.
  */
 
-import { Check, ChevronRight, Copy, Loader2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  Loader2,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ChatMessage } from "../lib/chat-state.js";
@@ -68,6 +75,15 @@ interface Props {
     groups: string[],
     messageId: string,
   ): void;
+  /**
+   * Plan Issue 10 layer 2 — host receives thumbs-up / thumbs-down
+   * feedback per assistant message and posts to the SPA backend's
+   * ``POST /v1/chat/sessions/{sid}/messages/{messageId}/feedback``
+   * endpoint. When omitted, the buttons stay hidden — the affordance
+   * is opt-in so embedders without a feedback persistence layer
+   * don't get a non-functional button.
+   */
+  onFeedback?(messageId: string, value: "up" | "down"): void;
 }
 
 /**
@@ -121,11 +137,69 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
+/**
+ * Plan Issue 10 layer 2 — thumbs-up / thumbs-down per assistant
+ * message. Persists to the SPA backend's append-only JSONL audit
+ * log via the host-provided ``onFeedback`` callback (see
+ * ``app/routers/feedback.py``).
+ *
+ * Submission is fire-and-forget at this layer; we record the
+ * sentiment locally for visual confirmation. If the user changes
+ * their mind they can click the other thumb — the backend keeps
+ * every submission in the timeline (no DELETE / PATCH on feedback).
+ */
+function FeedbackButtons({
+  messageId,
+  onFeedback,
+}: {
+  messageId: string;
+  onFeedback: (id: string, value: "up" | "down") => void;
+}) {
+  const [submitted, setSubmitted] = useState<"up" | "down" | null>(null);
+  const click = (value: "up" | "down") => {
+    onFeedback(messageId, value);
+    setSubmitted(value);
+  };
+  const baseClass =
+    "inline-flex items-center justify-center rounded p-1 " +
+    "text-muted-foreground hover:text-foreground " +
+    "hover:bg-muted/60 transition-colors";
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => click("up")}
+        title={submitted === "up" ? "Thanks — recorded" : "Helpful"}
+        aria-label="Mark answer helpful"
+        aria-pressed={submitted === "up"}
+        className={
+          submitted === "up" ? `${baseClass} text-foreground bg-muted/60` : baseClass
+        }
+      >
+        <ThumbsUp className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        onClick={() => click("down")}
+        title={submitted === "down" ? "Thanks — recorded" : "Not helpful"}
+        aria-label="Mark answer not helpful"
+        aria-pressed={submitted === "down"}
+        className={
+          submitted === "down" ? `${baseClass} text-foreground bg-muted/60` : baseClass
+        }
+      >
+        <ThumbsDown className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
 export function Message({
   message,
   verboseTools = false,
   onPinElevationToSession,
   onCapabilityDecide,
+  onFeedback,
 }: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
@@ -353,6 +427,9 @@ export function Message({
             toolCount={message.tool_calls?.length}
           />
           {message.content ? <CopyMessageButton text={message.content} /> : null}
+          {onFeedback ? (
+            <FeedbackButtons messageId={message.id} onFeedback={onFeedback} />
+          ) : null}
         </div>
       )}
     </article>
