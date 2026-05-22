@@ -58,7 +58,7 @@ from kaos_ui.agents import build_chat_runtime
 
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
-from app.routers import chat, citations, feedback, files, health, models, runs
+from app.routers import chat, citations, feedback, files, health, models, replay, runs
 from app.settings import AppSettings
 
 if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
@@ -282,6 +282,10 @@ def create_app(settings: AppSettings | None = None):
     app.include_router(citations.router, prefix="/v1/chat")
     # Plan Issue 10 layer 2 — message-level thumbs feedback.
     app.include_router(feedback.router, prefix="/v1/chat")
+    # Plan Issue 6 — court-reproducibility replay endpoint.
+    # Mounted under /v1/admin/ rather than /v1/chat/ because replay is
+    # operator/audit tooling, not a per-tenant chat surface.
+    app.include_router(replay.router, prefix="/v1/admin")
 
     return app
 
