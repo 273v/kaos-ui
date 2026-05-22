@@ -424,6 +424,26 @@ class SessionMeta(BaseModel):
     # ``None`` on sessions created before this field shipped — the
     # SPA treats ``None`` as "pre-tracking; build identity unknown".
     build_sha: str | None = None
+    # Plan Issue 4 — per-session tenant policy for HIPAA / privilege /
+    # cross-vendor egress. The kaos-llm-client hook that enforces these
+    # at provider-dispatch time lives upstream (planned 0.1.3+); the
+    # SPA persists them now so they survive an upgrade and so the SPA
+    # auto-titler + reports can surface the right context. Defaults
+    # match a "non-regulated" session — flip via PATCH /sessions.
+    #
+    # ``hipaa_required``: when True, kaos-llm-client (once the gate
+    #     lands) refuses any provider whose vendor_manifest entry
+    #     reports ``hipaa_safe: false``. Audit purpose only here.
+    # ``privileged``: attorney-client privilege marker. SPA adds a
+    #     "Privileged" banner; future egress logger stamps every line.
+    # ``allowed_providers``: empty list = no restriction. Populated by
+    #     the SPA settings panel from the vendor_manifest.yaml ids.
+    #
+    # Optional because pre-Issue-4 sessions hydrate forward with all
+    # None — matched by the SPA's "no policy → unrestricted" branch.
+    hipaa_required: bool = False
+    privileged: bool = False
+    allowed_providers: list[str] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
