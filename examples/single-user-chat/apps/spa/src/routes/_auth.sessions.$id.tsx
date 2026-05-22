@@ -314,21 +314,27 @@ function ChatDetail() {
 
   // Plan Issue 10 layer 3 — regenerate this assistant turn from the
   // prior user message. The backend at
-  // app/routers/messages.py:174 rewinds MESSAGES to BEFORE the
-  // targeted assistant id and re-dispatches the prior user message
-  // through the same SSE flow (per-session lock-aware per #588).
-  // We don't have to do anything on the SPA side beyond the POST —
-  // the existing useSendMessage stream subscriber sees the new SSE
-  // run id once the backend opens it. Errors are surfaced to the
-  // console; the RegenerateButton's busy state resets after 1.5s
-  // (acts as visual lock against double-click).
+  // app/routers/messages.py:174 rewinds MESSAGES at index ``idx``
+  // (inclusive of the assistant turn at that index) and the client
+  // reissues the prior user message via POST /messages to trigger
+  // a fresh run with full ChatGPT/Claude.ai parity.
+  //
+  // The backend uses NUMERIC idx (not message id strings), so the
+  // handler maps the clicked ChatMessage.id back to its array index
+  // before POSTing. Errors are console-warned; the
+  // RegenerateButton's 1.5s busy lock suppresses double-clicks.
   const onRegenerate = (messageId: string) => {
-    apiFetch(`/v1/chat/sessions/${id}/messages/${messageId}/regenerate`, {
+    const idx = stream.state.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) {
+      console.warn("regenerate: message id not found in transcript", { messageId });
+      return;
+    }
+    apiFetch(`/v1/chat/sessions/${id}/messages/${idx}/regenerate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }).catch((err) => {
-      console.warn("regenerate POST failed", { messageId, err });
+      console.warn("regenerate POST failed", { messageId, idx, err });
     });
   };
 
