@@ -133,6 +133,12 @@ class SessionStore:
         tools_enabled: bool = False,
         session_id: str | None = None,
         tenant_id: str | None = None,
+        # Plan Issues 2 + 4 — optional tenant-policy + matter scoping
+        # at creation. All optional with conservative defaults.
+        matter_id: str | None = None,
+        hipaa_required: bool = False,
+        privileged: bool = False,
+        allowed_providers: list[str] | None = None,
     ) -> SessionMeta:
         """Create a new session metadata record. Returns the stored meta.
 
@@ -177,6 +183,10 @@ class SessionStore:
             message_count=0,
             archived=False,
             build_sha=current_build_sha(),
+            matter_id=matter_id,
+            hipaa_required=hipaa_required,
+            privileged=privileged,
+            allowed_providers=list(allowed_providers or []),
         )
         await self._write_meta(meta, tenant_id=tenant_id)
         return meta
@@ -296,6 +306,14 @@ class SessionStore:
         last_turn_tokens: int | None = None,
         total_cost_usd: float | None = None,
         total_tokens: int | None = None,
+        # Plan Issues 2 + 4 — tenant-policy patches. ``None`` = leave
+        # the existing value alone; an explicit empty string / list /
+        # ``False`` overwrites. ``allowed_providers`` always replaces
+        # in full (the caller passes the new desired allowlist).
+        matter_id: str | None = None,
+        hipaa_required: bool | None = None,
+        privileged: bool | None = None,
+        allowed_providers: list[str] | None = None,
         tenant_id: str | None = None,
     ) -> SessionMeta:
         meta = await self._read_meta(session_id, tenant_id=tenant_id)
@@ -358,6 +376,17 @@ class SessionStore:
             updates["total_cost_usd"] = total_cost_usd
         if total_tokens is not None:
             updates["total_tokens"] = total_tokens
+        # Plan Issues 2 + 4 — tenant-policy patch path.
+        if matter_id is not None:
+            # Empty string is interpreted as "clear the matter_id" so a
+            # session can be detached from a matter without re-creating.
+            updates["matter_id"] = matter_id or None
+        if hipaa_required is not None:
+            updates["hipaa_required"] = hipaa_required
+        if privileged is not None:
+            updates["privileged"] = privileged
+        if allowed_providers is not None:
+            updates["allowed_providers"] = list(allowed_providers)
         new_meta = meta.model_copy(update=updates)
         await self._write_meta(new_meta, tenant_id=tenant_id)
         return new_meta

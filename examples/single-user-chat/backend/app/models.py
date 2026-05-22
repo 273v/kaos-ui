@@ -600,6 +600,14 @@ class CreateSessionBody(BaseModel):
     model: str | None = Field(default=None, max_length=_MAX_MODEL_LEN)
     system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
+    # Plan Issues 2 + 4 — initial per-session policy. All optional and
+    # default-conservative so a client that doesn't know about these
+    # fields creates an unscoped, unrestricted session (the historic
+    # behavior).
+    matter_id: str | None = Field(default=None, max_length=128)
+    hipaa_required: bool | None = None
+    privileged: bool | None = None
+    allowed_providers: list[str] | None = None
 
 
 class PatchMetaBody(BaseModel):
@@ -608,6 +616,14 @@ class PatchMetaBody(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
     starred: bool | None = None
+    # Plan Issues 2 + 4 — tenant-policy patches (e.g. attorney flips
+    # `privileged` mid-session, or re-tags an existing session into a
+    # newly-opened matter). None = "leave unchanged" per the PATCH
+    # semantics elsewhere in this body.
+    matter_id: str | None = Field(default=None, max_length=128)
+    hipaa_required: bool | None = None
+    privileged: bool | None = None
+    allowed_providers: list[str] | None = None
 
 
 # ── tool-policy routes (TR-4) ─────────────────────────────────────────

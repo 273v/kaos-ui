@@ -175,6 +175,14 @@ async def create_session(
         if body.tools_enabled is not None
         else settings.default_tools_enabled,
         tenant_id=tenant_id,
+        # Plan Issues 2 + 4 — initial tenant-policy fields from the
+        # request body. ``None`` → keep the model defaults
+        # (matter_id=None, hipaa_required=False, privileged=False,
+        # allowed_providers=[]).
+        matter_id=body.matter_id,
+        hipaa_required=body.hipaa_required or False,
+        privileged=body.privileged or False,
+        allowed_providers=body.allowed_providers or [],
     )
     logger.info("created session %s", sid)
     return meta
@@ -337,6 +345,11 @@ async def patch_meta(
             model=body.model,
             system_prompt=body.system_prompt,
             tools_enabled=body.tools_enabled,
+            # Plan Issues 2 + 4 — tenant-policy patches.
+            matter_id=body.matter_id,
+            hipaa_required=body.hipaa_required,
+            privileged=body.privileged,
+            allowed_providers=body.allowed_providers,
             tenant_id=tenant_id,
         )
     except SessionNotFoundError as exc:
