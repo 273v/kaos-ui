@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Copy,
   Loader2,
+  RotateCw,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
@@ -84,6 +85,20 @@ interface Props {
    * don't get a non-functional button.
    */
   onFeedback?(messageId: string, value: "up" | "down"): void;
+  /**
+   * Plan Issue 10 layer 3 — regenerate this assistant turn from
+   * the prior user message. Host posts to
+   * ``POST /v1/chat/sessions/{sid}/messages/{messageId}/regenerate``
+   * which rewinds the persisted MESSAGES section to BEFORE the
+   * targeted assistant turn and re-dispatches the prior user
+   * message through the same chat flow (lock-aware per #588).
+   * The new turn streams in over SSE just like a fresh send.
+   *
+   * Host receives the assistant message id. When omitted, the
+   * button stays hidden — opt-in so embedders that don't expose
+   * the regenerate endpoint don't get a non-functional button.
+   */
+  onRegenerate?(messageId: string): void;
 }
 
 /**
@@ -194,12 +209,65 @@ function FeedbackButtons({
   );
 }
 
+/**
+ * Plan Issue 10 layer 3 — "regenerate this assistant turn from the
+ * prior user message". Mirrors the FeedbackButtons state machine
+ * (idle → in-flight → settled). The host's onRegenerate callback
+ * is responsible for the actual POST + the SSE resubscribe; this
+ * component just gives a visible spinner while the round-trip is
+ * in flight so the user can't double-click.
+ */
+function RegenerateButton({
+  messageId,
+  onRegenerate,
+}: {
+  messageId: string;
+  onRegenerate: (id: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const click = () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      onRegenerate(messageId);
+    } finally {
+      // The host typically navigates / re-subscribes to SSE, so we
+      // give a short visual lock then return to idle. If the host
+      // re-renders the transcript (replacing this message), the
+      // component unmounts anyway and the timeout is harmless.
+      setTimeout(() => setBusy(false), 1500);
+    }
+  };
+  const label = busy ? "Regenerating…" : "Regenerate";
+  return (
+    <button
+      type="button"
+      onClick={click}
+      disabled={busy}
+      title={label}
+      aria-label={label}
+      aria-busy={busy}
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors ${
+        busy ? "opacity-60 cursor-wait" : ""
+      }`}
+    >
+      {busy ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <RotateCw className="h-3 w-3" />
+      )}
+      <span>{busy ? "Regenerating…" : "Regenerate"}</span>
+    </button>
+  );
+}
+
 export function Message({
   message,
   verboseTools = false,
   onPinElevationToSession,
   onCapabilityDecide,
   onFeedback,
+  onRegenerate,
 }: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
@@ -427,6 +495,9 @@ export function Message({
             toolCount={message.tool_calls?.length}
           />
           {message.content ? <CopyMessageButton text={message.content} /> : null}
+          {onRegenerate ? (
+            <RegenerateButton messageId={message.id} onRegenerate={onRegenerate} />
+          ) : null}
           {onFeedback ? (
             <FeedbackButtons messageId={message.id} onFeedback={onFeedback} />
           ) : null}

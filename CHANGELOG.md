@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Regenerate-this-turn button on assistant messages (Issue 10 L3)
+
+Closes the plan §Issue 10 L3 acceptance row at the SPA UI layer.
+The backend `POST /v1/chat/sessions/{sid}/messages/{messageId}/regenerate`
+endpoint already shipped in `app/routers/messages.py:174`; this is
+the React frontend half that surfaces it.
+
+* **`packages/kaos-ui-react/src/chat/Message.tsx`** — new
+  `<RegenerateButton>` rendered alongside `<CopyMessageButton>` and
+  `<FeedbackButtons>` in the assistant-turn action row. Opt-in via
+  a new `onRegenerate?(messageId: string)` prop on `<Message>`;
+  hidden when the host doesn't supply the callback (same pattern as
+  feedback). Click → fire the callback once → show a 1.5s spinner
+  lock (`Loader2`) to suppress double-clicks → settle back to idle
+  (`RotateCw`). The host owns the actual POST + SSE resubscribe.
+* **`examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`**
+  — `onRegenerate` handler defined parallel to `onFeedback` and
+  passed to `<Message>`. POSTs to
+  `/v1/chat/sessions/${id}/messages/${messageId}/regenerate` with
+  an empty body; backend rewinds MESSAGES to BEFORE the targeted
+  assistant id and re-dispatches the prior user message through
+  the same SSE flow (per-session lock-aware per #588).
+
+Failure is console-warned (not surfaced as a banner) because the
+regenerate action is an explicit user gesture — the user will see
+either the new SSE stream open or the absence of one and can
+retry. The `useSendMessage` stream subscriber picks up the new
+run automatically once the backend opens it.
+
 ### Added — Per-turn StateSnapshot writer (Issue 5)
 
 Closes the plan §Issue 5 acceptance row "State snapshot per turn:

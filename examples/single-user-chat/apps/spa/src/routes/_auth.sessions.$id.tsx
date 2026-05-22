@@ -312,6 +312,26 @@ function ChatDetail() {
     });
   };
 
+  // Plan Issue 10 layer 3 — regenerate this assistant turn from the
+  // prior user message. The backend at
+  // app/routers/messages.py:174 rewinds MESSAGES to BEFORE the
+  // targeted assistant id and re-dispatches the prior user message
+  // through the same SSE flow (per-session lock-aware per #588).
+  // We don't have to do anything on the SPA side beyond the POST —
+  // the existing useSendMessage stream subscriber sees the new SSE
+  // run id once the backend opens it. Errors are surfaced to the
+  // console; the RegenerateButton's busy state resets after 1.5s
+  // (acts as visual lock against double-click).
+  const onRegenerate = (messageId: string) => {
+    apiFetch(`/v1/chat/sessions/${id}/messages/${messageId}/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }).catch((err) => {
+      console.warn("regenerate POST failed", { messageId, err });
+    });
+  };
+
   // Pin auto-elevated groups into the session's persistent ceiling.
   // The ElevationPill's "Pin to session" affordance calls this with
   // the deduped groups the AgenticLoop widened to during this turn.
@@ -586,6 +606,7 @@ function ChatDetail() {
                   onPinElevationToSession={onPinElevationToSession}
                   onCapabilityDecide={onCapabilityDecide}
                   onFeedback={onFeedback}
+                  onRegenerate={onRegenerate}
                 />
               ))}
             </div>
