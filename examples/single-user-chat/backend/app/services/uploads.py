@@ -500,7 +500,65 @@ async def store_and_parse(
     meta_bytes = meta.model_dump_json().encode("utf-8")
     await vfs.write(f"{vfs_path}.meta.json", meta_bytes)
 
+    # #589 / B1.6 — write the corpus headline into the agent's
+    # ``SessionMemory.DOCUMENTS`` section so ``corpus_ever_attached``
+    # flips True. Pre-fix the SPA wrote corpus markdown into the
+    # system prompt only; ``SessionMemory.DOCUMENTS.item_count``
+    # stayed 0, ``corpus_ever_attached`` stayed False, the IntentSignature
+    # ``corpus_attached`` signal never fired, and
+    # ``context/assemble.pin_corpus_handles`` was unreachable. Symptom:
+    # the agent didn't *know* files were attached and answered from
+    # training knowledge instead of reading the uploaded NDA.
+    #
+    # Best-effort: a memory-write failure must NOT roll back the
+    # upload itself (file persistence + meta sidecar already done),
+    # because the file is still readable via the VFS path even when
+    # the memory entry is missing. Log + continue.
     if parse_status.status == "ready":
+        try:
+            from kaos_agents.memory.store import SessionStore
+            from kaos_agents.types.memory import MemoryType
+            from kaos_agents.api.settings import scope_session_id
+
+            effective_sid = scope_session_id(session_id, tenant_id)
+            store = SessionStore(runtime.vfs)
+            memory = await store.load_or_create(effective_sid)
+            headline_parts = [
+                f"filename: {filename}",
+                f"vfs_path: {vfs_path}",
+                f"size_bytes: {len(data)}",
+            ]
+            if content_type:
+                headline_parts.append(f"content_type: {content_type}")
+            if meta.token_count is not None:
+                headline_parts.append(f"token_count: {meta.token_count}")
+            if meta.summary:
+                # Trim to a single sentence so the DOCUMENTS section
+                # stays a metadata-only manifest (full text is in the
+                # AST sidecar, behind kaos-content-* tools).
+                trimmed = meta.summary.split(". ")[0].strip()
+                if trimmed:
+                    headline_parts.append(f"summary: {trimmed}")
+            if meta.ocr_applied:
+                headline_parts.append("ocr_applied: true")
+            if meta.track_changes_detected:
+                headline_parts.append("track_changes_detected: true")
+            headline = " | ".join(headline_parts)
+            memory.add(
+                MemoryType.DOCUMENTS,
+                headline,
+                metadata={"filename": filename, "vfs_path": vfs_path},
+            )
+            await store.save(memory)
+        except Exception:
+            logger.exception(
+                "B1.6 SessionMemory.DOCUMENTS write failed for session=%s file=%s — "
+                "upload proceeds but corpus_attached signal will stay False",
+                session_id,
+                filename,
+                extra={"session_id": session_id, "upload_filename": filename},
+            )
+
         logger.info(
             "upload+parse ok session=%s file=%s size=%d",
             session_id,
