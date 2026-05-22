@@ -157,6 +157,10 @@ dev = [
 # Referenced in app/services/tool_call_recorder.py and app/routers/chat.py
 # but had no implementation anywhere in the monorepo until 2026-05-22.
 kaos-audit-session = "app.cli.audit_session:main"
+# Plan Issue 5 — durable JSONL audit log via daily aggregation across
+# all sessions. Reads the per-session runs/turn-*.jsonl event streams
+# the SPA already writes; produces one JSONL line per completed turn.
+kaos-audit-aggregate = "app.cli.audit_aggregate:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

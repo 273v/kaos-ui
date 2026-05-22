@@ -444,6 +444,16 @@ class SessionMeta(BaseModel):
     hipaa_required: bool = False
     privileged: bool = False
     allowed_providers: list[str] = Field(default_factory=list)
+    # Plan Issue 2 — per-matter tenancy. ``matter_id`` is a free-text
+    # identifier (typically the firm's matter number, e.g. "ABC-2026-
+    # 0042") that groups related sessions for ethical-wall enforcement.
+    # The upstream ``MatterClientGuard`` (kaos-agents 0.1.8+) consumes
+    # this to refuse cross-matter SessionMemory reads. Until that gate
+    # lands, the SPA stamps it for audit-CLI surfacing and future
+    # session-search by matter. ``None`` means "unscoped" (single-
+    # matter or non-firm workflow); the planner does not gate on
+    # missing matter_id.
+    matter_id: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
