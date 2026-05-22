@@ -56,6 +56,9 @@ class TurnSummary:
     tool_call_count: int = 0
     tool_names: Counter[str] = field(default_factory=Counter)
     error_count: int = 0
+    # Plan Issue 3 — per-turn version pinning. Stamped at run_started
+    # time so historical turns survive a subsequent kaos-* upgrade.
+    build_sha: str | None = None
 
 
 @dataclass(slots=True)
@@ -100,6 +103,7 @@ class SessionReport:
                     "run_id": t.run_id,
                     "started_at": t.started_at,
                     "model": t.model,
+                    "build_sha": t.build_sha,
                     "tool_call_count": t.tool_call_count,
                     "tool_names": dict(t.tool_names),
                     "error_count": t.error_count,
@@ -234,6 +238,12 @@ def _load_turn_runs(vfs_root: Path, session_id: str, report: SessionReport) -> N
                         summary.run_id = data.get("run_id")
                         summary.started_at = data.get("started_at")
                         summary.model = data.get("model")
+                        # Plan Issue 3 — per-turn version pinning.
+                        # Stamped by app/routers/chat.py at run_started
+                        # emission. Sessions created before this commit
+                        # don't have the field; surface None and let
+                        # the report flag the missing data.
+                        summary.build_sha = data.get("build_sha")
                     if evt.get("event") in {"tool_call_completed", "tool_completed"}:
                         summary.tool_call_count += 1
                         name = data.get("tool_name") or data.get("name")
@@ -335,9 +345,10 @@ def _render_text(report: SessionReport) -> str:
             lines.append(f"  - {name}: {count}")
     lines.append(f"turns       : {report.turn_count}")
     for t in report.turns:
+        sha_tag = f" build={t.build_sha[:8]}" if t.build_sha else " build=?"
         lines.append(
-            f"  - turn[{t.turn_index}] run={t.run_id} tools={t.tool_call_count}"
-            f" errors={t.error_count}"
+            f"  - turn[{t.turn_index}] run={t.run_id}{sha_tag}"
+            f" tools={t.tool_call_count} errors={t.error_count}"
         )
         if t.tool_names:
             for name, count in t.tool_names.most_common():

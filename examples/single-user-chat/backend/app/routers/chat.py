@@ -706,6 +706,17 @@ async def send_message(
         # client reconnecting with ``Last-Event-ID: -1`` replays from
         # the very start. Written to the JSONL FIRST so it shows up at
         # the head of any resume stream.
+        # Plan Issue 3 — per-turn version pinning. Stamp the running
+        # build_sha into every run_started envelope so historical
+        # turns persisted in `runs/turn-NNNN-XXXX.jsonl` survive a
+        # subsequent kaos-* upgrade. `kaos-audit-session` reads this
+        # field to flag drift between session.meta.build_sha (set at
+        # create-time) and per-turn build_sha (set at run-time). A
+        # divergent pair is the canonical "this session predates the
+        # current build" signal that the sidebar already badges, but
+        # at turn granularity instead of session granularity.
+        from app.routers.health import current_build_sha as _current_build_sha
+
         run_started_payload = {
             "type": "run_started",
             "run_id": run_id,
@@ -713,6 +724,7 @@ async def send_message(
             "turn_index": turn_index,
             "started_at": run_log.started_at if run_log is not None else None,
             "model": meta.model,
+            "build_sha": _current_build_sha(),
         }
         if run_log is not None:
             try:

@@ -74,6 +74,7 @@ def _build_fake_session(vfs_root: Path, sid: str, *, with_track_changes: bool) -
                             "run_id": "run-abc",
                             "started_at": 1779454179.0,
                             "model": "openai:gpt-5.4-mini",
+                            "build_sha": "deadbeef1234",
                         },
                     }
                 ),
@@ -103,6 +104,24 @@ def _build_fake_session(vfs_root: Path, sid: str, *, with_track_changes: bool) -
             ]
         )
     )
+
+
+@pytest.mark.unit
+def test_per_turn_build_sha_round_trips(tmp_path: Path) -> None:
+    """Plan Issue 3 — per-turn version pinning. The run_started event
+    carries build_sha, and the audit report exposes it on each turn
+    (text + JSON). Sessions created before this commit will have
+    build_sha=None and that's intentional — the field is opt-in
+    forward-compatible.
+    """
+    sid = "01TESTBUILDSHAXXXXXXXX"
+    _build_fake_session(tmp_path, sid, with_track_changes=False)
+    report = audit(tmp_path, sid)
+    assert report.turns
+    assert report.turns[0].build_sha == "deadbeef1234"
+    # JSON round-trip surfaces the field.
+    payload = report.to_dict()
+    assert payload["turns"][0]["build_sha"] == "deadbeef1234"
 
 
 @pytest.mark.unit
