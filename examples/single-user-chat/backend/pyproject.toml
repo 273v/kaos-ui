@@ -152,6 +152,12 @@ dev = [
     "ty>=0.0.1a17",
 ]
 
+[project.scripts]
+# Plan Issue 6 — postmortem CLI for debugging "yesterday's turn."
+# Referenced in app/services/tool_call_recorder.py and app/routers/chat.py
+# but had no implementation anywhere in the monorepo until 2026-05-22.
+kaos-audit-session = "app.cli.audit_session:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
