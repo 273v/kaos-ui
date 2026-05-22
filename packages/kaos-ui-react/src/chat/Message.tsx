@@ -22,10 +22,11 @@
  * populated.
  */
 
-import { ChevronRight, Loader2 } from "lucide-react";
+import { Check, ChevronRight, Copy, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ChatMessage } from "../lib/chat-state.js";
+import { copyToClipboard } from "../lib/copy-to-clipboard.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { CapabilityApproval, type CapabilityDecision } from "./CapabilityApproval.js";
 import { ElevationPill } from "./ElevationPill.js";
@@ -67,6 +68,57 @@ interface Props {
     groups: string[],
     messageId: string,
   ): void;
+}
+
+/**
+ * Tiny copy-to-clipboard button shown next to the UsageChip on every
+ * finalized assistant message. Consumer-AI table-stakes parity
+ * (Pattern α from the consumer-AI parity audit): ChatGPT / Claude.ai
+ * both expose copy on every assistant turn. Copies the rendered
+ * Markdown source (`message.content`) — agents that emit code blocks
+ * and tables keep them intact when pasted into other tools.
+ *
+ * Mirrors the `ToolCallBlock` CopyJsonButton state machine
+ * (idle/copied/failed) and the `lib/copy-to-clipboard` helper that
+ * falls back to `document.execCommand("copy")` when
+ * `navigator.clipboard` is unavailable (insecure context, sandboxed
+ * iframe, headless-Chrome unfocused-page rejection).
+ */
+function CopyMessageButton({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const onClick = async () => {
+    const ok = await copyToClipboard(text);
+    setState(ok ? "copied" : "failed");
+    setTimeout(() => setState("idle"), 1500);
+  };
+  const label =
+    state === "copied"
+      ? "Copied"
+      : state === "failed"
+        ? "Copy failed — your browser blocked clipboard write"
+        : "Copy answer";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 " +
+        "text-xs text-muted-foreground hover:text-foreground " +
+        "hover:bg-muted/60 transition-colors"
+      }
+    >
+      {state === "copied" ? (
+        <Check className="h-3 w-3" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+      <span className="hidden sm:inline">
+        {state === "copied" ? "Copied" : "Copy"}
+      </span>
+    </button>
+  );
 }
 
 export function Message({
@@ -293,12 +345,15 @@ export function Message({
       )}
 
       {isAssistant && !message.streaming && (
-        <UsageChip
-          latencyMs={message.latency_ms}
-          tokens={message.tokens}
-          costUsd={message.cost_usd}
-          toolCount={message.tool_calls?.length}
-        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <UsageChip
+            latencyMs={message.latency_ms}
+            tokens={message.tokens}
+            costUsd={message.cost_usd}
+            toolCount={message.tool_calls?.length}
+          />
+          {message.content ? <CopyMessageButton text={message.content} /> : null}
+        </div>
       )}
     </article>
   );
