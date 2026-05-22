@@ -242,6 +242,41 @@ def make_worker(
                 cost = payload.get("cost_usd")
                 if isinstance(cost, int | float):
                     usage_sum_cost_usd += float(cost)
+                    # Plan Issue 9 SPA layer — emit a synthetic
+                    # ``cost_forecast`` SSE event so the UI's RunInspector
+                    # can render a running-total cost line + warn at 80%
+                    # of cap mid-stream. The kaos-agents wire surfaces
+                    # per-LLM-call ``usage_observed`` but never a rolling
+                    # turn-total; the UI today has to wait for
+                    # ``turn_summary`` (end of run) to see the number.
+                    # By injecting a synthetic event into
+                    # ``captured_events`` we keep the wire shape additive
+                    # (no breaking change for consumers that ignore
+                    # unknown event types) while giving the UI an
+                    # actionable mid-iteration signal.
+                    forecast_event = {
+                        "event": "cost_forecast",
+                        "data": json.dumps(
+                            {
+                                "type": "cost_forecast",
+                                "cost_usd_so_far": round(
+                                    usage_sum_cost_usd, 6
+                                ),
+                                "max_cost_usd": max_cost_usd,
+                                "fraction_used": (
+                                    round(usage_sum_cost_usd / max_cost_usd, 4)
+                                    if max_cost_usd > 0
+                                    else None
+                                ),
+                                "warn_threshold_reached": (
+                                    usage_sum_cost_usd >= 0.8 * max_cost_usd
+                                    if max_cost_usd > 0
+                                    else False
+                                ),
+                            }
+                        ),
+                    }
+                    captured_events.append(forecast_event)
 
         latency_ms = (time.monotonic() - t_start) * 1000.0
         cost_usd = (
