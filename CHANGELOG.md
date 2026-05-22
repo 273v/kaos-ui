@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Edit-prior user message inline editor (Issue 10 L4)
+
+Closes the plan §Issue 10 L4 acceptance row at the SPA UI layer.
+Mirrors the L3 (Regenerate) shape — backend was already shipped
+(`PATCH /messages/{idx}` in `app/routers/messages.py:260`); this
+is the React frontend half.
+
+* **`packages/kaos-ui-react/src/chat/Message.tsx`** — new
+  `<EditPriorButton>` rendered under user messages when the host
+  supplies an `onEditPrior?(messageId, newText)` prop. Click swaps
+  the message body for a textarea + Save / Cancel pair. Save fires
+  the callback once, applies a 1.5s spinner lock against
+  double-fire (mirrors the L3 Regenerate pattern), and the host
+  PATCHes the truncate-forward + reissues the edited content via
+  the existing send flow. Opt-in via `onEditPrior` prop — hidden
+  when undefined.
+* **`examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`**
+  — `onEditPrior(messageId, newText)` handler resolves the array
+  index via `findIndex`, PATCHes
+  `/v1/chat/sessions/${id}/messages/${idx}` with `{content:
+  newText}`, then on success populates the composer with the
+  edited text and triggers the composer-form submit so the new
+  user message ships through the same `useSendMessage` flow
+  (cost tracking + SSE wiring apply automatically).
+
+Live-verified end-to-end against `localhost:8000`: PATCH returns
+HTTP 200 + `{"session_id":..., "item_count":1, "rewound_role":"user"}`,
+and the subsequent `GET /messages` confirms the content has been
+replaced and the assistant reply dropped.
+
 ### Added — Regenerate-this-turn button on assistant messages (Issue 10 L3)
 
 Closes the plan §Issue 10 L3 acceptance row at the SPA UI layer.

@@ -312,6 +312,41 @@ function ChatDetail() {
     });
   };
 
+  // Plan Issue 10 layer 4 — edit a prior user message in place.
+  // The backend at app/routers/messages.py:264 takes a numeric
+  // ``idx`` pointing at the USER message; it replaces the content
+  // and truncates every subsequent item. The client then re-sends
+  // the edited user message to trigger a fresh run (the SPA's
+  // existing useSendMessage hook owns that send).
+  //
+  // The handler resolves messageId → array idx via findIndex
+  // before PATCHing. Errors are console-warned; the
+  // EditPriorButton's 1.5s busy lock suppresses double-clicks.
+  const onEditPrior = (messageId: string, newText: string) => {
+    const idx = stream.state.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) {
+      console.warn("edit-prior: message id not found in transcript", { messageId });
+      return;
+    }
+    apiFetch(`/v1/chat/sessions/${id}/messages/${idx}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: newText }),
+    })
+      .then(() => {
+        // After truncating, send the edited message to trigger a fresh run.
+        // Use the existing send flow so SSE wiring + cost tracking apply.
+        setInput(newText);
+        setTimeout(() => {
+          const form = document.getElementById("composer-form") as HTMLFormElement | null;
+          form?.requestSubmit();
+        }, 200);
+      })
+      .catch((err) => {
+        console.warn("edit-prior PATCH failed", { messageId, idx, err });
+      });
+  };
+
   // Plan Issue 10 layer 3 — regenerate this assistant turn from the
   // prior user message. The backend at
   // app/routers/messages.py:174 rewinds MESSAGES at index ``idx``
@@ -613,6 +648,7 @@ function ChatDetail() {
                   onCapabilityDecide={onCapabilityDecide}
                   onFeedback={onFeedback}
                   onRegenerate={onRegenerate}
+                  onEditPrior={onEditPrior}
                 />
               ))}
             </div>

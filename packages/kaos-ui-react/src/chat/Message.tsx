@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Copy,
   Loader2,
+  Pencil,
   RotateCw,
   ThumbsDown,
   ThumbsUp,
@@ -99,6 +100,25 @@ interface Props {
    * the regenerate endpoint don't get a non-functional button.
    */
   onRegenerate?(messageId: string): void;
+  /**
+   * Plan Issue 10 layer 4 — edit a prior user message in place.
+   * Host posts to
+   * ``PATCH /v1/chat/sessions/{sid}/messages/{idx}`` with the edited
+   * text; the backend replaces the user message content and
+   * truncates every subsequent item, then the SPA reissues the
+   * edited user message to trigger a fresh run.
+   *
+   * Host receives the user message id; the SPA host resolves the
+   * persisted index from the visible transcript before posting.
+   * When omitted, the affordance stays hidden — opt-in so embedders
+   * that don't expose the edit endpoint don't surface a
+   * non-functional pencil.
+   *
+   * The component itself owns the inline edit state machine
+   * (idle → editing → saving → settled); the host receives the
+   * final value via the callback.
+   */
+  onEditPrior?(messageId: string, newText: string): void;
 }
 
 /**
@@ -261,6 +281,97 @@ function RegenerateButton({
   );
 }
 
+/**
+ * Plan Issue 10 layer 4 — "edit this user message in place".
+ * Surfaces a small pencil button on USER turns. Clicking it
+ * swaps the message content for a textarea + Save/Cancel pair;
+ * Save fires onEditPrior(id, newText) and the host POSTs to
+ * PATCH /messages/{idx}. Cancel reverts without calling the host.
+ */
+function EditPriorButton({
+  messageId,
+  initialText,
+  onEditPrior,
+}: {
+  messageId: string;
+  initialText: string;
+  onEditPrior: (id: string, newText: string) => void;
+}) {
+  const [mode, setMode] = useState<"idle" | "editing" | "saving">("idle");
+  const [draft, setDraft] = useState(initialText);
+
+  if (mode === "idle") {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(initialText);
+          setMode("editing");
+        }}
+        title="Edit and resend"
+        aria-label="Edit this message and resend"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <Pencil className="h-3 w-3" />
+        <span>Edit</span>
+      </button>
+    );
+  }
+
+  const save = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === initialText.trim()) {
+      setMode("idle");
+      return;
+    }
+    setMode("saving");
+    try {
+      onEditPrior(messageId, trimmed);
+    } finally {
+      // Host typically refreshes the transcript on the next SSE
+      // event; visual lock against double-fire matches the
+      // RegenerateButton's 1.5s pattern.
+      setTimeout(() => setMode("idle"), 1500);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={mode === "saving"}
+        rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+        className="w-full resize-y rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        aria-label="Edit message"
+        autoFocus
+      />
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setMode("idle")}
+          disabled={mode === "saving"}
+          className="rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={mode === "saving" || !draft.trim()}
+          className={`inline-flex items-center gap-1 rounded bg-foreground px-2 py-0.5 text-xs text-background hover:bg-foreground/90 transition-colors ${
+            mode === "saving" || !draft.trim() ? "opacity-60 cursor-wait" : ""
+          }`}
+          aria-busy={mode === "saving"}
+        >
+          {mode === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          <span>{mode === "saving" ? "Saving…" : "Save & resend"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Message({
   message,
   verboseTools = false,
@@ -268,6 +379,7 @@ export function Message({
   onCapabilityDecide,
   onFeedback,
   onRegenerate,
+  onEditPrior,
 }: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
@@ -503,6 +615,21 @@ export function Message({
           ) : null}
         </div>
       )}
+
+      {/*
+       * Plan Issue 10 layer 4 — edit-prior affordance on user turns.
+       * Hidden when the host doesn't supply onEditPrior (opt-in).
+       * The EditPriorButton itself owns the inline edit state
+       * machine; on Save it fires onEditPrior(id, newText) and the
+       * host POSTs PATCH /messages/{idx} which truncates forward.
+       */}
+      {isUser && onEditPrior && message.content ? (
+        <EditPriorButton
+          messageId={message.id}
+          initialText={message.content}
+          onEditPrior={onEditPrior}
+        />
+      ) : null}
     </article>
   );
 }
