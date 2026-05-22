@@ -1,13 +1,23 @@
 """Session metadata sidecar — title, model, system prompt, tools toggle.
 
 Backed by `kaos_core.vfs.VirtualFileSystem` at
-`.kaos-vfs/single-user-chat/sessions/{id}/meta.json`. Lives alongside
-the kaos-agents agent memory namespace at `.kaos-vfs/kaos-agents/`.
+`.kaos-vfs/single-user-chat/sessions/{scoped_id}/meta.json`. Lives
+alongside the kaos-agents agent memory namespace at
+`.kaos-vfs/kaos-agents/`.
 
 The kaos-agents `POST /v1/sessions` accepts only `session_id` and
 discards extra fields (see docs/PATTERNS.md P-003), so we own all
 human-facing metadata here. The id is shared with kaos-agents — same
 ULID names our `meta.json` AND its memory directory.
+
+B0.1 (broad-reliability roadmap #569): every meta path is now tenant-
+scoped via :func:`kaos_agents.api.settings.scope_session_id`. The
+pre-fix layout — ``{ns}/{session_id}/meta.json`` — let tenant A read
+tenant B's title + system_prompt by guessing the ULID. The post-fix
+layout — ``{ns}/{scoped_id}/meta.json`` where ``scoped_id`` is
+``f"{tenant_id}:{session_id}"`` in auth'd mode and ``session_id``
+unchanged in localhost-dev mode — isolates per tenant. R0.2 already
+did this for upload VFS paths; this closes the matching meta leak.
 
 All methods are async because `VirtualFileSystem` is async.
 """
@@ -18,6 +28,7 @@ import builtins
 from datetime import UTC, datetime
 
 import ulid
+from kaos_agents.api.settings import scope_session_id
 from kaos_core.vfs import VFSConfig, VirtualFileSystem
 from kaos_core.vfs.models import IsolationMode
 
@@ -61,19 +72,47 @@ class SessionStore:
 
     # ── paths ──────────────────────────────────────────────────────
 
-    def _meta_path(self, session_id: str, *, archived: bool = False) -> str:
+    def _meta_path(
+        self,
+        session_id: str,
+        *,
+        archived: bool = False,
+        tenant_id: str | None = None,
+    ) -> str:
+        """Resolve the on-disk meta sidecar path for a session.
+
+        B0.1 (broad-reliability roadmap #569): tenant-scope the path
+        via :func:`scope_session_id` so a guess-the-ULID attack from
+        token A cannot read token B's meta sidecar. In localhost-dev
+        mode (``tenant_id=None``) the scoped id equals the raw id —
+        backward compatible with pre-B0.1 layouts. In auth'd mode the
+        path becomes ``{ns}/{tenant_id}:{session_id}/meta.json``.
+
+        The lookup is single-namespace — there is no fallback to the
+        unscoped path. A token-A request for token-B's session ULID
+        returns 404, not 403, so existence isn't leaked across tenants.
+        """
         ns = _ARCHIVED_NS if archived else _NS
-        return f"{ns}/{session_id}/meta.json"
+        scoped = scope_session_id(session_id, tenant_id)
+        return f"{ns}/{scoped}/meta.json"
 
     # ── primitives ────────────────────────────────────────────────
 
-    async def _write_meta(self, meta: SessionMeta, *, archived: bool = False) -> None:
-        path = self._meta_path(meta.id, archived=archived)
+    async def _write_meta(
+        self,
+        meta: SessionMeta,
+        *,
+        archived: bool = False,
+        tenant_id: str | None = None,
+    ) -> None:
+        path = self._meta_path(meta.id, archived=archived, tenant_id=tenant_id)
         data = meta.model_dump_json().encode("utf-8")
         await self._vfs.write(path, data)
 
-    async def _read_meta(self, session_id: str) -> SessionMeta:
-        path = self._meta_path(session_id)
+    async def _read_meta(
+        self, session_id: str, *, tenant_id: str | None = None
+    ) -> SessionMeta:
+        path = self._meta_path(session_id, tenant_id=tenant_id)
         if not await self._vfs.exists(path):
             raise SessionNotFoundError(
                 f"Session {session_id!r} not found.\n"
@@ -93,6 +132,13 @@ class SessionStore:
         system_prompt: str,
         tools_enabled: bool = False,
         session_id: str | None = None,
+        tenant_id: str | None = None,
+        # Plan Issues 2 + 4 — optional tenant-policy + matter scoping
+        # at creation. All optional with conservative defaults.
+        matter_id: str | None = None,
+        hipaa_required: bool = False,
+        privileged: bool = False,
+        allowed_providers: list[str] | None = None,
     ) -> SessionMeta:
         """Create a new session metadata record. Returns the stored meta.
 
@@ -137,12 +183,18 @@ class SessionStore:
             message_count=0,
             archived=False,
             build_sha=current_build_sha(),
+            matter_id=matter_id,
+            hipaa_required=hipaa_required,
+            privileged=privileged,
+            allowed_providers=list(allowed_providers or []),
         )
-        await self._write_meta(meta)
+        await self._write_meta(meta, tenant_id=tenant_id)
         return meta
 
-    async def get(self, session_id: str) -> SessionMeta:
-        return await self._read_meta(session_id)
+    async def get(
+        self, session_id: str, *, tenant_id: str | None = None
+    ) -> SessionMeta:
+        return await self._read_meta(session_id, tenant_id=tenant_id)
 
     async def list(
         self,
@@ -150,6 +202,7 @@ class SessionStore:
         limit: int = 50,
         cursor: str | None = None,
         archived: bool = False,
+        tenant_id: str | None = None,
     ) -> tuple[builtins.list[SessionSummary], str | None]:
         """Return sessions newest-first.
 
@@ -157,9 +210,34 @@ class SessionStore:
         (a few thousand at most), so we read every meta, sort by
         last_message_at, then slice. A cursor is the int offset of the
         next item; a None cursor means start at 0.
+
+        B0.1 (#569): when ``tenant_id`` is set, only entries whose
+        on-disk path starts with ``{ns}/{tenant_id}:`` are returned.
+        Localhost-dev mode (``tenant_id=None``) returns every entry
+        whose path has NO tenant-colon prefix (backward compat with
+        pre-B0.1 layouts written before the path scheme changed).
         """
         ns = _ARCHIVED_NS if archived else _NS
         all_paths = await self._vfs.list(ns)
+        # B0.1: filter to this tenant's slice. Path layout is
+        # ``{ns}/{scoped_id}/meta.json`` where ``scoped_id`` is either
+        # ``{tenant_id}:{raw_sid}`` (auth'd) or ``{raw_sid}`` (dev).
+        if tenant_id is not None:
+            prefix = f"{ns}/{tenant_id}:"
+            all_paths = [p for p in all_paths if p.startswith(prefix)]
+        else:
+            # Dev mode: exclude anything that LOOKS like a tenant-scoped
+            # path so the operator's own list isn't contaminated by
+            # tenant-scoped entries written by a prior auth'd run on
+            # the same disk.
+            def _is_unscoped(p: str) -> bool:
+                # path shape: {ns}/{segment}/meta.json
+                # unscoped segment has no ":" (ULID is [0-9A-Z], no colons)
+                rest = p[len(ns) + 1 :]  # strip "{ns}/"
+                segment = rest.split("/", 1)[0]
+                return ":" not in segment
+
+            all_paths = [p for p in all_paths if _is_unscoped(p)]
         summaries: list[SessionSummary] = []
         for path in all_paths:
             try:
@@ -228,8 +306,17 @@ class SessionStore:
         last_turn_tokens: int | None = None,
         total_cost_usd: float | None = None,
         total_tokens: int | None = None,
+        # Plan Issues 2 + 4 — tenant-policy patches. ``None`` = leave
+        # the existing value alone; an explicit empty string / list /
+        # ``False`` overwrites. ``allowed_providers`` always replaces
+        # in full (the caller passes the new desired allowlist).
+        matter_id: str | None = None,
+        hipaa_required: bool | None = None,
+        privileged: bool | None = None,
+        allowed_providers: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> SessionMeta:
-        meta = await self._read_meta(session_id)
+        meta = await self._read_meta(session_id, tenant_id=tenant_id)
         updates: dict[str, object] = {}
         if title is not None:
             updates["title"] = title
@@ -289,18 +376,39 @@ class SessionStore:
             updates["total_cost_usd"] = total_cost_usd
         if total_tokens is not None:
             updates["total_tokens"] = total_tokens
+        # Plan Issues 2 + 4 — tenant-policy patch path.
+        if matter_id is not None:
+            # Empty string is interpreted as "clear the matter_id" so a
+            # session can be detached from a matter without re-creating.
+            updates["matter_id"] = matter_id or None
+        if hipaa_required is not None:
+            updates["hipaa_required"] = hipaa_required
+        if privileged is not None:
+            updates["privileged"] = privileged
+        if allowed_providers is not None:
+            updates["allowed_providers"] = list(allowed_providers)
         new_meta = meta.model_copy(update=updates)
-        await self._write_meta(new_meta)
+        await self._write_meta(new_meta, tenant_id=tenant_id)
         return new_meta
 
-    async def set_tool_preset(self, session_id: str, preset_name: Persona) -> SessionMeta:
+    async def set_tool_preset(
+        self,
+        session_id: str,
+        preset_name: Persona,
+        *,
+        tenant_id: str | None = None,
+    ) -> SessionMeta:
         """Apply a named persona preset to a session.
 
         Convenience method the SPA's persona-chip row calls. Resets
         both `allowed_groups` AND `soft_ceiling` to the persona's
         defaults (per `kaos_agents.types.session_policy.SessionPolicy.for_persona`).
         """
-        return await self.patch(session_id, policy=SessionPolicyWire.for_persona(preset_name))
+        return await self.patch(
+            session_id,
+            policy=SessionPolicyWire.for_persona(preset_name),
+            tenant_id=tenant_id,
+        )
 
     async def touch(
         self,
@@ -308,27 +416,30 @@ class SessionStore:
         *,
         last_message_at: datetime | None = None,
         increment_messages: int = 0,
+        tenant_id: str | None = None,
     ) -> SessionMeta:
-        meta = await self._read_meta(session_id)
+        meta = await self._read_meta(session_id, tenant_id=tenant_id)
         new_meta = meta.model_copy(
             update={
                 "last_message_at": last_message_at or _now(),
                 "message_count": meta.message_count + increment_messages,
             }
         )
-        await self._write_meta(new_meta)
+        await self._write_meta(new_meta, tenant_id=tenant_id)
         return new_meta
 
-    async def archive(self, session_id: str) -> datetime:
+    async def archive(
+        self, session_id: str, *, tenant_id: str | None = None
+    ) -> datetime:
         """Move metadata under archived/. Idempotent."""
         import contextlib
 
-        meta = await self._read_meta(session_id)
+        meta = await self._read_meta(session_id, tenant_id=tenant_id)
         archived_at = _now()
         new_meta = meta.model_copy(update={"archived": True})
-        await self._write_meta(new_meta, archived=True)
+        await self._write_meta(new_meta, archived=True, tenant_id=tenant_id)
         # Best-effort delete of the active path. If it fails (race with
         # another writer), the archived copy still exists.
         with contextlib.suppress(Exception):
-            await self._vfs.delete(self._meta_path(session_id))
+            await self._vfs.delete(self._meta_path(session_id, tenant_id=tenant_id))
         return archived_at

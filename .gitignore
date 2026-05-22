@@ -43,3 +43,10 @@ Thumbs.db
 /demo-*/
 /test-scaffold-*/
 .screenshots/
+
+# Claude Code session cache
+.claude/
+
+# SPA backend local logs
+examples/*/backend/.logs/
+.logs/

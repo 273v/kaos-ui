@@ -89,6 +89,13 @@ class FileMeta(BaseModel):
     # null, but the file is still persisted.
     token_count: int | None = None
     summary: str | None = None
+    # B0.4 / B0.5 — surface honest parse-mode signals so the UI can
+    # render banners ("This PDF was OCR'd — text accuracy may vary",
+    # "This DOCX contains tracked changes — review insertions/deletions"
+    # before relying on the agent's analysis). Both default to False so
+    # legacy meta sidecars round-trip without re-parsing.
+    ocr_applied: bool = False
+    track_changes_detected: bool = False
 
 
 # ── filename sanitization ────────────────────────────────────────────

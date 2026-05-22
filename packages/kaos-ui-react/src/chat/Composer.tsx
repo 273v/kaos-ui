@@ -109,7 +109,7 @@ export function Composer({
               uploading
                 ? "Uploading…"
                 : onAttach
-                  ? "Attach a file (PDF, DOCX, PPTX)"
+                  ? "Attach a file (PDF, DOCX, PPTX, XLSX)"
                   : "Attach unavailable"
             }
             aria-label="Attach file"

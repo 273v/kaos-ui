@@ -40,16 +40,20 @@ from app.models import (
     ToolSetUpdateBody,
 )
 from app.persistence.sessions import SessionStore
+from app.services.baa_gate import TenantPolicyError, assert_session_baa_compliance
 from app.services.stream_proxy import _bearer_from_env
 from app.settings import AppSettings
 
-router = APIRouter(tags=["chat"], dependencies=[Depends(require_auth)])
+router = APIRouter(tags=["chat"])
 logger = app_logger("chat_router")
 
 
 SettingsDep = Annotated[AppSettings, Depends(get_settings)]
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
 UpstreamDep = Annotated[httpx.AsyncClient, Depends(get_upstream_client)]
+# B0.1 (#569): capture tenant id per-handler so SessionStore meta
+# paths can be tenant-scoped. Same pattern as R0.2 in files.py.
+TenantDep = Annotated[str | None, Depends(require_auth)]
 
 
 def _bearer_from_request(request: Request) -> str:
@@ -148,6 +152,7 @@ async def create_session(
     settings: SettingsDep,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> SessionMeta:
     """Create a new chat session.
 
@@ -170,6 +175,15 @@ async def create_session(
         tools_enabled=body.tools_enabled
         if body.tools_enabled is not None
         else settings.default_tools_enabled,
+        tenant_id=tenant_id,
+        # Plan Issues 2 + 4 — initial tenant-policy fields from the
+        # request body. ``None`` → keep the model defaults
+        # (matter_id=None, hipaa_required=False, privileged=False,
+        # allowed_providers=[]).
+        matter_id=body.matter_id,
+        hipaa_required=body.hipaa_required or False,
+        privileged=body.privileged or False,
+        allowed_providers=body.allowed_providers or [],
     )
     logger.info("created session %s", sid)
     return meta
@@ -178,18 +192,21 @@ async def create_session(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     store: StoreDep,
+    tenant_id: TenantDep,
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = None,
     archived: bool = False,
 ) -> SessionListResponse:
-    summaries, next_cursor = await store.list(limit=limit, cursor=cursor, archived=archived)
+    summaries, next_cursor = await store.list(
+        limit=limit, cursor=cursor, archived=archived, tenant_id=tenant_id
+    )
     return SessionListResponse(sessions=summaries, next_cursor=next_cursor)
 
 
 @router.get("/sessions/{session_id}/meta", response_model=SessionMeta)
-async def get_meta(session_id: str, store: StoreDep) -> SessionMeta:
+async def get_meta(session_id: str, store: StoreDep, tenant_id: TenantDep) -> SessionMeta:
     try:
-        return await store.get(session_id)
+        return await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -244,7 +261,9 @@ async def list_categories() -> CategoriesResponse:
 
 
 @router.patch("/sessions/{session_id}/tool-set", response_model=SessionMeta)
-async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreDep) -> SessionMeta:
+async def patch_tool_set(
+    session_id: str, body: ToolSetUpdateBody, store: StoreDep, tenant_id: TenantDep
+) -> SessionMeta:
     """Update a session's tool ceiling. Fields are partial — omit a
     dimension to keep the existing value.
 
@@ -256,7 +275,7 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
     from kaos_agents.registry import default_tool_group_registry
 
     try:
-        current = await store.get(session_id)
+        current = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -309,11 +328,13 @@ async def patch_tool_set(session_id: str, body: ToolSetUpdateBody, store: StoreD
     else:
         new_policy = current.policy
 
-    return await store.patch(session_id, policy=new_policy)
+    return await store.patch(session_id, policy=new_policy, tenant_id=tenant_id)
 
 
 @router.patch("/sessions/{session_id}/meta", response_model=SessionMeta)
-async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> SessionMeta:
+async def patch_meta(
+    session_id: str, body: PatchMetaBody, store: StoreDep, tenant_id: TenantDep
+) -> SessionMeta:
     if body.model is not None:
         _validate_model_id(body.model)
     try:
@@ -323,15 +344,23 @@ async def patch_meta(session_id: str, body: PatchMetaBody, store: StoreDep) -> S
             model=body.model,
             system_prompt=body.system_prompt,
             tools_enabled=body.tools_enabled,
+            # Plan Issues 2 + 4 — tenant-policy patches.
+            matter_id=body.matter_id,
+            hipaa_required=body.hipaa_required,
+            privileged=body.privileged,
+            allowed_providers=body.allowed_providers,
+            tenant_id=tenant_id,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/archive", response_model=ArchiveResponse)
-async def archive_session(session_id: str, store: StoreDep) -> ArchiveResponse:
+async def archive_session(
+    session_id: str, store: StoreDep, tenant_id: TenantDep
+) -> ArchiveResponse:
     try:
-        archived_at = await store.archive(session_id)
+        archived_at = await store.archive(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ArchiveResponse(archived_at=archived_at)
@@ -345,10 +374,11 @@ async def send_message(
     settings: SettingsDep,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: Annotated[str | None, Depends(require_auth)],
 ) -> EventSourceResponse:
     """Stream SSE: forward to upstream + bump our metadata on completion."""
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -359,6 +389,31 @@ async def send_message(
     if body.model is not None and body.model != meta.model:
         _validate_model_id(body.model)
         meta = meta.model_copy(update={"model": body.model})
+
+    # Plan §Issue 4 — BAA / tenant-policy enforcement.
+    # Refuse hipaa_required sessions targeting a non-BAA provider
+    # (and refuse any session whose model isn't on a non-empty
+    # ``allowed_providers`` list). Runs AFTER the per-turn override
+    # so the gate sees the model actually about to be billed, not the
+    # session's default.
+    try:
+        assert_session_baa_compliance(
+            model=meta.model,
+            hipaa_required=getattr(meta, "hipaa_required", False) or False,
+            allowed_providers=list(getattr(meta, "allowed_providers", None) or ()),
+        )
+    except TenantPolicyError as exc:
+        v = exc.violation
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "kind": "tenant_policy_violation",
+                "constraint": v.constraint,
+                "provider": v.provider,
+                "model": v.model,
+                "message": v.detail,
+            },
+        ) from exc
 
     bearer = _bearer_from_request(request)
     runtime = getattr(request.app.state, "kaos_runtime", None)
@@ -374,7 +429,7 @@ async def send_message(
 
         try:
             corpus_markdown = await render_session_corpus_markdown(
-                runtime=runtime, session_id=session_id
+                runtime=runtime, session_id=session_id, tenant_id=tenant_id
             )
         except Exception:
             logger.exception("failed to render corpus for session=%s", session_id)
@@ -400,7 +455,9 @@ async def send_message(
         try:
             from app.services.uploads import list_session_files
 
-            file_metas = await list_session_files(runtime=runtime, session_id=session_id)
+            file_metas = await list_session_files(
+                runtime=runtime, session_id=session_id, tenant_id=tenant_id
+            )
             corpus_headlines = "\n".join(
                 f"{m.filename} — {m.size_bytes} bytes, {m.content_type or 'unknown'}"
                 for m in file_metas
@@ -436,6 +493,45 @@ async def send_message(
     usage_recorder = TurnUsageRecorder()
     turn_index = meta.message_count // 2
 
+    # B1.2 — Per-session asyncio.Lock for concurrent-POST protection.
+    # The ``runs/active.json`` check below is the *soft* guard against
+    # a stale pointer after a process restart. The lock below is the
+    # *hard* guard against the same-process race where two browser
+    # tabs both POST within milliseconds — without it, both POSTs
+    # would read ``active=None``, both proceed, both write SessionMemory.
+    # Acquire eagerly here so the second concurrent POST hits the
+    # 409 path before any side effects. Released in ``_do_persist``
+    # AFTER the SSE response body is fully sent (the lock lifetime
+    # must span the streaming response, not just the handler).
+    from app.services.locks import get_session_lock, is_session_running
+
+    if is_session_running(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "run_in_progress",
+                "what": (
+                    "Another turn is currently streaming for this session "
+                    "(detected via in-process lock)."
+                ),
+                "how_to_fix": (
+                    "Wait for the in-flight turn to complete, or open a "
+                    "new chat. Concurrent POSTs to the same session are "
+                    "not supported."
+                ),
+                "alternative_tool": None,
+            },
+        )
+    _session_lock = get_session_lock(session_id)
+    await _session_lock.acquire()
+    _lock_released = False
+
+    def _release_session_lock() -> None:
+        nonlocal _lock_released
+        if not _lock_released and _session_lock.locked():
+            _session_lock.release()
+            _lock_released = True
+
     # SSE resume Stage 1: refuse a second concurrent POST. If
     # ``runs/active.json`` still says ``running`` for this session, the
     # SPA should be calling ``GET /runs/{run_id}/events`` instead. The
@@ -447,6 +543,10 @@ async def send_message(
         except Exception:  # noqa: BLE001 — never let pointer reads block the turn
             active = None
         if active is not None and active.get("status") == "running":
+            # B1.2: release the lock we acquired above before raising the
+            # soft-409 — otherwise the next POST would deadlock on a
+            # never-released asyncio.Lock.
+            _release_session_lock()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -581,6 +681,12 @@ async def send_message(
                 fetch_history=_fetch_history,
                 turn_cost_usd=float(persist_snapshot.get("turn_cost_usd") or 0.0),
                 turn_tokens=int(persist_snapshot.get("turn_tokens") or 0),
+                tenant_id=tenant_id,
+                # Plan §Issue 5: thread through the values needed
+                # for the per-turn StateSnapshot writer (Step 4).
+                run_id=run_id,
+                model=meta.model,
+                build_sha=getattr(settings, "build_sha", None),
             )
         finally:
             # SSE resume Stage 1: flip the active-pointer to a terminal
@@ -600,6 +706,13 @@ async def send_message(
                         session_id,
                         run_id,
                     )
+            # B1.2: release the per-session asyncio.Lock acquired at the
+            # top of the handler. Must run AFTER the SSE body is fully
+            # sent (Starlette's BackgroundTask contract) — releasing
+            # earlier would let a concurrent POST race the persist work.
+            # Idempotent: if the early-409 path already released, this
+            # is a no-op.
+            _release_session_lock()
 
     # Per-run sequence fallback used when an event payload doesn't
     # carry ``payload["sequence"]`` (defensive — every kaos-agents
@@ -635,6 +748,17 @@ async def send_message(
         # client reconnecting with ``Last-Event-ID: -1`` replays from
         # the very start. Written to the JSONL FIRST so it shows up at
         # the head of any resume stream.
+        # Plan Issue 3 — per-turn version pinning. Stamp the running
+        # build_sha into every run_started envelope so historical
+        # turns persisted in `runs/turn-NNNN-XXXX.jsonl` survive a
+        # subsequent kaos-* upgrade. `kaos-audit-session` reads this
+        # field to flag drift between session.meta.build_sha (set at
+        # create-time) and per-turn build_sha (set at run-time). A
+        # divergent pair is the canonical "this session predates the
+        # current build" signal that the sidebar already badges, but
+        # at turn granularity instead of session granularity.
+        from app.routers.health import current_build_sha as _current_build_sha
+
         run_started_payload = {
             "type": "run_started",
             "run_id": run_id,
@@ -642,6 +766,7 @@ async def send_message(
             "turn_index": turn_index,
             "started_at": run_log.started_at if run_log is not None else None,
             "model": meta.model,
+            "build_sha": _current_build_sha(),
         }
         if run_log is not None:
             try:
@@ -719,6 +844,21 @@ async def send_message(
                 )
                 or None
             )
+            # R1.5 (reliability roadmap #565): M3 document-grounding
+            # critic. Catches "I retrieved X" / "I read your PDF"
+            # claims when no fetch / parse succeeded (R1-REAL family,
+            # historically tasks #348 + #445). The critic is fully
+            # implemented in kaos-agents but was never invoked from
+            # the SPA pre-R1.5. Default: anthropic:claude-haiku-4-5
+            # — small, cheap, and the same family the M2 critic uses.
+            # Unset the env var to disable on a per-deployment basis.
+            m3_grounding_model = (
+                os.environ.get(
+                    "KAOS_AGENT_M3_GROUNDING_MODEL",
+                    "anthropic:claude-haiku-4-5",
+                )
+                or None
+            )
             async for ev in run_agentic_turn(
                 user_message=body.message,
                 policy=session_policy,
@@ -736,6 +876,7 @@ async def send_message(
                 # planner tolerates an empty string.
                 recent_turns="",
                 m2_consistency_model=m2_consistency_model,
+                m3_grounding_model=m3_grounding_model,
             ):
                 sse_event = _to_sse_event(ev)
                 if sse_event is None:
@@ -901,16 +1042,52 @@ async def get_history(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> HistoryResponse:
     """Fetch prior conversation messages from kaos-agents SessionMemory.
 
     Returns an empty list (not 404) when the session has no turns yet —
     the SPA seeds the transcript with whatever this returns on route mount.
+
+    **Response shape (P2-D, 0.1.1):**
+
+    The response is an OBJECT, NOT a bare list:
+
+    ```json
+    {
+      "session_id": "01KS5...",
+      "turn_count": 2,
+      "item_count": 4,
+      "messages": [
+        {"role": "user", "content": "...", "added_at": 1779375495.0, "tool_calls": []},
+        {"role": "assistant", "content": "...", "added_at": 1779375495.0,
+         "tool_calls": [{"id": "...", "name": "...", "status": "done", ...}]}
+      ]
+    }
+    ```
+
+    Common consumer mistakes:
+
+    - **Assuming the top level is a list**: it is not. Always read
+      `response.json()["messages"]` (Python) or
+      `(await resp.json()).messages` (TypeScript).
+    - **Assuming `tool_calls` lives on the response root**: tool calls
+      are scoped to the assistant message that emitted them and live
+      under `messages[i].tool_calls`.
+    - **Bearer auth**: every call must include
+      ``Authorization: Bearer <token>``. The dev token is
+      ``demo-token-must-be-at-least-32-chars-long-for-validation``;
+      production uses real OIDC.
+
+    The `tool_calls[]` entries follow the
+    :class:`~app.models.MessageToolCall` shape — fields include
+    ``id``, ``name``, ``status`` ("done" | "error" | "running"),
+    ``args_preview``, ``result_preview``, ``structured_content``.
     """
     # Ensure our metadata exists; if not, 404 here rather than letting
     # the upstream call leak a confusing message.
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1040,6 +1217,13 @@ async def get_history(
             except Exception:
                 records = []
             if records:
+                # R2.1 (reliability roadmap #566): forward
+                # ``structured_content`` through the /messages
+                # serialization. Pre-R2.1 the field was defined on
+                # ``HistoryToolCall`` (models.py:728) but omitted at
+                # construction here, so kaos-source / kaos-pdf /
+                # kaos-content artifacts disappeared on history
+                # re-hydration (Artifact panel rehydrated empty).
                 msg.tool_calls = [
                     HistoryToolCall(
                         id=r.id,
@@ -1047,6 +1231,7 @@ async def get_history(
                         status=r.status,
                         args_preview=r.args_preview,
                         result_preview=r.result_preview,
+                        structured_content=r.structured_content,
                     )
                     for r in records
                 ]
@@ -1095,6 +1280,9 @@ async def get_history(
                     records = parse_actions_into_records(window)
                     if not records:
                         continue
+                    # R2.1 #566: forward structured_content in the
+                    # memory/actions fallback path too — same
+                    # rationale as the per-message sidecar path above.
                     msg.tool_calls = [
                         HistoryToolCall(
                             id=r.id,
@@ -1102,6 +1290,7 @@ async def get_history(
                             status=r.status,
                             args_preview=r.args_preview,
                             result_preview=r.result_preview,
+                            structured_content=r.structured_content,
                         )
                         for r in records
                     ]
@@ -1147,6 +1336,7 @@ async def transcript_export(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
     format: str = "markdown",
 ) -> Response:
     """P2-4 — server-side transcript export. Supports ``markdown``,
@@ -1168,7 +1358,7 @@ async def transcript_export(
     # directly because it's a FastAPI handler; pull the upstream call
     # inline instead.
     try:
-        meta = await store.get(session_id)
+        meta = await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1278,6 +1468,7 @@ async def get_audit_trace(
     request: Request,
     store: StoreDep,
     upstream: UpstreamDep,
+    tenant_id: TenantDep,
 ) -> Response:
     """#447 — canonical full action trace for one session.
 
@@ -1291,7 +1482,7 @@ async def get_audit_trace(
     level subset for chip-UI rendering only.
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

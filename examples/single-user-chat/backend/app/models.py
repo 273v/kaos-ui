@@ -424,6 +424,36 @@ class SessionMeta(BaseModel):
     # ``None`` on sessions created before this field shipped — the
     # SPA treats ``None`` as "pre-tracking; build identity unknown".
     build_sha: str | None = None
+    # Plan Issue 4 — per-session tenant policy for HIPAA / privilege /
+    # cross-vendor egress. The kaos-llm-client hook that enforces these
+    # at provider-dispatch time lives upstream (planned 0.1.3+); the
+    # SPA persists them now so they survive an upgrade and so the SPA
+    # auto-titler + reports can surface the right context. Defaults
+    # match a "non-regulated" session — flip via PATCH /sessions.
+    #
+    # ``hipaa_required``: when True, kaos-llm-client (once the gate
+    #     lands) refuses any provider whose vendor_manifest entry
+    #     reports ``hipaa_safe: false``. Audit purpose only here.
+    # ``privileged``: attorney-client privilege marker. SPA adds a
+    #     "Privileged" banner; future egress logger stamps every line.
+    # ``allowed_providers``: empty list = no restriction. Populated by
+    #     the SPA settings panel from the vendor_manifest.yaml ids.
+    #
+    # Optional because pre-Issue-4 sessions hydrate forward with all
+    # None — matched by the SPA's "no policy → unrestricted" branch.
+    hipaa_required: bool = False
+    privileged: bool = False
+    allowed_providers: list[str] = Field(default_factory=list)
+    # Plan Issue 2 — per-matter tenancy. ``matter_id`` is a free-text
+    # identifier (typically the firm's matter number, e.g. "ABC-2026-
+    # 0042") that groups related sessions for ethical-wall enforcement.
+    # The upstream ``MatterClientGuard`` (kaos-agents 0.1.8+) consumes
+    # this to refuse cross-matter SessionMemory reads. Until that gate
+    # lands, the SPA stamps it for audit-CLI surfacing and future
+    # session-search by matter. ``None`` means "unscoped" (single-
+    # matter or non-firm workflow); the planner does not gate on
+    # missing matter_id.
+    matter_id: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -570,6 +600,14 @@ class CreateSessionBody(BaseModel):
     model: str | None = Field(default=None, max_length=_MAX_MODEL_LEN)
     system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
+    # Plan Issues 2 + 4 — initial per-session policy. All optional and
+    # default-conservative so a client that doesn't know about these
+    # fields creates an unscoped, unrestricted session (the historic
+    # behavior).
+    matter_id: str | None = Field(default=None, max_length=128)
+    hipaa_required: bool | None = None
+    privileged: bool | None = None
+    allowed_providers: list[str] | None = None
 
 
 class PatchMetaBody(BaseModel):
@@ -578,6 +616,14 @@ class PatchMetaBody(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=_MAX_PROMPT_LEN)
     tools_enabled: bool | None = None
     starred: bool | None = None
+    # Plan Issues 2 + 4 — tenant-policy patches (e.g. attorney flips
+    # `privileged` mid-session, or re-tags an existing session into a
+    # newly-opened matter). None = "leave unchanged" per the PATCH
+    # semantics elsewhere in this body.
+    matter_id: str | None = Field(default=None, max_length=128)
+    hipaa_required: bool | None = None
+    privileged: bool | None = None
+    allowed_providers: list[str] | None = None
 
 
 # ── tool-policy routes (TR-4) ─────────────────────────────────────────
@@ -825,12 +871,48 @@ class ExtractCitationsResponse(BaseModel):
 
 
 class CorpusSearchHitWire(BaseModel):
-    """One BM25 hit on the session's uploaded corpus."""
+    """One BM25 hit on the session's uploaded corpus.
+
+    B0.6 (broad-reliability roadmap §B0.6): citation grounding fields
+    flow through from kaos-content's ``SearchResult`` so the SPA UI
+    can render anchored "jump-to-passage" affordances and the agent
+    cannot fabricate "Section X" labels on paragraphs whose AST has
+    none. All new fields default to safe sentinels (``None`` / empty
+    tuple) so pre-fix consumers and older payloads parse cleanly.
+    """
 
     filename: str
     score: float
     snippet: str = Field(description="First ~300 chars of the matching passage.")
     char_offset: int = Field(description="Byte offset within the source file's markdown.")
+    # B0.6 — structural citation grounding. Empty / None means
+    # "no structural identifier available for this hit"; the agent
+    # MUST NOT invent one. Per kaos-content's contract: any
+    # "Section N" claim about a hit with empty ``path`` is a
+    # fabrication.
+    block_ref: str | None = Field(
+        default=None,
+        description=(
+            "JSON-pointer ref of the containing AST block (e.g. '#/body/12'). "
+            "Stable handle for the SPA's 'jump-to-passage' click target."
+        ),
+    )
+    page: int | None = Field(
+        default=None,
+        description="1-indexed page number from provenance, or null when not page-paginated.",
+    )
+    section_title: str | None = Field(
+        default=None,
+        description="Text of the immediate section heading enclosing the hit, or null.",
+    )
+    path: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Root-first structural breadcrumb (e.g. ['Article 3', 'Section 3.4']). "
+            "Empty when the hit has no enclosing heading — the agent must not "
+            "invent a citation in that case."
+        ),
+    )
 
 
 class CorpusSearchResponse(BaseModel):

@@ -7,6 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Edit-prior user message inline editor (Issue 10 L4)
+
+Closes the plan §Issue 10 L4 acceptance row at the SPA UI layer.
+Mirrors the L3 (Regenerate) shape — backend was already shipped
+(`PATCH /messages/{idx}` in `app/routers/messages.py:260`); this
+is the React frontend half.
+
+* **`packages/kaos-ui-react/src/chat/Message.tsx`** — new
+  `<EditPriorButton>` rendered under user messages when the host
+  supplies an `onEditPrior?(messageId, newText)` prop. Click swaps
+  the message body for a textarea + Save / Cancel pair. Save fires
+  the callback once, applies a 1.5s spinner lock against
+  double-fire (mirrors the L3 Regenerate pattern), and the host
+  PATCHes the truncate-forward + reissues the edited content via
+  the existing send flow. Opt-in via `onEditPrior` prop — hidden
+  when undefined.
+* **`examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`**
+  — `onEditPrior(messageId, newText)` handler resolves the array
+  index via `findIndex`, PATCHes
+  `/v1/chat/sessions/${id}/messages/${idx}` with `{content:
+  newText}`, then on success populates the composer with the
+  edited text and triggers the composer-form submit so the new
+  user message ships through the same `useSendMessage` flow
+  (cost tracking + SSE wiring apply automatically).
+
+Live-verified end-to-end against `localhost:8000`: PATCH returns
+HTTP 200 + `{"session_id":..., "item_count":1, "rewound_role":"user"}`,
+and the subsequent `GET /messages` confirms the content has been
+replaced and the assistant reply dropped.
+
+### Added — Regenerate-this-turn button on assistant messages (Issue 10 L3)
+
+Closes the plan §Issue 10 L3 acceptance row at the SPA UI layer.
+The backend `POST /v1/chat/sessions/{sid}/messages/{messageId}/regenerate`
+endpoint already shipped in `app/routers/messages.py:174`; this is
+the React frontend half that surfaces it.
+
+* **`packages/kaos-ui-react/src/chat/Message.tsx`** — new
+  `<RegenerateButton>` rendered alongside `<CopyMessageButton>` and
+  `<FeedbackButtons>` in the assistant-turn action row. Opt-in via
+  a new `onRegenerate?(messageId: string)` prop on `<Message>`;
+  hidden when the host doesn't supply the callback (same pattern as
+  feedback). Click → fire the callback once → show a 1.5s spinner
+  lock (`Loader2`) to suppress double-clicks → settle back to idle
+  (`RotateCw`). The host owns the actual POST + SSE resubscribe.
+* **`examples/single-user-chat/apps/spa/src/routes/_auth.sessions.$id.tsx`**
+  — `onRegenerate` handler defined parallel to `onFeedback` and
+  passed to `<Message>`. POSTs to
+  `/v1/chat/sessions/${id}/messages/${messageId}/regenerate` with
+  an empty body; backend rewinds MESSAGES to BEFORE the targeted
+  assistant id and re-dispatches the prior user message through
+  the same SSE flow (per-session lock-aware per #588).
+
+Failure is console-warned (not surfaced as a banner) because the
+regenerate action is an explicit user gesture — the user will see
+either the new SSE stream open or the absence of one and can
+retry. The `useSendMessage` stream subscriber picks up the new
+run automatically once the backend opens it.
+
+### Added — Per-turn StateSnapshot writer (Issue 5)
+
+Closes the plan §Issue 5 acceptance row "State snapshot per turn:
+`runs/turn-NNNN/snapshot.json` written; replay tool can resume
+from it."
+
+* **New service module** `app/services/state_snapshot.py` —
+  `write_turn_snapshot(*, runtime, session_id, turn_index, run_id,
+  model, tenant_id, build_sha, sidecar_records, turn_cost_usd,
+  turn_tokens)` writes a compact `snapshot.json` to
+  `runs/turn-NNNN/snapshot.json`. Schema v1 carries
+  snapshot_version, session_id, turn_index, run_id, model,
+  tenant_id, captured_at, build_sha, tool_calls[] (tool_name,
+  is_error, duration_ms, cost_usd, started_at), and totals
+  (cost_usd, tokens, tool_call_count, tool_error_count).
+* **Wired into Step 4 of `persist_turn_completion`** —
+  the chat router threads run_id, meta.model, and settings.build_sha
+  through to the BackgroundTask, which calls `write_turn_snapshot`
+  AFTER the LLM auto-titler so the snapshot reflects the final
+  committed turn state. Failure is best-effort (logged, not
+  raised) — the sidecar is the source of truth; snapshot is the
+  summary.
+* **9 unit tests** in `tests/unit/test_state_snapshot.py` covering
+  the canonical path, required field set, ToolCallRecord
+  serialisation, optional-field handling, JSON round-trip, error-
+  count semantics, missing-runtime short-circuit, happy-path
+  VFS write, and swallowed-VFS-failure invariant.
+
+Replaceable with the canonical kaos-agents
+`StateSnapshot.from_invocation` + `to_json` when the SPA grows a
+wired TurnInvocation accumulator (Phase 6+ per kaos-agents
+governance roadmap); the file path and consumer-visible schema
+stay the same across the swap.
+
+### Added — BAA / HIPAA enforcement gate in single-user-chat backend (Issue 4)
+
+Closes the SPA half of launch-blocker plan §Issue 4
+(`kaos-modules/docs/plans/2026-05-22-launch-blocker-top-10.md`).
+When a session is flagged `hipaa_required=True` and the resolved
+provider is not BAA-eligible, the chat router refuses the message
+turn at the edge with HTTP 403. When a non-empty
+`allowed_providers` list is configured, off-list providers are
+likewise refused — independent of `hipaa_required`.
+
+* **New service module** `app/services/baa_gate.py` —
+  `assert_session_baa_compliance(*, model, hipaa_required,
+  allowed_providers)` + typed `TenantPolicyError` /
+  `TenantPolicyViolation`. Conservative default: only Anthropic /
+  OpenAI / Google / Azure-OpenAI / AWS-Bedrock are flagged
+  BAA-eligible (operators verify their actual signed contract).
+* **Chat router wiring** — `POST /v1/chat/sessions/{id}/messages`
+  calls `assert_session_baa_compliance` AFTER the per-turn model
+  override but BEFORE the upstream POST, so the gate sees the model
+  about to be billed. On trip, raises `HTTPException(403,
+  detail={"kind": "tenant_policy_violation", "constraint": ...,
+  "provider": ..., "model": ..., "message": ...})` — typed body
+  for the UI to render a specific "BAA required" or
+  "off-allowlist" banner.
+* **13 unit tests** in `tests/unit/test_baa_gate.py` covering
+  provider inference from `provider:model` and bare-model shapes,
+  unknown-provider fail-closed, the `hipaa_required=False` bypass,
+  the five BAA-eligible providers, the explicit xAI refusal,
+  allowlist empty-vs-set semantics, allowlist precedence over the
+  BAA gate, and the violation payload contract.
+
+Vendored locally until kaos-llm-client 0.1.3+ ships
+`profiles.assert_baa_compliance` on PyPI; the helper has the same
+signature and will be swap-replaceable in one commit.
+
 ## [0.1.0a13] — 2026-05-20
 
 ### Added — SettingsSheet AgenticLoop budget caps (#312)

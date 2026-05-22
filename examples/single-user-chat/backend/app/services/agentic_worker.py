@@ -177,8 +177,63 @@ def make_worker(
                 content = payload.get("content")
                 if isinstance(content, str):
                     text_parts.append(content)
-            elif event_type == "tool_call_summary":
-                tool_calls.append(payload)
+            elif event_type == "span" and payload.get("subject") == "tool_call":
+                # ROOT CAUSE OF #548 (WU-K v2 matrix, 5-of-5
+                # reproductions on tool-dispatch turns).
+                #
+                # Before this fix the worker listened for
+                # `event_type == "tool_call_summary"` — but the
+                # kaos-agents wire stream does NOT emit a standalone
+                # `tool_call_summary` event. `ToolCallSummary` only
+                # exists as a nested field inside
+                # `TurnSummary.tool_calls` (see
+                # `kaos_agents/events/tools.py` +
+                # `kaos_agents/events/lifecycle.py`). The old branch
+                # was dead code, so `tool_calls` was ALWAYS `[]`
+                # regardless of how many tools the worker actually
+                # ran. The GoalCheckerSignature
+                # (`kaos_agents/planning/goal_check.py:483-489`)
+                # then received an empty list every turn, and its
+                # rules at lines 425-445 ("Factual-external-entity
+                # question with zero successful tool calls") fired
+                # correctly given what they saw — but mismatched
+                # against reality. The persisted refusal text
+                # "tool_calls_made is empty" was literally true at
+                # the data-flow level, even though the actual trace
+                # had 5+ status=done tool spans.
+                #
+                # Fix: read tool calls from the canonical `span`
+                # events with `subject="tool_call", phase="complete"`
+                # — the same source the SPA's
+                # `tool_call_recorder.py` uses to build the persisted
+                # UI tool-card list. Build the exact dict shape the
+                # GoalCheckerSignature documents:
+                # `{name, is_error, summary_excerpt}`.
+                if payload.get("phase") != "complete":
+                    continue
+                attrs = payload.get("attributes") or {}
+                if not isinstance(attrs, dict):
+                    continue
+                tool_name = str(attrs.get("tool_name") or "")
+                if not tool_name:
+                    continue
+                is_error = bool(attrs.get("is_error", False))
+                result_summary = attrs.get("result_summary") or attrs.get("result") or ""
+                if not isinstance(result_summary, str):
+                    result_summary = str(result_summary)
+                tool_calls.append(
+                    {
+                        # ── kaos-agents GoalChecker contract ────────
+                        "name": tool_name,
+                        "is_error": is_error,
+                        "summary_excerpt": result_summary[:800],
+                        # ── enrichment for downstream consumers ─────
+                        "tool_name": tool_name,
+                        "call_id": attrs.get("call_id"),
+                        "result_summary": result_summary,
+                        "structured_content": attrs.get("structured_content"),
+                    }
+                )
             elif event_type == "turn_summary":
                 cost = payload.get("cost_usd")
                 if isinstance(cost, int | float):
@@ -187,6 +242,41 @@ def make_worker(
                 cost = payload.get("cost_usd")
                 if isinstance(cost, int | float):
                     usage_sum_cost_usd += float(cost)
+                    # Plan Issue 9 SPA layer — emit a synthetic
+                    # ``cost_forecast`` SSE event so the UI's RunInspector
+                    # can render a running-total cost line + warn at 80%
+                    # of cap mid-stream. The kaos-agents wire surfaces
+                    # per-LLM-call ``usage_observed`` but never a rolling
+                    # turn-total; the UI today has to wait for
+                    # ``turn_summary`` (end of run) to see the number.
+                    # By injecting a synthetic event into
+                    # ``captured_events`` we keep the wire shape additive
+                    # (no breaking change for consumers that ignore
+                    # unknown event types) while giving the UI an
+                    # actionable mid-iteration signal.
+                    forecast_event = {
+                        "event": "cost_forecast",
+                        "data": json.dumps(
+                            {
+                                "type": "cost_forecast",
+                                "cost_usd_so_far": round(
+                                    usage_sum_cost_usd, 6
+                                ),
+                                "max_cost_usd": max_cost_usd,
+                                "fraction_used": (
+                                    round(usage_sum_cost_usd / max_cost_usd, 4)
+                                    if max_cost_usd > 0
+                                    else None
+                                ),
+                                "warn_threshold_reached": (
+                                    usage_sum_cost_usd >= 0.8 * max_cost_usd
+                                    if max_cost_usd > 0
+                                    else False
+                                ),
+                            }
+                        ),
+                    }
+                    captured_events.append(forecast_event)
 
         latency_ms = (time.monotonic() - t_start) * 1000.0
         cost_usd = (

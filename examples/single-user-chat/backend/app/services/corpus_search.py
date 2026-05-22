@@ -24,12 +24,37 @@ logger = get_logger("kaos.app.chat.corpus_search")
 
 @dataclass(frozen=True, slots=True)
 class CorpusSearchHit:
-    """One BM25 hit. Frozen value type — serializable via dataclasses."""
+    """One BM25 hit. Frozen value type — serializable via dataclasses.
+
+    B0.6 (broad-reliability roadmap): the structural citation fields
+    (``block_ref``, ``page``, ``section_title``, ``path``) flow through
+    from kaos-content's :class:`SearchResult` so the SPA can render
+    grounded citations and the agent cannot fabricate "Section X"
+    labels on paragraphs whose AST has none.
+
+    The kaos-content contract is explicit (see ``kaos_content.search``
+    docstring): "Agents that need to cite a position in a document
+    MUST draw the section identifier from ``path`` — empty ``path``
+    is the contract that no structural identifier is available for
+    this hit, and any 'Section N' claim about it would be a
+    fabrication." Empty ``path`` here means the same.
+
+    All new fields default to safe sentinels so legacy callers /
+    older JSON payloads round-trip without crashing.
+    """
 
     filename: str
     score: float
     snippet: str
     char_offset: int
+    # B0.6 — structural citation grounding fields. Empty / None means
+    # "no structural identifier available"; the agent must not invent
+    # one. Empty defaults keep the dataclass shape compatible with any
+    # caller that constructs hits without the AST refs.
+    block_ref: str | None = None
+    page: int | None = None
+    section_title: str | None = None
+    path: tuple[str, ...] = ()
 
 
 async def search_session_corpus(
@@ -38,6 +63,7 @@ async def search_session_corpus(
     session_id: str,
     query: str,
     top_k: int = 10,
+    tenant_id: str | None = None,
 ) -> list[CorpusSearchHit]:
     """BM25-search the ready-parsed files in ``session_id``.
 
@@ -53,28 +79,25 @@ async def search_session_corpus(
         return []
 
     # Lazy imports — keep the routing layer importable when the NLP
-    # extras aren't on the path.
+    # extras aren't on the path. B0.6: switched from
+    # serialize_markdown-then-split (which discarded AST refs) to
+    # kaos-content's :class:`SearchableCorpus` so the structural
+    # citation fields (block_ref, page, section_title, path) flow
+    # through to the SPA.
     try:
-        from kaos_content import (
-            ContentDocument,
-            serialize_markdown,
-        )
-        from kaos_nlp_core.search import (
-            DocumentCollection,
-            Searcher,
-        )
+        from kaos_content import ContentDocument
+        from kaos_content.indexing import SearchableCorpus
     except ImportError as exc:
-        logger.warning("kaos_nlp_core / kaos_content not importable: %s", exc)
+        logger.warning("kaos_content not importable: %s", exc)
         return []
 
-    # Build (filename, paragraphs) by walking the AST sidecars. Each
-    # paragraph becomes one DocumentCollection record so BM25 can
-    # rank per-paragraph rather than per-file — granular hits make
-    # the SPA's "jump to passage" UX feasible later.
-    prefix = f"sessions/{session_id}/files/"
+    from app.services.uploads import _vfs_prefix
+
+    prefix = _vfs_prefix(session_id, tenant_id)
     paths = await runtime.vfs.list(prefix)
-    records: list[dict[str, str | int]] = []
-    rec_id = 0
+
+    docs: list[ContentDocument] = []
+    doc_filenames: list[str] = []
     for path in sorted(paths):
         if not path.endswith(".kaos.json"):
             continue
@@ -82,7 +105,6 @@ async def search_session_corpus(
         try:
             ast_bytes = await runtime.vfs.read(path)
             doc = ContentDocument.model_validate_json(ast_bytes)
-            text = serialize_markdown(doc)
         except Exception as exc:
             logger.warning(
                 "skipping unreadable AST for session=%s file=%s: %s",
@@ -92,51 +114,41 @@ async def search_session_corpus(
                 extra={"session_id": session_id, "filename": filename},
             )
             continue
+        docs.append(doc)
+        doc_filenames.append(filename)
 
-        offset = 0
-        for paragraph in text.split("\n\n"):
-            chunk = paragraph.strip()
-            if not chunk or len(chunk) < 20:
-                # Skip tiny paragraphs (figure captions / single
-                # words) — they pollute the score distribution.
-                offset += len(paragraph) + 2
-                continue
-            records.append(
-                {
-                    "id": f"{filename}#{rec_id}",
-                    "text": chunk,
-                    "filename": filename,
-                    "char_offset": offset,
-                }
-            )
-            rec_id += 1
-            offset += len(paragraph) + 2
-
-    if not records:
+    if not docs:
         return []
 
-    collection = DocumentCollection.from_records(
-        records,
-        id_field="id",
-        text_field="text",
-        metadata_fields=("filename", "char_offset"),
-    )
-    searcher = Searcher.from_collection(collection)
-    hits = searcher.search(q, top_k=top_k)
+    # Build a single corpus-wide BM25 index — IDF spans the full
+    # session corpus, the same way the agent's downstream retrieval
+    # would see it. ``doc_uris=doc_filenames`` lets ``SearchResult.doc_uri``
+    # carry the filename so we don't have to keep a parallel mapping.
+    corpus = SearchableCorpus(docs, doc_uris=doc_filenames)
+    results = corpus.search(q, top_k=top_k, preview_length=300)
 
     out: list[CorpusSearchHit] = []
-    for hit in hits:
-        # `hit.document` is a kaos-nlp-core Document; ty can't follow
-        # the lazy-imported type so go through `getattr` defensively.
-        document = getattr(hit, "document", None)
-        meta_obj = getattr(document, "metadata", {}) or {}
-        text_obj = getattr(document, "text", "") or ""
+    for hit in results.results:
+        # ``hit.doc_uri`` was set from ``doc_filenames`` so it IS the
+        # filename. Fall back to ``doc_index`` only when ``doc_uri`` is
+        # somehow None.
+        filename = hit.doc_uri or (
+            doc_filenames[hit.doc_index] if hit.doc_index is not None else "?"
+        )
         out.append(
             CorpusSearchHit(
-                filename=str(meta_obj.get("filename", "?")),
+                filename=filename,
                 score=float(hit.score),
-                snippet=text_obj[:300],
-                char_offset=int(meta_obj.get("char_offset", 0)),
+                snippet=hit.text[:300],
+                # ``char_offset`` is no longer meaningful at the
+                # corpus-search layer (the inner segmentation is
+                # AST-rooted, not text-offset-rooted). Surface
+                # block_ref / path instead as the citation handles.
+                char_offset=hit.char_start or 0,
+                block_ref=hit.block_ref or None,
+                page=hit.page,
+                section_title=hit.section_title,
+                path=tuple(hit.path or ()),
             )
         )
     return out

@@ -25,10 +25,12 @@ from app.logging_setup import app_logger
 from app.models import ExtractCitationsBody, ExtractCitationsResponse
 from app.persistence.sessions import SessionStore
 
-router = APIRouter(tags=["citations"], dependencies=[Depends(require_auth)])
+router = APIRouter(tags=["citations"])
 logger = app_logger("citations_router")
 
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
+# B0.1 (#569): capture tenant_id per-handler — same pattern as files / chat.
+TenantDep = Annotated[str | None, Depends(require_auth)]
 
 
 @router.post(
@@ -39,6 +41,7 @@ async def extract_session_citations(
     session_id: str,
     body: ExtractCitationsBody,
     store: StoreDep,
+    tenant_id: TenantDep,
 ) -> ExtractCitationsResponse:
     """Extract typed Bluebook / financial / accounting citations from `text`.
 
@@ -47,7 +50,7 @@ async def extract_session_citations(
     state for the lifetime of the route, refreshed on every turn.
     """
     try:
-        await store.get(session_id)
+        await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

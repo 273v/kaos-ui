@@ -27,7 +27,7 @@ interface Props {
   subtitle?: string;
 }
 
-const DEFAULT_ACCEPT = new Set([".pdf", ".docx", ".pptx"]);
+const DEFAULT_ACCEPT = new Set([".pdf", ".docx", ".pptx", ".xlsx"]);
 
 export function DropZone({
   onDrop,

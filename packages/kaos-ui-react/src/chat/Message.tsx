@@ -22,10 +22,20 @@
  * populated.
  */
 
-import { ChevronRight, Loader2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  Loader2,
+  Pencil,
+  RotateCw,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ChatMessage } from "../lib/chat-state.js";
+import { copyToClipboard } from "../lib/copy-to-clipboard.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { CapabilityApproval, type CapabilityDecision } from "./CapabilityApproval.js";
 import { ElevationPill } from "./ElevationPill.js";
@@ -67,6 +77,299 @@ interface Props {
     groups: string[],
     messageId: string,
   ): void;
+  /**
+   * Plan Issue 10 layer 2 — host receives thumbs-up / thumbs-down
+   * feedback per assistant message and posts to the SPA backend's
+   * ``POST /v1/chat/sessions/{sid}/messages/{messageId}/feedback``
+   * endpoint. When omitted, the buttons stay hidden — the affordance
+   * is opt-in so embedders without a feedback persistence layer
+   * don't get a non-functional button.
+   */
+  onFeedback?(messageId: string, value: "up" | "down"): void;
+  /**
+   * Plan Issue 10 layer 3 — regenerate this assistant turn from
+   * the prior user message. Host posts to
+   * ``POST /v1/chat/sessions/{sid}/messages/{messageId}/regenerate``
+   * which rewinds the persisted MESSAGES section to BEFORE the
+   * targeted assistant turn and re-dispatches the prior user
+   * message through the same chat flow (lock-aware per #588).
+   * The new turn streams in over SSE just like a fresh send.
+   *
+   * Host receives the assistant message id. When omitted, the
+   * button stays hidden — opt-in so embedders that don't expose
+   * the regenerate endpoint don't get a non-functional button.
+   */
+  onRegenerate?(messageId: string): void;
+  /**
+   * Plan Issue 10 layer 4 — edit a prior user message in place.
+   * Host posts to
+   * ``PATCH /v1/chat/sessions/{sid}/messages/{idx}`` with the edited
+   * text; the backend replaces the user message content and
+   * truncates every subsequent item, then the SPA reissues the
+   * edited user message to trigger a fresh run.
+   *
+   * Host receives the user message id; the SPA host resolves the
+   * persisted index from the visible transcript before posting.
+   * When omitted, the affordance stays hidden — opt-in so embedders
+   * that don't expose the edit endpoint don't surface a
+   * non-functional pencil.
+   *
+   * The component itself owns the inline edit state machine
+   * (idle → editing → saving → settled); the host receives the
+   * final value via the callback.
+   */
+  onEditPrior?(messageId: string, newText: string): void;
+}
+
+/**
+ * Tiny copy-to-clipboard button shown next to the UsageChip on every
+ * finalized assistant message. Consumer-AI table-stakes parity
+ * (Pattern α from the consumer-AI parity audit): ChatGPT / Claude.ai
+ * both expose copy on every assistant turn. Copies the rendered
+ * Markdown source (`message.content`) — agents that emit code blocks
+ * and tables keep them intact when pasted into other tools.
+ *
+ * Mirrors the `ToolCallBlock` CopyJsonButton state machine
+ * (idle/copied/failed) and the `lib/copy-to-clipboard` helper that
+ * falls back to `document.execCommand("copy")` when
+ * `navigator.clipboard` is unavailable (insecure context, sandboxed
+ * iframe, headless-Chrome unfocused-page rejection).
+ */
+function CopyMessageButton({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const onClick = async () => {
+    const ok = await copyToClipboard(text);
+    setState(ok ? "copied" : "failed");
+    setTimeout(() => setState("idle"), 1500);
+  };
+  const label =
+    state === "copied"
+      ? "Copied"
+      : state === "failed"
+        ? "Copy failed — your browser blocked clipboard write"
+        : "Copy answer";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 " +
+        "text-xs text-muted-foreground hover:text-foreground " +
+        "hover:bg-muted/60 transition-colors"
+      }
+    >
+      {state === "copied" ? (
+        <Check className="h-3 w-3" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+      <span className="hidden sm:inline">
+        {state === "copied" ? "Copied" : "Copy"}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Plan Issue 10 layer 2 — thumbs-up / thumbs-down per assistant
+ * message. Persists to the SPA backend's append-only JSONL audit
+ * log via the host-provided ``onFeedback`` callback (see
+ * ``app/routers/feedback.py``).
+ *
+ * Submission is fire-and-forget at this layer; we record the
+ * sentiment locally for visual confirmation. If the user changes
+ * their mind they can click the other thumb — the backend keeps
+ * every submission in the timeline (no DELETE / PATCH on feedback).
+ */
+function FeedbackButtons({
+  messageId,
+  onFeedback,
+}: {
+  messageId: string;
+  onFeedback: (id: string, value: "up" | "down") => void;
+}) {
+  const [submitted, setSubmitted] = useState<"up" | "down" | null>(null);
+  const click = (value: "up" | "down") => {
+    onFeedback(messageId, value);
+    setSubmitted(value);
+  };
+  const baseClass =
+    "inline-flex items-center justify-center rounded p-1 " +
+    "text-muted-foreground hover:text-foreground " +
+    "hover:bg-muted/60 transition-colors";
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => click("up")}
+        title={submitted === "up" ? "Thanks — recorded" : "Helpful"}
+        aria-label="Mark answer helpful"
+        aria-pressed={submitted === "up"}
+        className={
+          submitted === "up" ? `${baseClass} text-foreground bg-muted/60` : baseClass
+        }
+      >
+        <ThumbsUp className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        onClick={() => click("down")}
+        title={submitted === "down" ? "Thanks — recorded" : "Not helpful"}
+        aria-label="Mark answer not helpful"
+        aria-pressed={submitted === "down"}
+        className={
+          submitted === "down" ? `${baseClass} text-foreground bg-muted/60` : baseClass
+        }
+      >
+        <ThumbsDown className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Plan Issue 10 layer 3 — "regenerate this assistant turn from the
+ * prior user message". Mirrors the FeedbackButtons state machine
+ * (idle → in-flight → settled). The host's onRegenerate callback
+ * is responsible for the actual POST + the SSE resubscribe; this
+ * component just gives a visible spinner while the round-trip is
+ * in flight so the user can't double-click.
+ */
+function RegenerateButton({
+  messageId,
+  onRegenerate,
+}: {
+  messageId: string;
+  onRegenerate: (id: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const click = () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      onRegenerate(messageId);
+    } finally {
+      // The host typically navigates / re-subscribes to SSE, so we
+      // give a short visual lock then return to idle. If the host
+      // re-renders the transcript (replacing this message), the
+      // component unmounts anyway and the timeout is harmless.
+      setTimeout(() => setBusy(false), 1500);
+    }
+  };
+  const label = busy ? "Regenerating…" : "Regenerate";
+  return (
+    <button
+      type="button"
+      onClick={click}
+      disabled={busy}
+      title={label}
+      aria-label={label}
+      aria-busy={busy}
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors ${
+        busy ? "opacity-60 cursor-wait" : ""
+      }`}
+    >
+      {busy ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <RotateCw className="h-3 w-3" />
+      )}
+      <span>{busy ? "Regenerating…" : "Regenerate"}</span>
+    </button>
+  );
+}
+
+/**
+ * Plan Issue 10 layer 4 — "edit this user message in place".
+ * Surfaces a small pencil button on USER turns. Clicking it
+ * swaps the message content for a textarea + Save/Cancel pair;
+ * Save fires onEditPrior(id, newText) and the host POSTs to
+ * PATCH /messages/{idx}. Cancel reverts without calling the host.
+ */
+function EditPriorButton({
+  messageId,
+  initialText,
+  onEditPrior,
+}: {
+  messageId: string;
+  initialText: string;
+  onEditPrior: (id: string, newText: string) => void;
+}) {
+  const [mode, setMode] = useState<"idle" | "editing" | "saving">("idle");
+  const [draft, setDraft] = useState(initialText);
+
+  if (mode === "idle") {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(initialText);
+          setMode("editing");
+        }}
+        title="Edit and resend"
+        aria-label="Edit this message and resend"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <Pencil className="h-3 w-3" />
+        <span>Edit</span>
+      </button>
+    );
+  }
+
+  const save = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === initialText.trim()) {
+      setMode("idle");
+      return;
+    }
+    setMode("saving");
+    try {
+      onEditPrior(messageId, trimmed);
+    } finally {
+      // Host typically refreshes the transcript on the next SSE
+      // event; visual lock against double-fire matches the
+      // RegenerateButton's 1.5s pattern.
+      setTimeout(() => setMode("idle"), 1500);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={mode === "saving"}
+        rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+        className="w-full resize-y rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        aria-label="Edit message"
+        autoFocus
+      />
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setMode("idle")}
+          disabled={mode === "saving"}
+          className="rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={mode === "saving" || !draft.trim()}
+          className={`inline-flex items-center gap-1 rounded bg-foreground px-2 py-0.5 text-xs text-background hover:bg-foreground/90 transition-colors ${
+            mode === "saving" || !draft.trim() ? "opacity-60 cursor-wait" : ""
+          }`}
+          aria-busy={mode === "saving"}
+        >
+          {mode === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          <span>{mode === "saving" ? "Saving…" : "Save & resend"}</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function Message({
@@ -74,6 +377,9 @@ export function Message({
   verboseTools = false,
   onPinElevationToSession,
   onCapabilityDecide,
+  onFeedback,
+  onRegenerate,
+  onEditPrior,
 }: Props) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
@@ -293,13 +599,37 @@ export function Message({
       )}
 
       {isAssistant && !message.streaming && (
-        <UsageChip
-          latencyMs={message.latency_ms}
-          tokens={message.tokens}
-          costUsd={message.cost_usd}
-          toolCount={message.tool_calls?.length}
-        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <UsageChip
+            latencyMs={message.latency_ms}
+            tokens={message.tokens}
+            costUsd={message.cost_usd}
+            toolCount={message.tool_calls?.length}
+          />
+          {message.content ? <CopyMessageButton text={message.content} /> : null}
+          {onRegenerate ? (
+            <RegenerateButton messageId={message.id} onRegenerate={onRegenerate} />
+          ) : null}
+          {onFeedback ? (
+            <FeedbackButtons messageId={message.id} onFeedback={onFeedback} />
+          ) : null}
+        </div>
       )}
+
+      {/*
+       * Plan Issue 10 layer 4 — edit-prior affordance on user turns.
+       * Hidden when the host doesn't supply onEditPrior (opt-in).
+       * The EditPriorButton itself owns the inline edit state
+       * machine; on Save it fires onEditPrior(id, newText) and the
+       * host POSTs PATCH /messages/{idx} which truncates forward.
+       */}
+      {isUser && onEditPrior && message.content ? (
+        <EditPriorButton
+          messageId={message.id}
+          initialText={message.content}
+          onEditPrior={onEditPrior}
+        />
+      ) : null}
     </article>
   );
 }
