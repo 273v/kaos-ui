@@ -50,17 +50,22 @@ class _FakeBlock:
 
 class _FakeAnnotation:
     def __init__(self, kind: Any) -> None:
-        self.kind = kind
+        # Real Annotation discriminator is ``.type``. a5cbda1 fixed the
+        # production code to look at ``.type``; tests must mirror.
+        self.type = kind
 
 
 class _FakeDocPDF:
     def __init__(self, extractors: list[str | None]) -> None:
-        self.blocks = [_FakeBlock(e) for e in extractors]
+        # ContentDocument stores its block sequence on ``.body`` (tuple).
+        # a5cbda1 fixed the production code to walk ``.body``; tests
+        # must mirror, or the detection branch reads an empty sequence.
+        self.body = tuple(_FakeBlock(e) for e in extractors)
 
 
 class _FakeDocDOCX:
     def __init__(self, kinds: list[Any]) -> None:
-        self.blocks: list[Any] = []
+        self.body: tuple[Any, ...] = ()
         self.annotations = [_FakeAnnotation(k) for k in kinds]
 
 
