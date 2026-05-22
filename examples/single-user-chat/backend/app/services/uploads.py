@@ -185,9 +185,21 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
         from kaos_office import parse_pptx
 
         return parse_pptx(temp_path)
+    if ext == ".xlsx":
+        # Issue 5 (M2.1) — kaos-office.parse_xlsx ships with formula
+        # preservation but pre-fix the SPA never dispatched .xlsx, so
+        # cap tables / damages models / exhibit lists rejected on
+        # upload. Returns a TabularDocument (not ContentDocument);
+        # downstream ``_enrich_parsed_doc`` fails soft when
+        # ``serialize_markdown`` doesn't accept the shape — token
+        # count + summary land null on the FileMeta sidecar, which
+        # is the same fail-soft we use for partial parses.
+        from kaos_office import parse_xlsx
+
+        return parse_xlsx(temp_path, include_formulas=True)
     raise UploadValidationError(
         what=f"unsupported file extension {ext!r}",
-        how_to_fix="upload one of: .pdf, .docx, .pptx",
+        how_to_fix="upload one of: .pdf, .docx, .pptx, .xlsx",
     )
 
 
@@ -395,7 +407,7 @@ async def store_and_parse(
     raw_filename: str,
     data: bytes,
     content_type: str | None = None,
-    supported_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx"),
+    supported_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx", ".xlsx"),
     tenant_id: str | None = None,
 ) -> FileMeta:
     """Persist + parse one uploaded file. Caller validates size before

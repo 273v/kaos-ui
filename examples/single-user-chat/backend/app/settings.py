@@ -245,10 +245,12 @@ class AppSettings(ModuleSettings):
     # a typical SEC filing or a deal-room PDF, small enough to keep the
     # sync-parser path responsive.
     max_upload_bytes: int = 25 * 1024 * 1024
-    # Extensions we dispatch a parser for. XLSX intentionally absent —
-    # kaos-office's parse_xlsx returns TabularDocument (different type
-    # from ContentDocument), wiring deferred to a follow-up.
-    supported_upload_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx")
+    # Extensions we dispatch a parser for. XLSX returns a
+    # TabularDocument (vs ContentDocument from PDF/DOCX/PPTX); the
+    # uploads pipeline fails soft on type-specific enrichment (token
+    # count + summary land null for xlsx — acceptable for the initial
+    # wire per Issue 5 / multimodal audit M2.1).
+    supported_upload_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx", ".xlsx")
 
     model_config = SettingsConfigDict(
         env_prefix="APP_",

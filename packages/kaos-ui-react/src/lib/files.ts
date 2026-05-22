@@ -42,7 +42,7 @@ export interface FileListResponse {
  * server-side supported_upload_extensions default. Consumers can
  * override.
  */
-export const DEFAULT_UPLOAD_ACCEPT = ".pdf,.docx,.pptx";
+export const DEFAULT_UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.xlsx";
 
 export async function uploadFile(
   transport: Transport,
