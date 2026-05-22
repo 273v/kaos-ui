@@ -682,6 +682,11 @@ async def send_message(
                 turn_cost_usd=float(persist_snapshot.get("turn_cost_usd") or 0.0),
                 turn_tokens=int(persist_snapshot.get("turn_tokens") or 0),
                 tenant_id=tenant_id,
+                # Plan §Issue 5: thread through the values needed
+                # for the per-turn StateSnapshot writer (Step 4).
+                run_id=run_id,
+                model=meta.model,
+                build_sha=getattr(settings, "build_sha", None),
             )
         finally:
             # SSE resume Stage 1: flip the active-pointer to a terminal

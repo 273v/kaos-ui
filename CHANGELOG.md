@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Per-turn StateSnapshot writer (Issue 5)
+
+Closes the plan §Issue 5 acceptance row "State snapshot per turn:
+`runs/turn-NNNN/snapshot.json` written; replay tool can resume
+from it."
+
+* **New service module** `app/services/state_snapshot.py` —
+  `write_turn_snapshot(*, runtime, session_id, turn_index, run_id,
+  model, tenant_id, build_sha, sidecar_records, turn_cost_usd,
+  turn_tokens)` writes a compact `snapshot.json` to
+  `runs/turn-NNNN/snapshot.json`. Schema v1 carries
+  snapshot_version, session_id, turn_index, run_id, model,
+  tenant_id, captured_at, build_sha, tool_calls[] (tool_name,
+  is_error, duration_ms, cost_usd, started_at), and totals
+  (cost_usd, tokens, tool_call_count, tool_error_count).
+* **Wired into Step 4 of `persist_turn_completion`** —
+  the chat router threads run_id, meta.model, and settings.build_sha
+  through to the BackgroundTask, which calls `write_turn_snapshot`
+  AFTER the LLM auto-titler so the snapshot reflects the final
+  committed turn state. Failure is best-effort (logged, not
+  raised) — the sidecar is the source of truth; snapshot is the
+  summary.
+* **9 unit tests** in `tests/unit/test_state_snapshot.py` covering
+  the canonical path, required field set, ToolCallRecord
+  serialisation, optional-field handling, JSON round-trip, error-
+  count semantics, missing-runtime short-circuit, happy-path
+  VFS write, and swallowed-VFS-failure invariant.
+
+Replaceable with the canonical kaos-agents
+`StateSnapshot.from_invocation` + `to_json` when the SPA grows a
+wired TurnInvocation accumulator (Phase 6+ per kaos-agents
+governance roadmap); the file path and consumer-visible schema
+stay the same across the swap.
+
 ### Added — BAA / HIPAA enforcement gate in single-user-chat backend (Issue 4)
 
 Closes the SPA half of launch-blocker plan §Issue 4

@@ -37,6 +37,7 @@ from kaos_core.logging import get_logger
 from app.exceptions import SessionNotFoundError
 from app.models import HistoryMessage
 from app.persistence.sessions import SessionStore
+from app.services.state_snapshot import write_turn_snapshot
 from app.services.title import maybe_retitle_session
 from app.services.tool_call_recorder import (
     ToolCallRecord,
@@ -77,6 +78,9 @@ async def persist_turn_completion(
     turn_cost_usd: float = 0.0,
     turn_tokens: int = 0,
     tenant_id: str | None = None,
+    run_id: str | None = None,
+    model: str | None = None,
+    build_sha: str | None = None,
 ) -> None:
     """Run every post-turn durable side effect as a detached task.
 
@@ -157,4 +161,23 @@ async def persist_turn_completion(
         logger.exception(
             "persist_turn_completion: title summarize failed session=%s",
             session_id,
+        )
+
+    # Step 4 (plan §Issue 5): per-turn StateSnapshot. Audit / replay-tool
+    # canonical artifact at ``runs/turn-NNNN/snapshot.json``. Failure is
+    # absorbed by ``write_turn_snapshot`` — the snapshot is a summary of
+    # the sidecar (Step 1, source of truth), so a snapshot-write hiccup
+    # never costs the agent its tool trace.
+    if runtime is not None and run_id is not None and model is not None:
+        await write_turn_snapshot(
+            runtime=runtime,
+            session_id=session_id,
+            turn_index=turn_index,
+            run_id=run_id,
+            model=model,
+            tenant_id=tenant_id,
+            build_sha=build_sha,
+            sidecar_records=sidecar_records,
+            turn_cost_usd=turn_cost_usd,
+            turn_tokens=turn_tokens,
         )
