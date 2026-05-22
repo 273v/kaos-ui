@@ -90,6 +90,27 @@ def _build_fake_session(vfs_root: Path, sid: str, *, with_track_changes: bool) -
                         "data": {"tool_name": "kaos-content-stats"},
                     }
                 ),
+                # Plan Issue 8 — per-turn token + cost aggregation.
+                json.dumps(
+                    {
+                        "event": "usage_observed",
+                        "data": {
+                            "tokens_in": 1500,
+                            "tokens_out": 800,
+                            "cost_usd": 0.0042,
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event": "usage_observed",
+                        "data": {
+                            "tokens_in": 700,
+                            "tokens_out": 300,
+                            "cost_usd": 0.0018,
+                        },
+                    }
+                ),
             ]
         )
     )
@@ -104,6 +125,28 @@ def _build_fake_session(vfs_root: Path, sid: str, *, with_track_changes: bool) -
             ]
         )
     )
+
+
+@pytest.mark.unit
+def test_per_turn_token_usage_aggregated(tmp_path: Path) -> None:
+    """Plan Issue 8 — long-session degradation tracking. Per-turn
+    usage_observed events sum into tokens_in / tokens_out / cost_usd
+    on the TurnSummary, which audit reports use to plot the
+    degradation curve as a session approaches its context budget.
+    """
+    sid = "01TESTTOKENSXXXXXXXXXX"
+    _build_fake_session(tmp_path, sid, with_track_changes=False)
+    report = audit(tmp_path, sid)
+    t = report.turns[0]
+    # Two usage_observed records: (1500+800) + (700+300) tokens,
+    # (0.0042 + 0.0018) USD.
+    assert t.tokens_in == 2200
+    assert t.tokens_out == 1100
+    assert t.cost_usd == pytest.approx(0.0060, abs=1e-9)
+    payload = report.to_dict()
+    assert payload["turns"][0]["tokens_in"] == 2200
+    assert payload["turns"][0]["tokens_out"] == 1100
+    assert payload["turns"][0]["cost_usd"] == 0.006
 
 
 @pytest.mark.unit

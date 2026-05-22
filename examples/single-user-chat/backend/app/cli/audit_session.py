@@ -59,6 +59,15 @@ class TurnSummary:
     # Plan Issue 3 — per-turn version pinning. Stamped at run_started
     # time so historical turns survive a subsequent kaos-* upgrade.
     build_sha: str | None = None
+    # Plan Issue 8 — long-session degradation tracking. Aggregated
+    # from ``usage_observed`` events. Surfacing the per-turn
+    # input+output token count + cumulative cost lets postmortems
+    # plot the degradation curve as a session approaches the
+    # context-budget boundary (typically 25-30 turns on Sonnet 4.6,
+    # 50-80 on Opus 4.7 / GPT-5.4 mini).
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
 
 
 @dataclass(slots=True)
@@ -107,6 +116,9 @@ class SessionReport:
                     "tool_call_count": t.tool_call_count,
                     "tool_names": dict(t.tool_names),
                     "error_count": t.error_count,
+                    "tokens_in": t.tokens_in,
+                    "tokens_out": t.tokens_out,
+                    "cost_usd": round(t.cost_usd, 6),
                 }
                 for t in self.turns
             ],
@@ -251,6 +263,21 @@ def _load_turn_runs(vfs_root: Path, session_id: str, report: SessionReport) -> N
                             summary.tool_names[str(name)] += 1
                     if evt.get("event") in {"tool_call_failed", "error"}:
                         summary.error_count += 1
+                    # Plan Issue 8 — per-turn token + cost aggregation.
+                    # kaos-agents emits one usage_observed per LLM call;
+                    # we sum across the turn to surface degradation
+                    # curves. tokens_in / tokens_out follow the
+                    # kaos-llm-client UsageObserved schema.
+                    if evt.get("event") == "usage_observed":
+                        tin = data.get("tokens_in") or data.get("input_tokens")
+                        tout = data.get("tokens_out") or data.get("output_tokens")
+                        cost = data.get("cost_usd")
+                        if isinstance(tin, int):
+                            summary.tokens_in += tin
+                        if isinstance(tout, int):
+                            summary.tokens_out += tout
+                        if isinstance(cost, int | float):
+                            summary.cost_usd += float(cost)
         except OSError as exc:
             report.warnings.append(f"unreadable {run_file.name}: {exc}")
         report.turns.append(summary)
@@ -346,9 +373,15 @@ def _render_text(report: SessionReport) -> str:
     lines.append(f"turns       : {report.turn_count}")
     for t in report.turns:
         sha_tag = f" build={t.build_sha[:8]}" if t.build_sha else " build=?"
+        usage_tag = ""
+        if t.tokens_in or t.tokens_out:
+            usage_tag = (
+                f" tokens={t.tokens_in}+{t.tokens_out}"
+                f" cost=${t.cost_usd:.4f}"
+            )
         lines.append(
             f"  - turn[{t.turn_index}] run={t.run_id}{sha_tag}"
-            f" tools={t.tool_call_count} errors={t.error_count}"
+            f" tools={t.tool_call_count} errors={t.error_count}{usage_tag}"
         )
         if t.tool_names:
             for name, count in t.tool_names.most_common():

@@ -185,6 +185,31 @@ class AppSettings(ModuleSettings):
     default_system_prompt: str = _DEFAULT_SYSTEM_PROMPT
     default_tools_enabled: bool = True
 
+    # Plan Issue 1 acceptance criterion — citation verification ramp.
+    # The plan asks for the verifier to be on-by-default for attorney-
+    # facing surfaces. The actual verification Signature lives in
+    # kaos-citations 0.1.2+ / kaos-agents 0.1.7+; this setting is the
+    # SPA-side gate that decides whether the chat router asks the
+    # upstream Runner to invoke it. Default "on" matches the
+    # "confident-wrong is malpractice-grade" bar.
+    #
+    # Operators can flip to "off" for high-throughput non-billable
+    # workloads where the latency cost (~5-15s per turn for a typical
+    # citation-heavy answer) outweighs the verifier's catch rate.
+    # The toggle surfaces in SessionSettings → Tool Policy.
+    citation_verification_default: Literal["on", "off"] = "on"
+
+    # Plan Issue 2 — per-matter tenancy. The persistence sidecar
+    # already supports per-session matter_id (see SessionMeta). This
+    # setting controls whether the SessionStore enforces matter-level
+    # isolation on cross-session reads/lists — when on, ``store.list``
+    # filters out sessions whose matter_id is not in the caller's
+    # ``visible_matters`` set. Default "off" until MatterClientGuard
+    # is installed upstream (kaos-agents 0.1.8+); flip to "on" after
+    # the integration test in tests/integration/test_matter_isolation.py
+    # passes.
+    matter_isolation: Literal["off", "advisory", "enforced"] = "off"
+
     # Per-turn budget cap (USD). Threaded into MessageRequest.max_cost_usd.
     #
     # Sized for the attorney-grade default reviewing a 5-document
