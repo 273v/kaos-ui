@@ -295,6 +295,23 @@ function ChatDetail() {
     patch.mutate({ model: modelId });
   };
 
+  // Plan Issue 10 layer 2 — thumbs feedback. POST to the backend's
+  // append-only JSONL audit log. Fire-and-forget at the UI layer:
+  // the Message component's FeedbackButtons records the sentiment
+  // locally for visual confirmation, so we don't need a Promise here.
+  // A failed POST is logged to console (not surfaced to the user)
+  // because feedback is informational, not load-bearing — we never
+  // want a 5xx on feedback to interrupt the chat surface.
+  const onFeedback = (messageId: string, value: "up" | "down") => {
+    apiFetch(`/v1/chat/sessions/${id}/messages/${messageId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    }).catch((err) => {
+      console.warn("feedback POST failed", { messageId, value, err });
+    });
+  };
+
   // Pin auto-elevated groups into the session's persistent ceiling.
   // The ElevationPill's "Pin to session" affordance calls this with
   // the deduped groups the AgenticLoop widened to during this turn.
@@ -568,6 +585,7 @@ function ChatDetail() {
                   verboseTools={verboseTools}
                   onPinElevationToSession={onPinElevationToSession}
                   onCapabilityDecide={onCapabilityDecide}
+                  onFeedback={onFeedback}
                 />
               ))}
             </div>
