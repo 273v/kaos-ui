@@ -148,12 +148,36 @@ def _vfs_prefix(session_id: str, tenant_id: str | None = None) -> str:
 # ── parser dispatch ────────────────────────────────────────────────
 
 
-def _parse_sync(temp_path: Path, ext: str) -> Any:
-    """Synchronous parser dispatch by extension.
+# kaos-nlp-core content-type groups we know how to route. The right-hand
+# side is the canonical file extension we'd expect for that group — used
+# for logging when the declared extension and detected bytes disagree.
+_BYTES_GROUP_TO_EXT: dict[str, str] = {
+    "pdf": ".pdf",
+    "office-docx": ".docx",
+    "office-pptx": ".pptx",
+    "office-xlsx": ".xlsx",
+}
 
-    Returns whatever the parser returns. PDF/DOCX/PPTX return
-    ``ContentDocument``; future XLSX support would return
-    ``TabularDocument`` (different shape — not enabled in P1).
+
+def _parse_sync(temp_path: Path, ext: str) -> Any:
+    """Synchronous parser dispatch — sniff bytes first, then route.
+
+    Routing by file extension alone is spoofable: a DOCX renamed
+    ``report.pdf`` dies deep inside pypdfium2 with an opaque parser
+    error rather than fast at the dispatcher with a clear "expected
+    pdf, got office-docx" message. We sniff bytes via
+    :func:`kaos_nlp_core.content_type.detect` (which 0.1.1+ peeks
+    inside zip central directories to disambiguate real DOCX/PPTX
+    from generic archives) and route on the detected ``group``.
+    Extension routing remains as a fallback when kaos-nlp-core is
+    not importable at runtime.
+
+    PDF/DOCX/PPTX return ``ContentDocument``. XLSX returns a
+    ``TabularDocument`` (different shape); downstream
+    ``_enrich_parsed_doc`` fails soft when ``serialize_markdown``
+    doesn't accept the shape — token count + summary land null on
+    the FileMeta sidecar, which is the same fail-soft we use for
+    partial parses.
 
     B0.4 / B0.5 — opted-in parser kwargs:
     - PDF: ``ocr="auto"`` so scanned exhibits don't silently round-trip
@@ -169,11 +193,80 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
     and persisted into :class:`FileMeta` so the UI can render banners
     ("OCR'd PDF — text accuracy may vary" / "Tracked changes detected").
     """
+    # 1. Sniff bytes; fall back silently if kaos-nlp-core isn't installed.
+    detected_group: str | None = None
+    detected_mime: str = ""
+    try:
+        from kaos_nlp_core.content_type import detect
+
+        result = detect(temp_path.read_bytes())
+        detected_group = result.group
+        detected_mime = result.mime_type
+    except ImportError:
+        logger.warning(
+            "kaos_nlp_core.content_type unavailable; falling back to extension-based "
+            "routing for upload (ext=%s). Install kaos-nlp-core>=0.1.1 to enable "
+            "spoof-resistant byte sniffing.",
+            ext,
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(
+            "content-type detection raised %s; falling back to extension routing (ext=%s)",
+            exc,
+            ext,
+        )
+
+    # 2. Bytes-based dispatch when detection produced a supported group.
+    if detected_group in _BYTES_GROUP_TO_EXT:
+        expected_ext = _BYTES_GROUP_TO_EXT[detected_group]
+        if ext != expected_ext:
+            logger.info(
+                "upload ext/bytes mismatch resolved by bytes: declared_ext=%r "
+                "expected_ext=%r detected_group=%r mime=%r",
+                ext,
+                expected_ext,
+                detected_group,
+                detected_mime,
+            )
+        if detected_group == "pdf":
+            from kaos_pdf import extract_pdf
+
+            return extract_pdf(temp_path, ocr="auto")
+        if detected_group == "office-docx":
+            from kaos_office import parse_docx
+
+            return parse_docx(temp_path, track_changes=True)
+        if detected_group == "office-pptx":
+            from kaos_office import parse_pptx
+
+            return parse_pptx(temp_path)
+        if detected_group == "office-xlsx":
+            from kaos_office import parse_xlsx
+
+            return parse_xlsx(temp_path, include_formulas=True)
+
+    # 3. Detection ran but the format isn't supported → refuse with a
+    #    clear, actionable error rather than fall through to a parser
+    #    that will crash deep in a third-party library.
+    if detected_group is not None and detected_group not in _BYTES_GROUP_TO_EXT:
+        if detected_group == "unknown":
+            raise UploadValidationError(
+                what=(
+                    f"could not identify content type for upload "
+                    f"(declared ext={ext!r}, no recognizable magic-byte signature)"
+                ),
+                how_to_fix="upload a PDF, DOCX, PPTX, or XLSX file",
+            )
+        raise UploadValidationError(
+            what=(
+                f"unsupported content type {detected_mime or detected_group!r} "
+                f"(detected group={detected_group!r}, declared ext={ext!r})"
+            ),
+            how_to_fix="upload one of: .pdf, .docx, .pptx, .xlsx",
+        )
+
+    # 4. Detection unavailable → extension fallback (legacy path).
     if ext == ".pdf":
-        # kaos-pdf 0.1.0a2 exports `extract_pdf` (the ContentDocument-
-        # returning canonical parser). Newer monorepo HEAD has a
-        # `parse_pdf` alias — use the published name for forward-compat
-        # against the PyPI release we depend on.
         from kaos_pdf import extract_pdf
 
         return extract_pdf(temp_path, ocr="auto")
@@ -186,14 +279,6 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
 
         return parse_pptx(temp_path)
     if ext == ".xlsx":
-        # Issue 5 (M2.1) — kaos-office.parse_xlsx ships with formula
-        # preservation but pre-fix the SPA never dispatched .xlsx, so
-        # cap tables / damages models / exhibit lists rejected on
-        # upload. Returns a TabularDocument (not ContentDocument);
-        # downstream ``_enrich_parsed_doc`` fails soft when
-        # ``serialize_markdown`` doesn't accept the shape — token
-        # count + summary land null on the FileMeta sidecar, which
-        # is the same fail-soft we use for partial parses.
         from kaos_office import parse_xlsx
 
         return parse_xlsx(temp_path, include_formulas=True)
