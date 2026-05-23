@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a14] — 2026-05-23
+
+audit-04 remediation: Family D classifier + README count drift.
+
 ### Changed
 
 - `pyproject.toml` classifier bumped from `Development Status :: 3 - Alpha`
