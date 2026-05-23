@@ -117,7 +117,7 @@ kaos-ui doctor . --json            # structured findings
 |---|---|
 | **Python** | 3.13, 3.14 |
 | **OS** | Linux, macOS, Windows (pure-Python wheel; no native code) |
-| **Maturity** | Alpha. Public API is documented in `kaos_ui.__all__` (18 symbols). |
+| **Maturity** | Alpha. Public API is documented in `kaos_ui.__all__` (19 symbols). |
 | **Stability policy** | Pre-1.0: minor bumps may change behaviour. Every change is documented in [`CHANGELOG.md`](CHANGELOG.md). Shipping template kinds (and their `post_install` + `next_steps` contracts), the MCP tool surface, and the `KAOS_UI_*` environment-variable namespace are public API. |
 | **Test coverage** | 105 tests, 81% line coverage; the four MCP tools are 98%+ covered. |
 | **Type checker** | Validated with [`ty`](https://docs.astral.sh/ty/), Astral's Python type checker. |
