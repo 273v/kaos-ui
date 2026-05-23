@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.1.0 GA release (WU-L #543) that froze the public API for the
   0.1.x line. Closes audit-04/kaos-ui.md Family D (classifier drift).
 
+### Documentation
+
+- **audit-04 README count drift.** README Maturity row updated from
+  "18 symbols" to the correct "19 symbols" — the count rotted after
+  the most recent symbol addition. Doc-only fix; no public API or
+  behavior change. Closes audit-04/kaos-ui.md count drift.
 
 ### Changed — Upload dispatcher routes by detected bytes, not extension
 
