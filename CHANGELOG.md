@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Upload dispatcher routes by detected bytes, not extension
+
+Closes audit `kaos-modules/docs/audits/2026-05-22-content-type-detection-unused.md` Fix 1.
+
+`kaos_ui.uploads._parse_sync` now sniffs the uploaded bytes via
+`kaos_nlp_core.content_type.detect()` (0.1.1+) and routes on the
+detected ``group`` (`pdf` / `office-docx` / `office-pptx`) instead
+of the declared file extension. Bytes-based dispatch closes the
+spoofable-upload class: a DOCX renamed `report.pdf` used to crash
+deep inside pypdfium2 with an opaque parser error; it now routes
+to `parse_docx` with the mismatch logged for observability.
+
+When the detector returns `group="unknown"` (no magic-byte
+signature) the dispatcher refuses with a typed
+`UploadValidationError` that names both the declared extension and
+the detection failure — uploads are user-facing surfaces, so fail
+fast rather than fall through to a parser that will crash on
+unknown bytes (audit §8 Q2, option b).
+
+Graceful fallback: when `kaos-nlp-core` isn't importable at runtime
+(it's not a hard dependency of `kaos-ui` itself) we revert to
+extension-based dispatch with a logged warning, preserving the
+"kaos-ui-without-NLP-stack" deployment baseline. The single-user-chat
+example backend and the `web:spa` template `uploads.py.tmpl` get the
+same upgrade — the template's `_verify_magic_bytes` prefers the
+kaos-nlp-core detector when available and falls back to `python-magic`.
+
+Live SPA verification (Footnote.docx uploaded as `.pdf` with
+content-type `application/pdf`, against single-user-chat backend on
+:8888 with kaos-nlp-core 0.1.1 facade): backend logged
+``upload ext/bytes mismatch resolved by bytes: declared_ext='.pdf'
+expected_ext='.docx' detected_group='office-docx'`` and parsed
+successfully, returning a real document summary instead of an opaque
+pypdfium2 traceback.
+
 ### Added — Edit-prior user message inline editor (Issue 10 L4)
 
 Closes the plan §Issue 10 L4 acceptance row at the SPA UI layer.

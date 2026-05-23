@@ -137,15 +137,105 @@ def _vfs_path(session_id: str, filename: str) -> str:
 # ── parser dispatch ──────────────────────────────────────────────────
 
 
-def _parse_sync(temp_path: Path, ext: str) -> Any:
-    """Synchronous parser dispatch by extension.
+_BYTES_GROUP_TO_EXT: dict[str, str] = {
+    "pdf": ".pdf",
+    "office-docx": ".docx",
+    "office-pptx": ".pptx",
+}
 
-    Returns whatever the parser returns. PDF / DOCX / PPTX return
-    ``ContentDocument`` (kaos-content's AST). XLSX is intentionally
-    absent — kaos-office's ``parse_xlsx`` returns ``TabularDocument``,
-    a different shape; consumers wanting tabular uploads should call
-    the tabular pipeline directly.
+
+def _parse_sync(temp_path: Path, ext: str) -> Any:
+    """Synchronous parser dispatch — sniff bytes first, route on result.
+
+    Routing by file extension alone is spoofable: a DOCX renamed
+    ``report.pdf`` reaches us as ``ext=".pdf"`` and dies deep inside
+    pypdfium2 with an opaque parser error rather than fast at the
+    dispatcher with a clear "expected pdf, got office-docx" message.
+
+    This dispatcher sniffs the bytes via
+    :func:`kaos_nlp_core.content_type.detect` and routes on the
+    detected ``group`` (``"pdf"`` / ``"office-docx"`` /
+    ``"office-pptx"``). When kaos-nlp-core is unavailable at runtime
+    (the package isn't a hard dependency of kaos-ui itself), we
+    gracefully fall back to extension routing with a logged warning so
+    pre-existing deployments keep working.
+
+    PDF / DOCX / PPTX return ``ContentDocument`` (kaos-content's AST).
+    XLSX is intentionally absent — kaos-office's ``parse_xlsx``
+    returns ``TabularDocument``, a different shape; consumers wanting
+    tabular uploads should call the tabular pipeline directly.
     """
+    # 1. Sniff bytes. Falls back to ext routing if kaos-nlp-core isn't
+    #    installed (preserves the kaos-ui-without-NLP-stack baseline).
+    detected_group: str | None = None
+    detected_mime: str = ""
+    try:
+        from kaos_nlp_core.content_type import detect  # ty: ignore[unresolved-import]
+
+        result = detect(temp_path.read_bytes())
+        detected_group = result.group
+        detected_mime = result.mime_type
+    except ImportError:
+        logger.warning(
+            "kaos_nlp_core.content_type unavailable; falling back to extension-based "
+            "routing for upload (ext=%s). Install `kaos-nlp-core>=0.1.1` to enable "
+            "spoof-resistant byte sniffing.",
+            ext,
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(
+            "content-type detection raised %s; falling back to extension routing (ext=%s)",
+            exc,
+            ext,
+        )
+
+    # 2. Bytes-based dispatch when detection succeeded with a known group.
+    if detected_group in _BYTES_GROUP_TO_EXT:
+        expected_ext = _BYTES_GROUP_TO_EXT[detected_group]
+        if ext != expected_ext:
+            logger.info(
+                "upload ext/bytes mismatch resolved by bytes: declared_ext=%r "
+                "expected_ext=%r detected_group=%r mime=%r",
+                ext,
+                expected_ext,
+                detected_group,
+                detected_mime,
+            )
+        if detected_group == "pdf":
+            from kaos_pdf import extract_pdf  # ty: ignore[unresolved-import]
+
+            return extract_pdf(temp_path)
+        if detected_group == "office-docx":
+            from kaos_office import parse_docx  # ty: ignore[unresolved-import]
+
+            return parse_docx(temp_path)
+        if detected_group == "office-pptx":
+            from kaos_office import parse_pptx  # ty: ignore[unresolved-import]
+
+            return parse_pptx(temp_path)
+
+    # 3. Detection ran but found nothing supported → refuse with a clear,
+    #    actionable error rather than fall through to a parser that will
+    #    crash deep in a third-party library. Uploads are user-facing;
+    #    fail fast (audit §8 Q2, option b).
+    if detected_group is not None and detected_group not in _BYTES_GROUP_TO_EXT:
+        if detected_group == "unknown":
+            raise UploadValidationError(
+                what=(
+                    f"could not identify content type for upload "
+                    f"(declared ext={ext!r}, no recognizable magic-byte signature)"
+                ),
+                how_to_fix="upload a PDF, DOCX, or PPTX file",
+            )
+        raise UploadValidationError(
+            what=(
+                f"unsupported content type {detected_mime or detected_group!r} "
+                f"(detected group={detected_group!r}, declared ext={ext!r})"
+            ),
+            how_to_fix="upload one of: .pdf, .docx, .pptx",
+        )
+
+    # 4. Detection unavailable → extension fallback (legacy path).
     if ext == ".pdf":
         from kaos_pdf import extract_pdf  # ty: ignore[unresolved-import]
 

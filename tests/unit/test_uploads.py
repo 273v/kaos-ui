@@ -226,3 +226,167 @@ async def test_filename_sanitization_strips_directory_components() -> None:
     # The error must reference the (empty) extension, NOT a path-traversal
     # message — proving the basename got extracted first.
     assert "extension" in exc.value.what.lower()
+
+
+# ── bytes-based parser dispatch (spoof resistance) ───────────────────
+
+
+def _docx_bytes(payload_type: str = "wordprocessingml.document") -> bytes:
+    """Build a minimal valid OPC zip recognizable as a DOCX/PPTX/XLSX.
+
+    Mirrors the helper in the upstream kaos-nlp-core test suite — the
+    [Content_Types].xml Override is what the detector's OPC fallback
+    greps for.
+    """
+    import io
+    import zipfile
+
+    payload_map = {
+        "wordprocessingml.document": (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+            "word/document.xml",
+        ),
+        "spreadsheetml.sheet": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+            "xl/workbook.xml",
+        ),
+        "presentationml.presentation": (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+            "ppt/presentation.xml",
+        ),
+    }
+    ct_string, part_name = payload_map[payload_type]
+    buf = io.BytesIO()
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        f'<Override PartName="/{part_name}" ContentType="{ct_string}"/>'
+        "</Types>"
+    ).encode()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr(part_name, b"<doc/>")
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_parse_sync_dispatches_docx_when_extension_is_pdf() -> None:
+    """Spoof-resistance: a DOCX renamed ``report.pdf`` MUST route to the
+    DOCX parser (bytes are the source of truth) rather than to
+    pypdfium2 (where it would die with an opaque error).
+
+    The audit's primary motivating bug — closes the kaos-ui /
+    SPA-backend spoofable-upload class. Skipped when the runtime
+    helpers needed to make the dispatch observable aren't available.
+    """
+    pytest.importorskip("kaos_nlp_core.content_type")
+    pytest.importorskip("kaos_office")
+
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from kaos_ui.uploads import _parse_sync
+
+    docx = _docx_bytes("wordprocessingml.document")
+    with NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        tf.write(docx)
+        temp_path = Path(tf.name)
+    try:
+        # Declared ext is ".pdf" (the spoof) but bytes are DOCX. The
+        # dispatcher should route to parse_docx and return a non-None
+        # parsed document, not raise. Some kaos-office versions return
+        # a ContentDocument; we only assert "did not raise + returned
+        # something".
+        result = _parse_sync(temp_path, ".pdf")
+        assert result is not None
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_parse_sync_refuses_unknown_bytes_with_clear_error() -> None:
+    """Detector returned 'unknown' (no magic-byte signature) → refuse
+    with a user-friendly error that names both the declared ext and
+    the detection failure. Per audit §8 Q2 option b (kaos-ui uploads
+    are user-facing; fail fast)."""
+    pytest.importorskip("kaos_nlp_core.content_type")
+
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from kaos_ui.uploads import _parse_sync
+
+    with NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        # Plain ASCII — no magic bytes anywhere; detector returns "unknown".
+        tf.write(b"this is plain text masquerading as a PDF")
+        temp_path = Path(tf.name)
+    try:
+        with pytest.raises(UploadValidationError) as exc:
+            _parse_sync(temp_path, ".pdf")
+        assert "could not identify content type" in exc.value.what.lower()
+        assert ".pdf" in exc.value.what  # declared ext surfaced
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_parse_sync_refuses_image_with_clear_error() -> None:
+    """Detector recognized the bytes but not as a supported document
+    format → refuse with a typed error naming the detected group and
+    the declared extension."""
+    pytest.importorskip("kaos_nlp_core.content_type")
+
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from kaos_ui.uploads import _parse_sync
+
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100  # PNG magic
+    with NamedTemporaryFile(suffix=".docx", delete=False) as tf:
+        tf.write(png_bytes)
+        temp_path = Path(tf.name)
+    try:
+        with pytest.raises(UploadValidationError) as exc:
+            _parse_sync(temp_path, ".docx")
+        # Error names BOTH the declared ext and the detected group.
+        body = (exc.value.what + " " + exc.value.how_to_fix).lower()
+        assert ".docx" in body
+        assert "image" in body or "png" in body
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_parse_sync_falls_back_to_extension_when_nlp_core_missing(monkeypatch) -> None:
+    """When ``kaos_nlp_core.content_type`` import fails at runtime we
+    must fall through to extension-based dispatch with a logged
+    warning — preserves the kaos-ui-without-NLP baseline."""
+    pytest.importorskip("kaos_office")
+
+    import builtins
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from kaos_ui.uploads import _parse_sync
+
+    real_import = builtins.__import__
+
+    def _block_kaos_nlp_core(name, *args, **kwargs):
+        if name == "kaos_nlp_core.content_type" or name.startswith("kaos_nlp_core.content_type"):
+            raise ImportError(f"blocked for test: {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _block_kaos_nlp_core)
+
+    docx = _docx_bytes("wordprocessingml.document")
+    with NamedTemporaryFile(suffix=".docx", delete=False) as tf:
+        tf.write(docx)
+        temp_path = Path(tf.name)
+    try:
+        # With NLP core blocked + ext=".docx" matching the bytes, the
+        # extension-fallback path routes to parse_docx successfully.
+        result = _parse_sync(temp_path, ".docx")
+        assert result is not None
+    finally:
+        temp_path.unlink(missing_ok=True)
