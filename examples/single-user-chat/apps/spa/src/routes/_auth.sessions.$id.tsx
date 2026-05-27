@@ -12,6 +12,7 @@ import {
   type Skill,
   SlashMenu,
   TurnStatus,
+  VfsExplorer,
 } from "@273v/kaos-ui-react/chat";
 import { RunInspector } from "@273v/kaos-ui-react/debug";
 import {
@@ -22,6 +23,7 @@ import {
   useLocalStorage,
   useSendMessage,
   useSessionFiles,
+  useSessionVfs,
   useUploadFile,
 } from "@273v/kaos-ui-react/hooks";
 import { type ChatMessage, newId, stripScratchpadTags } from "@273v/kaos-ui-react/lib";
@@ -31,6 +33,7 @@ import {
   Bug,
   Download,
   FileText,
+  FolderTree,
   Maximize2,
   Minimize2,
   Quote,
@@ -191,7 +194,13 @@ function ChatDetail() {
   const [exportOpen, setExportOpen] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
+  const [vfsOpen, setVfsOpen] = useState(false);
+  const [vfsShowSidecars, setVfsShowSidecars] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(debugDefault);
+  const vfs = useSessionVfs(id, {
+    enabled: vfsOpen,
+    includeSidecars: vfsShowSidecars,
+  });
   // Persisted preference: once the user flips verbose tools on, it
   // stays on across reloads + new sessions. Keyed under a stable
   // string so a future "global UI prefs" page can introspect it.
@@ -541,6 +550,31 @@ function ChatDetail() {
 
           <button
             type="button"
+            onClick={() => setVfsOpen((v) => !v)}
+            disabled={!meta}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
+              vfsOpen ? "bg-muted text-foreground" : ""
+            }`}
+            title={
+              vfs.data
+                ? `${vfs.data.nodes.length} VFS entries`
+                : "Session VFS explorer (operator view)"
+            }
+            aria-label={
+              vfs.data
+                ? `Session VFS explorer (${vfs.data.nodes.length} entries)`
+                : "Session VFS explorer"
+            }
+            aria-pressed={vfsOpen}
+          >
+            <FolderTree className="h-3.5 w-3.5" />
+            {vfs.data && vfs.data.nodes.length > 0 && (
+              <span className="tabular-nums text-[10px]">{vfs.data.nodes.length}</span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setVerboseTools((v) => !v)}
             disabled={!meta}
             className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md hover:bg-muted disabled:opacity-40 ${
@@ -812,6 +846,18 @@ function ChatDetail() {
         byMessage={citations.byMessage}
         pending={citations.pending}
         error={citations.error}
+      />
+
+      <VfsExplorer
+        open={vfsOpen}
+        onClose={() => setVfsOpen(false)}
+        nodes={vfs.data?.nodes ?? []}
+        loading={vfs.isLoading}
+        errorCount={vfs.data?.error_count ?? 0}
+        showSidecars={vfsShowSidecars}
+        onShowSidecarsChange={setVfsShowSidecars}
+        onRefresh={() => vfs.refetch()}
+        refreshing={vfs.isFetching && !vfs.isLoading}
       />
     </div>
   );
