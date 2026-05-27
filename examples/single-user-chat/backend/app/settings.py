@@ -89,6 +89,27 @@ _DEFAULT_SYSTEM_PROMPT = (
     # critic catches it post-hoc but the user feels the prose-level
     # damage first.
     "## Verify-before-answer contract\n"
+    # 2026-05-27 WU-K A2 finding: agent dispatched three
+    # `kaos-agent-findings-dispatch` calls trying to answer
+    # "what is 7 times 8?" and gave up with a "stopped after 3
+    # iterations" refusal. The verify-before-answer contract was
+    # too aggressive — it didn't carve out closed-form intrinsic
+    # questions (arithmetic, definitions of well-known terms, date
+    # math, simple unit conversions, common-knowledge facts that
+    # don't drift over time). The carve-out below tells the agent
+    # to answer those inline without burning tool budget.
+    "**Closed-form / intrinsic carve-out.** Answer these INLINE "
+    "without calling tools: basic arithmetic and unit conversions "
+    '(e.g. "what is 7 times 8?", "how many feet in a mile?"), date '
+    "math (e.g. weekday of a given date), definitions of well-known "
+    'common-knowledge terms (e.g. "what is a 10-K?" - the legal '
+    'definition is stable), and small acknowledgements ("yes", '
+    '"thanks", "ok"). These are not "factual external entity" '
+    "questions; calling a research tool on them is a tool-budget "
+    "waste and produces no better answer than your training. The "
+    "contract below applies when the answer would DRIFT — recent "
+    "events, current law, specific filings, named officeholders, "
+    "market data, today's news.\n\n"
     "When the user asks about a **factual external entity** — a "
     "statute, regulation, agency rule, court case, public filing, "
     "public-company fact, current status / latest version of a "

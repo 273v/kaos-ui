@@ -366,8 +366,20 @@ class TurnToolCallRecorder:
             )
 
     def records(self) -> list[ToolCallRecord]:
-        """Return the accumulated tool-call rows in first-seen order."""
-        return list(self._by_id.values())
+        """Return the accumulated tool-call rows in first-seen order.
+
+        Defensive dedup: if start and complete events arrived with
+        different call_ids (an upstream emitter bug that was present
+        through kaos-agents 0.1.22 for the findings-dispatch synthetic
+        tool-call), a "running" record can linger alongside its
+        completed sibling. Drop any orphan "running" record when a
+        same-name "done"/"error" record exists in the same turn — the
+        completion carries the full result_preview while the start
+        carries only the empty placeholder.
+        """
+        all_records = list(self._by_id.values())
+        finalized_names = {r.name for r in all_records if r.status in ("done", "error")}
+        return [r for r in all_records if not (r.status == "running" and r.name in finalized_names)]
 
     def is_empty(self) -> bool:
         return not self._by_id
@@ -466,7 +478,13 @@ def serialize_records(records: list[ToolCallRecord]) -> bytes:
 
 
 def parse_records_jsonl(blob: bytes | str) -> list[ToolCallRecord]:
-    """Inverse of `serialize_records`. Skips malformed lines defensively."""
+    """Inverse of `serialize_records`. Skips malformed lines defensively.
+
+    Applies the same orphan-running dedup as `TurnToolCallRecorder.records`
+    so historical sidecars written by kaos-agents <=0.1.22 (where the
+    findings-dispatch synthetic tool_call emitted start with one call_id
+    and complete with another) render as a single completed card.
+    """
     text = blob.decode("utf-8", errors="replace") if isinstance(blob, bytes) else blob
     out: list[ToolCallRecord] = []
     for line in text.splitlines():
@@ -479,4 +497,5 @@ def parse_records_jsonl(blob: bytes | str) -> list[ToolCallRecord]:
         except Exception as exc:
             logger.warning("dropping malformed toolcall record %r: %s", line[:80], exc)
             continue
-    return out
+    finalized_names = {r.name for r in out if r.status in ("done", "error")}
+    return [r for r in out if not (r.status == "running" and r.name in finalized_names)]

@@ -38,6 +38,7 @@ from app.models import (
     SendMessageBody,
     SessionListResponse,
     SessionMeta,
+    SessionPolicyWire,
     SessionToolSetWire,
     ToolSetUpdateBody,
 )
@@ -306,6 +307,32 @@ async def patch_tool_set(
             )
 
     policy_updates: dict[str, object] = {}
+
+    # 2026-05-27 WU-K B-bucket finding: PATCH `{"persona": "forensics"}`
+    # was setting policy.persona but leaving the existing wide
+    # allowed_groups / soft_ceiling in place. The session CREATE path
+    # uses ``SessionPolicyWire.for_persona`` to seed BOTH the persona
+    # name AND the matching group ceiling, so a forensics session
+    # created via the empty-state chip ceiling-refuses web/browser.
+    # The PATCH path should give the same shape unless the caller
+    # ALSO passed explicit allowed_groups/soft_ceiling/denied_tools
+    # (in which case the explicit values win). This makes the
+    # forensics persona a real authorization ceiling, not just an
+    # intent-routing hint.
+    persona_seed: dict[str, object] = {}
+    if body.persona is not None and body.persona != current.policy.persona:
+        preset = SessionPolicyWire.for_persona(body.persona)
+        persona_seed = {
+            "persona": preset.persona,
+            "allowed_groups": list(preset.allowed_groups),
+            "soft_ceiling": list(preset.soft_ceiling),
+            "denied_tools": list(preset.denied_tools),
+        }
+
+    # Apply persona-derived defaults first; explicit body fields below
+    # override them.
+    policy_updates.update(persona_seed)
+
     if body.allowed_groups is not None:
         policy_updates["allowed_groups"] = list(body.allowed_groups)
     if body.denied_tools is not None:
