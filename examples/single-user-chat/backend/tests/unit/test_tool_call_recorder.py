@@ -208,3 +208,79 @@ def test_parse_actions_into_records_skips_non_tool_items() -> None:
     ]
     recs = parse_actions_into_records(items)
     assert [r.name for r in recs] == ["tool-a", "tool-b"]
+
+
+def test_records_dedup_orphan_running_with_same_name_done() -> None:
+    # Regression for the "Agent Findings Dispatch running…" stuck-card bug:
+    # kaos-agents <=0.1.22 emitted the findings-dispatch synthetic
+    # tool_call's span_start with attrs.call_id = parent SUBAGENT span_id,
+    # but span_complete omitted call_id so the recorder fell back to the
+    # TOOL_CALL span's own span_id. Start and complete landed under
+    # DIFFERENT keys, leaving an orphan "running" record alongside the
+    # completed one. The dedup at .records() drops the orphan.
+    rec = TurnToolCallRecorder()
+    # Simulate the buggy emission: start with one call_id, complete with
+    # another, both naming the same tool.
+    rec.observe(
+        "span",
+        {
+            "type": "span",
+            "subject": "tool_call",
+            "phase": "start",
+            "span_id": "tc-span-A",
+            "attributes": {
+                "call_id": "parent-subagent-id",  # wrong — parent's id
+                "tool_name": "kaos-agent-findings-dispatch",
+            },
+        },
+    )
+    rec.observe(
+        "span",
+        {
+            "type": "span",
+            "subject": "tool_call",
+            "phase": "complete",
+            "span_id": "tc-span-A",
+            "attributes": {
+                # NO call_id — recorder falls back to span_id "tc-span-A"
+                "tool_name": "kaos-agent-findings-dispatch",
+                "result_summary": "FindingsAgent: enumerated=11 filtered=1",
+                "is_error": False,
+            },
+        },
+    )
+    records = rec.records()
+    assert len(records) == 1, f"expected 1 record after dedup, got {[r.status for r in records]}"
+    assert records[0].status == "done"
+    assert records[0].result_preview == "FindingsAgent: enumerated=11 filtered=1"
+
+
+def test_parse_records_jsonl_dedups_orphan_running_from_historical_sidecar() -> None:
+    # Historical sidecars written before the source fix contain both the
+    # orphan "running" record and the completed sibling. Loading them via
+    # parse_records_jsonl applies the same dedup so old sessions render
+    # as a single card.
+    import json as _json
+
+    lines = [
+        _json.dumps(
+            {
+                "id": "parent-subagent-id",
+                "name": "kaos-agent-findings-dispatch",
+                "status": "running",
+            }
+        ),
+        _json.dumps(
+            {
+                "id": "tc-span-A",
+                "name": "kaos-agent-findings-dispatch",
+                "status": "done",
+                "result_preview": "FindingsAgent: enumerated=11 filtered=1",
+            }
+        ),
+    ]
+    blob = ("\n".join(lines)).encode("utf-8")
+    records = parse_records_jsonl(blob)
+    assert len(records) == 1
+    assert records[0].status == "done"
+    assert records[0].result_preview == "FindingsAgent: enumerated=11 filtered=1"

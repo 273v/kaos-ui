@@ -114,7 +114,11 @@ dependencies = [
     # body, recovering text so the agent can ground rather than emit
     # "(empty)". Requires kaos-pdf[ocr]>=0.1.4 (pytesseract) to
     # activate — see the kaos-pdf line below.
-    "kaos-agents>=0.1.21,<0.2",
+    # 2026-05-26: bumped floor to 0.1.22 — WI3 quantified-ratio
+    # refusal wording in evaluate_no_evidence_gate. No behavior change
+    # for sessions that don't hit the gate; surfaces honest "0 of N"
+    # denominators to operators when it does fire.
+    "kaos-agents>=0.1.22,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the

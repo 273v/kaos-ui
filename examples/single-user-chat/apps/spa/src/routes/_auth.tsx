@@ -29,24 +29,30 @@ function AuthedShell() {
   const navigate = useNavigate();
 
   // Cmd/Ctrl-K opens a new chat. Bound here so it works under any
-  // authenticated route (sidebar visible or not).
+  // authenticated route (sidebar visible or not). Capture-phase + always
+  // preventDefault so the shortcut works from inside the composer too —
+  // the original "skip when focus is in an input" guard made the
+  // advertised shortcut a no-op for the 99% of the time the user is
+  // actually typing in the composer, and Chrome's default Cmd/Ctrl-K
+  // (search-bar focus) was firing instead, which behaves like a page
+  // refresh under some browser configs.
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        // Skip when the user is typing in an editable field (Cmd-K is
-        // also a browser-level shortcut; we don't want to hijack
-        // search-bar interactions or the composer's send chord).
-        const target = e.target as HTMLElement | null;
-        const tag = target?.tagName?.toLowerCase() ?? "";
-        if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+        // Honour modifier keys that turn Cmd-K into something else
+        // (Cmd-Shift-K is "show inspector" / "developer tools" in some
+        // browsers — leave those alone).
+        if (e.shiftKey || e.altKey) return;
         e.preventDefault();
         if (createSession.isPending) return;
         const meta = await createSession.mutateAsync({});
         navigate({ to: "/sessions/$id", params: { id: meta.id } });
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // capture: true so we win the race against any nested input handlers
+    // (the composer textarea, sidebar search, etc.).
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [createSession, navigate]);
 
   return <Outlet />;
