@@ -204,7 +204,7 @@ class TurnUsageRecorder:
            critic-heavy turns where the worker's ``turn_summary`` only
            covers the ReAct dispatch and misses M2/M3/GoalCheck spend
            (Agent 5's diary: meta reported $0.0014 vs true $0.0091, a
-           5-6× under-count pre-R2.3).
+           5-6x under-count pre-R2.3).
         2. Sum of ``usage_observed`` events — covers every LLM call we
            saw, including critic + planner calls between worker
            iterations. Fires when ``loop_terminated`` doesn't arrive

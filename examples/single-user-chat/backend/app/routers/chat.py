@@ -12,6 +12,7 @@ Routes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from typing import Annotated, cast
@@ -21,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sse_starlette import EventSourceResponse
 
+from app._request_ctx import current_tenant_id
 from app.auth import require_auth
 from app.deps import get_session_store, get_settings, get_upstream_client
 from app.exceptions import SessionNotFoundError
@@ -540,7 +542,7 @@ async def send_message(
     if runtime is not None:
         try:
             active = await read_active_pointer(vfs=runtime.vfs, session_id=session_id)
-        except Exception:  # noqa: BLE001 — never let pointer reads block the turn
+        except Exception:
             active = None
         if active is not None and active.get("status") == "running":
             # B1.2: release the lock we acquired above before raising the
@@ -584,7 +586,7 @@ async def send_message(
                 model=meta.model,
                 turn_index=turn_index,
             )
-        except Exception:  # noqa: BLE001 — log open failures must not break the turn
+        except Exception:
             logger.exception("failed to open run_log session=%s run=%s", session_id, run_id)
             run_log = None
 
@@ -700,7 +702,7 @@ async def send_message(
                 status_str: Any = "error" if persist_snapshot.get("errored") else "done"
                 try:
                     await run_log.mark_done(status=status_str)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.exception(
                         "failed to mark run done session=%s run=%s",
                         session_id,
@@ -728,6 +730,18 @@ async def send_message(
         return v
 
     async def event_generator():
+        # Per-request tenant binding for the kaos-agents Runner's
+        # ``context_factory`` (see ``app/main.py`` and
+        # ``app/_request_ctx.py``). The factory reads this ContextVar
+        # to build a ``KaosContext`` whose ``default_vfs_namespace``
+        # matches the tenant-scoped on-disk path that
+        # ``app/services/uploads.py`` wrote to for THIS request. The
+        # value propagates through the in-process httpx ASGITransport
+        # call into the bundled kaos-agents API (same asyncio task →
+        # ContextVar inheritance is automatic). ``reset(...)`` in the
+        # finally below restores the prior value so a subsequent
+        # request on this task doesn't see this turn's tenant.
+        _tenant_ctx_token = current_tenant_id.set(tenant_id)
         # AgenticLoop wire-up: drive plan → elevate → execute → check →
         # replan via :func:`run_agentic_turn`. The orchestrator yields
         # a mix of typed KaosEvent objects (its own 4 events:
@@ -737,8 +751,6 @@ async def send_message(
         # shapes need to land in the SSE stream as ``{event, data}``.
         from kaos_agents.patterns.agentic_loop import run_agentic_turn
         from kaos_agents.registry import default_tool_group_registry
-
-        from app.services.agentic_worker import make_worker
 
         # SSE resume (Stage 1): emit a leading ``run_started`` envelope
         # so resume clients pulling from the JSONL log learn the
@@ -758,6 +770,7 @@ async def send_message(
         # current build" signal that the sidebar already badges, but
         # at turn granularity instead of session granularity.
         from app.routers.health import current_build_sha as _current_build_sha
+        from app.services.agentic_worker import make_worker
 
         run_started_payload = {
             "type": "run_started",
@@ -769,10 +782,8 @@ async def send_message(
             "build_sha": _current_build_sha(),
         }
         if run_log is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await run_log.append("run_started", run_started_payload, sequence=-1)
-            except Exception:  # noqa: BLE001
-                pass
         yield {
             "event": "run_started",
             "data": json.dumps(run_started_payload),
@@ -895,10 +906,7 @@ async def send_message(
                 except Exception:
                     payload = None
                 seq_raw = payload.get("sequence") if isinstance(payload, dict) else None
-                if isinstance(seq_raw, int):
-                    sequence = seq_raw
-                else:
-                    sequence = _next_fallback_seq()
+                sequence = seq_raw if isinstance(seq_raw, int) else _next_fallback_seq()
                 sse_event["id"] = str(sequence)
                 # Persist BEFORE yielding so resume clients connecting
                 # the instant after the live consumer drops the frame
@@ -906,10 +914,8 @@ async def send_message(
                 # failure logs internally and the live stream keeps
                 # flowing.
                 if run_log is not None and isinstance(payload, dict):
-                    try:
+                    with contextlib.suppress(Exception):
                         await run_log.append(event_name, payload, sequence=sequence)
-                    except Exception:
-                        pass
                 # Best-effort tap: parsing failures must not corrupt
                 # the stream. Both recorders ignore events they don't
                 # know. Single try block — neither call should be able
@@ -1018,6 +1024,11 @@ async def send_message(
             # ``BackgroundTask`` is the safe place — it runs after the
             # response body is fully sent regardless of client state.
             persist_snapshot["last_iter_text"] = last_iter_text
+
+            # Restore the prior tenant binding so a subsequent request
+            # served on the same asyncio task doesn't inherit this
+            # turn's tenant. Reset is safe even after an exception.
+            current_tenant_id.reset(_tenant_ctx_token)
 
     return EventSourceResponse(
         event_generator(),

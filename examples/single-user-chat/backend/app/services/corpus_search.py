@@ -91,31 +91,46 @@ async def search_session_corpus(
         logger.warning("kaos_content not importable: %s", exc)
         return []
 
-    from app.services.uploads import _vfs_prefix
+    from app.services.uploads import _sidecar_prefix, _vfs_prefix
 
-    prefix = _vfs_prefix(session_id, tenant_id)
-    paths = await runtime.vfs.list(prefix)
+    # #583 — read AST sidecars from BOTH the new out-of-tree
+    # ``sidecars/{scoped}/`` location and the legacy in-tree
+    # ``sessions/{scoped}/files/`` location so existing sessions still
+    # search after the sidecar relocation. New writes go to the new
+    # location only; dedup so a single file isn't searched twice when
+    # both locations carry the same AST.
+    new_prefix = _sidecar_prefix(session_id, tenant_id)
+    legacy_prefix = _vfs_prefix(session_id, tenant_id)
 
     docs: list[ContentDocument] = []
     doc_filenames: list[str] = []
-    for path in sorted(paths):
-        if not path.endswith(".kaos.json"):
-            continue
-        filename = path[len(prefix) : -len(".kaos.json")]
+    seen_filenames: set[str] = set()
+    for prefix in (new_prefix, legacy_prefix):
         try:
-            ast_bytes = await runtime.vfs.read(path)
-            doc = ContentDocument.model_validate_json(ast_bytes)
-        except Exception as exc:
-            logger.warning(
-                "skipping unreadable AST for session=%s file=%s: %s",
-                session_id,
-                filename,
-                exc,
-                extra={"session_id": session_id, "filename": filename},
-            )
+            paths = await runtime.vfs.list(prefix)
+        except Exception:
             continue
-        docs.append(doc)
-        doc_filenames.append(filename)
+        for path in sorted(paths):
+            if not path.endswith(".kaos.json"):
+                continue
+            filename = path[len(prefix) : -len(".kaos.json")]
+            if filename in seen_filenames:
+                continue
+            seen_filenames.add(filename)
+            try:
+                ast_bytes = await runtime.vfs.read(path)
+                doc = ContentDocument.model_validate_json(ast_bytes)
+            except Exception as exc:
+                logger.warning(
+                    "skipping unreadable AST for session=%s file=%s: %s",
+                    session_id,
+                    filename,
+                    exc,
+                    extra={"session_id": session_id, "filename": filename},
+                )
+                continue
+            docs.append(doc)
+            doc_filenames.append(filename)
 
     if not docs:
         return []

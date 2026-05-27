@@ -9,7 +9,7 @@ and assert the output shape + filter behaviour.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from app.cli.audit_aggregate import aggregate, main
 
 
 def _ts(year: int, month: int, day: int, hour: int = 12) -> float:
-    return datetime(year, month, day, hour, tzinfo=timezone.utc).timestamp()
+    return datetime(year, month, day, hour, tzinfo=UTC).timestamp()
 
 
 def _build_session(
@@ -126,9 +126,7 @@ def test_aggregate_tenant_filter_excludes_other_tenants(tmp_path: Path) -> None:
     )
     rep_all = aggregate(tmp_path / ".kaos-vfs", date="2026-05-22")
     assert rep_all.turn_count == 3
-    rep_one = aggregate(
-        tmp_path / ".kaos-vfs", date="2026-05-22", tenant_id="11f8f4450cce"
-    )
+    rep_one = aggregate(tmp_path / ".kaos-vfs", date="2026-05-22", tenant_id="11f8f4450cce")
     assert rep_one.turn_count == 2
     assert {r.session_id for r in rep_one.lines} == {"01A", "01B"}
 
@@ -262,9 +260,7 @@ def test_main_jsonl_format_emits_one_line_per_turn(
         sid="01A",
         started_at=_ts(2026, 5, 22, 1),
     )
-    code = main(
-        ["--vfs-path", str(tmp_path / ".kaos-vfs"), "--date", "2026-05-22"]
-    )
+    code = main(["--vfs-path", str(tmp_path / ".kaos-vfs"), "--date", "2026-05-22"])
     assert code == 0
     out = capsys.readouterr().out.strip()
     rows = [json.loads(line) for line in out.splitlines() if line]

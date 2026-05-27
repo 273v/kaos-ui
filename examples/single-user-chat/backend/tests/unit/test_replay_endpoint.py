@@ -23,7 +23,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
 _AUTH = "Bearer demo-token-must-be-at-least-32-chars-long-for-validation"
 
 
@@ -61,17 +60,13 @@ def _make_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClie
     return client, sid
 
 
-def _write_turn(
-    tmp_path: Path, sid: str, turn_idx: int, lines: list[dict[str, object]]
-) -> Path:
+def _write_turn(tmp_path: Path, sid: str, turn_idx: int, lines: list[dict[str, object]]) -> Path:
     """Write a fake ``turn-NNNN-XXXXXX.jsonl`` file under the session VFS.
 
     Returns the path written so individual tests can inspect afterwards
     if they need to (e.g., assert side-effect freedom).
     """
-    runs_dir = (
-        tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "runs"
-    )
+    runs_dir = tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
     path = runs_dir / f"turn-{turn_idx:04d}-replay{turn_idx:02d}.jsonl"
     path.write_text("\n".join(json.dumps(line, separators=(",", ":")) for line in lines))
@@ -102,9 +97,7 @@ def _parse_sse(body: str) -> list[tuple[str, str]]:
 
 
 @pytest.mark.unit
-def test_replay_streams_and_filters(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_replay_streams_and_filters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Cover the full SSE-stream happy path in a single test.
 
     Two TestClient SSE consumptions across `_make_app` re-imports
@@ -164,9 +157,7 @@ def test_replay_streams_and_filters(
     #    so we don't need to consume a second SSE stream in this test.
     from app.routers.replay import _turn_files
 
-    runs_dir = (
-        tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "runs"
-    )
+    runs_dir = tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "runs"
     one_only = _turn_files(runs_dir, turn=1)
     assert len(one_only) == 1
     assert "turn-0001-" in one_only[0].name
@@ -187,9 +178,7 @@ def test_replay_unknown_session_returns_404(
 
 
 @pytest.mark.unit
-def test_replay_unknown_turn_returns_404(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_replay_unknown_turn_returns_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client, sid = _make_app(tmp_path, monkeypatch)
     _write_turn(tmp_path, sid, 0, [{"event": "run_started", "data": {"run_id": "r1"}}])
     r = client.get(
@@ -218,9 +207,7 @@ def test_replay_no_persisted_runs_returns_404(
 
 
 @pytest.mark.unit
-def test_replay_rejects_invalid_delay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_replay_rejects_invalid_delay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pydantic Query bounds enforce 0 ≤ delay_ms ≤ 5000."""
     client, sid = _make_app(tmp_path, monkeypatch)
     _write_turn(tmp_path, sid, 0, [{"event": "run_started", "data": {"run_id": "r1"}}])

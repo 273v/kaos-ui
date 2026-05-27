@@ -21,6 +21,7 @@ Stage 2.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Annotated
 
@@ -108,10 +109,8 @@ async def stream_run_events(
     # falls back to whatever ``after_seq`` was on the query string.
     effective_after = after_seq
     if last_event_id is not None:
-        try:
+        with contextlib.suppress(ValueError):
             effective_after = int(last_event_id)
-        except ValueError:
-            pass
 
     events, total_bytes = await read_run_log_lines(
         vfs=vfs,

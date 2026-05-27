@@ -223,9 +223,7 @@ def test_audit_partial_session_still_reports(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_main_text_format_exits_zero(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_text_format_exits_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     sid = "01TESTSESSIONXXXXXXXXXX"
     _build_fake_session(tmp_path, sid, with_track_changes=False)
     code = main(["--session-id", sid, "--vfs-path", str(tmp_path), "--format", "text"])
@@ -237,9 +235,7 @@ def test_main_text_format_exits_zero(
 
 
 @pytest.mark.unit
-def test_main_json_format_is_valid_json(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_json_format_is_valid_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     sid = "01TESTSESSIONXXXXXXXXXX"
     _build_fake_session(tmp_path, sid, with_track_changes=False)
     code = main(["--session-id", sid, "--vfs-path", str(tmp_path), "--format", "json"])
@@ -253,13 +249,9 @@ def test_main_json_format_is_valid_json(
 
 
 @pytest.mark.unit
-def test_main_missing_session_exits_3(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_missing_session_exits_3(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / "single-user-chat" / "sessions").mkdir(parents=True)
-    code = main(
-        ["--session-id", "01DOESNOTEXIST00000000", "--vfs-path", str(tmp_path)]
-    )
+    code = main(["--session-id", "01DOESNOTEXIST00000000", "--vfs-path", str(tmp_path)])
     err = capsys.readouterr().err
     assert code == 3
     assert "not found" in err

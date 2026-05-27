@@ -30,8 +30,8 @@ single-user-chat reference SPA. See roadmap §B1.2.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 # Module-level dict from session_id → asyncio.Lock. Entries are
 # created lazily on first POST for a session. Bounded by the number

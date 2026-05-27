@@ -64,6 +64,14 @@ export type {
 } from "./files.js";
 export { uploadFile, listFiles, deleteFile, DEFAULT_UPLOAD_ACCEPT } from "./files.js";
 
+export type {
+  VfsNode,
+  VfsNodeKind,
+  VfsListResponse,
+  ListVfsOptions,
+} from "./vfs.js";
+export { listSessionVfs, groupVfsNodes } from "./vfs.js";
+
 export type { Citation, ExtractCitationsResponse } from "./citations.js";
 export { extractCitations } from "./citations.js";
 

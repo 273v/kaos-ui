@@ -42,6 +42,10 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+# Re-exported from kaos-agents to keep the on-disk path encoding in
+# lockstep with how the agent runtime resolves SessionMemory paths.
+from kaos_agents.api.settings import scope_session_id
 from pydantic import BaseModel, Field
 
 from app.auth import require_auth
@@ -49,10 +53,6 @@ from app.exceptions import SessionNotFoundError
 from app.persistence.sessions import SessionStore
 from app.services.locks import get_session_lock
 from app.settings import AppSettings
-
-# Re-exported from kaos-agents to keep the on-disk path encoding in
-# lockstep with how the agent runtime resolves SessionMemory paths.
-from kaos_agents.api.settings import scope_session_id
 
 # kaos-agents' memory.store URL-percent-encodes the scoped session id
 # so the directory survives Windows (where ``:`` is a reserved char in
@@ -166,9 +166,7 @@ async def _assert_session_owned(
     try:
         await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(
@@ -314,7 +312,7 @@ async def edit_prior(
         # next run sees the same conversation shape).
         edited = dict(items[idx])
         edited["content"] = f"user: {body.content}"
-        new_items = items[: idx] + [edited]
+        new_items = [*items[:idx], edited]
         _atomic_write_memory(path, _set_items(memory, new_items))
 
         await store.touch(

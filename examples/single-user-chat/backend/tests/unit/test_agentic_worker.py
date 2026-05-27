@@ -474,9 +474,7 @@ async def test_span_start_phase_is_ignored_only_complete_counts(
     GoalChecker would see ambiguous duplicates.
     """
     records = [
-        _tool_call_span(
-            tool_name="kaos-pdf-extract", call_id="a", phase="start"
-        ),
+        _tool_call_span(tool_name="kaos-pdf-extract", call_id="a", phase="start"),
         _tool_call_span(
             tool_name="kaos-pdf-extract",
             call_id="a",

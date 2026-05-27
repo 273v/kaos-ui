@@ -157,30 +157,41 @@ def _load_meta(vfs_root: Path, session_id: str, report: SessionReport) -> None:
 
 
 def _load_files(vfs_root: Path, session_id: str, report: SessionReport) -> None:
-    """Walk the per-session ``files/`` dir, picking up each upload's
-    ``*.meta.json`` sidecar (NOT the ``*.kaos.json`` AST sidecar — those
-    are not user-facing and are filtered from agent surfaces; see
-    #583 + corpus-markdown follow-up).
+    """Walk the per-session sidecar directories, picking up each upload's
+    ``*.meta.json`` sidecar.
+
+    New uploads write the meta sidecar to ``sidecars/{session_id}/`` (off
+    the agent-visible namespace, #583). Pre-refactor sessions still have
+    the sidecar at ``sessions/{session_id}/files/`` — read both so audit
+    output is consistent regardless of which schema the session was
+    written under. Dedup by basename so a co-existing pair only counts
+    once.
     """
-    files_dir = vfs_root / "sessions" / session_id / "files"
-    if not files_dir.is_dir():
-        return
-    for entry in sorted(files_dir.iterdir()):
-        if not entry.name.endswith(".meta.json"):
+    new_dir = vfs_root / "sidecars" / session_id
+    legacy_dir = vfs_root / "sessions" / session_id / "files"
+    seen: set[str] = set()
+    for d in (new_dir, legacy_dir):
+        if not d.is_dir():
             continue
-        meta = _load_json(entry, report)
-        if meta is None:
-            continue
-        parse = meta.get("parse") or {}
-        report.files.append(
-            FileEntry(
-                filename=meta.get("filename", entry.stem),
-                size_bytes=int(meta.get("size_bytes") or 0),
-                parse_status=str(parse.get("status") or "unknown"),
-                ocr_applied=bool(meta.get("ocr_applied")),
-                track_changes_detected=bool(meta.get("track_changes_detected")),
+        for entry in sorted(d.iterdir()):
+            if not entry.name.endswith(".meta.json"):
+                continue
+            if entry.name in seen:
+                continue
+            seen.add(entry.name)
+            meta = _load_json(entry, report)
+            if meta is None:
+                continue
+            parse = meta.get("parse") or {}
+            report.files.append(
+                FileEntry(
+                    filename=meta.get("filename", entry.stem),
+                    size_bytes=int(meta.get("size_bytes") or 0),
+                    parse_status=str(parse.get("status") or "unknown"),
+                    ocr_applied=bool(meta.get("ocr_applied")),
+                    track_changes_detected=bool(meta.get("track_changes_detected")),
+                )
             )
-        )
     report.file_count = len(report.files)
 
 
@@ -331,8 +342,7 @@ def audit(vfs_root: Path, session_id: str) -> SessionReport:
         # Also check tenant-scoped memory path.
         scoped = vfs_root / "kaos-agents" / "sessions"
         scoped_match = scoped.is_dir() and any(
-            child.name.endswith(f":{session_id}")
-            or child.name.endswith(f"%3A{session_id}")
+            child.name.endswith(f":{session_id}") or child.name.endswith(f"%3A{session_id}")
             for child in scoped.iterdir()
         )
         if not scoped_match:
@@ -362,9 +372,7 @@ def _render_text(report: SessionReport) -> str:
         if f.track_changes_detected:
             flags.append("track_changes")
         flag_str = f" [{','.join(flags)}]" if flags else ""
-        lines.append(
-            f"  - {f.filename} · {f.size_bytes} bytes · parse={f.parse_status}{flag_str}"
-        )
+        lines.append(f"  - {f.filename} · {f.size_bytes} bytes · parse={f.parse_status}{flag_str}")
     lines.append(f"corpus_attached: {report.corpus_ever_attached}")
     if report.memory_section_counts:
         lines.append("memory sections:")
@@ -375,10 +383,7 @@ def _render_text(report: SessionReport) -> str:
         sha_tag = f" build={t.build_sha[:8]}" if t.build_sha else " build=?"
         usage_tag = ""
         if t.tokens_in or t.tokens_out:
-            usage_tag = (
-                f" tokens={t.tokens_in}+{t.tokens_out}"
-                f" cost=${t.cost_usd:.4f}"
-            )
+            usage_tag = f" tokens={t.tokens_in}+{t.tokens_out} cost=${t.cost_usd:.4f}"
         lines.append(
             f"  - turn[{t.turn_index}] run={t.run_id}{sha_tag}"
             f" tools={t.tool_call_count} errors={t.error_count}{usage_tag}"

@@ -25,6 +25,9 @@ export { useLocalStorage } from "./use-local-storage.js";
 export type { ActiveRunPointer } from "./use-active-run.js";
 export { useActiveRun } from "./use-active-run.js";
 
+export type { UseSessionVfsOptions } from "./use-vfs.js";
+export { useSessionVfs } from "./use-vfs.js";
+
 // Re-export the transport-context reader from the lib layer so hook
 // consumers can import it from `@273v/kaos-ui-react/hooks` without
 // crossing subpath barriers.

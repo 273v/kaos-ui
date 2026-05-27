@@ -813,7 +813,36 @@ class HistoryResponse(BaseModel):
 # Identical fields; the only difference vs the previous definitions
 # here is that the source-of-truth class lives in kaos-ui now and is
 # shared with any other consumer.
-from kaos_ui.uploads import FileMeta, FileParseStatus  # noqa: E402,F401
+from kaos_ui.uploads import FileMeta as _UpstreamFileMeta  # noqa: E402
+from kaos_ui.uploads import FileParseStatus  # noqa: E402,F401
+
+
+class FileMeta(_UpstreamFileMeta):
+    """SPA-local extension of :class:`kaos_ui.uploads.FileMeta`.
+
+    Adds ``artifact_id`` so the kaos-core artifact manifest registered
+    by ``app/services/uploads.py::store_and_parse`` (for the parsed
+    ``.kaos.json`` ContentDocument sidecar) is reachable directly from
+    the per-file meta sidecar — no second lookup into the artifact
+    store required, and the value survives backend restarts.
+
+    Pre-fix: ``store_and_parse`` wrote the parsed AST to the VFS
+    sidecar but never called ``runtime.artifacts.create_from_path``.
+    The agent's ``kaos-content-search-document`` tool resolves its
+    ``artifact_id`` argument through ``runtime.artifacts.get(...)``,
+    which raised ``"Unknown artifact"`` for every NDA the user
+    uploaded. With ``artifact_id`` now persisted on the meta sidecar
+    AND threaded into the corpus markdown surfaced to the agent, the
+    Q&A turn can pass the bare id straight to the content tools.
+
+    The field is optional + nullable so meta sidecars written before
+    this change (or write attempts where the artifact registration
+    raised) round-trip cleanly: ``None`` simply means "no artifact
+    was registered for this file", and the backfill helper picks it
+    up on the next ``GET /files`` and tries again.
+    """
+
+    artifact_id: str | None = None
 
 
 class UploadResponse(BaseModel):
@@ -922,3 +951,69 @@ class CorpusSearchResponse(BaseModel):
     query: str
     count: int
     hits: list[CorpusSearchHitWire]
+
+
+# ── session VFS explorer (2026-05-26 VFS panel, Stage 1) ─────────────
+
+
+class VfsNode(BaseModel):
+    """One entry in the session VFS tree returned by ``GET /vfs``.
+
+    ``path`` is the absolute VFS path (``sessions/{scoped}/...``);
+    ``relative_path`` strips the session-root prefix so the UI can
+    render a session-local tree without knowing scoping rules. The
+    three boolean flags are mutually distinguishing buckets so the
+    panel can group + style entries (uploads are user-facing files,
+    artifacts are agent-written intermediates, sidecars are the
+    SPA's own parse / metadata files).
+
+    ``parse_status`` + ``summary_excerpt`` are populated only for
+    upload nodes that have a readable ``.meta.json`` sidecar — the
+    panel uses them to badge "ready" / "failed" without an extra
+    per-row API call to ``/files``.
+    """
+
+    path: str
+    relative_path: str
+    kind: Literal["file", "directory"]
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    created_at: datetime | None = None
+    modified_at: datetime | None = None
+    is_sidecar: bool = False
+    is_upload: bool = False
+    is_artifact: bool = False
+    parse_status: Literal["ready", "pending", "failed"] | None = None
+    summary_excerpt: str | None = None
+
+
+class VfsListResponse(BaseModel):
+    """GET /v1/chat/sessions/{id}/vfs response."""
+
+    session_id: str
+    prefix: str = Field(
+        description=(
+            "The normalized prefix the walk used, with leading/trailing "
+            "slashes stripped. Empty string when the whole session "
+            "subtree was walked."
+        ),
+    )
+    nodes: list[VfsNode]
+    total_count: int = Field(
+        description=(
+            "Total entries after filtering (sidecar exclusion, etc.) but before pagination."
+        ),
+    )
+    error_count: int = Field(
+        default=0,
+        description=(
+            "Number of walk entries that surfaced an error from the "
+            "backend (permission denied, transient I/O, etc.). The UI "
+            "shows this as a footer hint; affected entries are dropped "
+            "from `nodes` to keep the tree renderable."
+        ),
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page; null when the result is exhausted.",
+    )

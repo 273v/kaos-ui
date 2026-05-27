@@ -24,6 +24,7 @@ kaos-agents and we just want to lock the event-emission contract.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -72,8 +73,14 @@ def _simulate_pump(events: list[dict], max_cost_usd: float) -> list[dict]:
 def test_cost_forecast_emitted_per_usage_observed() -> None:
     """One usage_observed → one cost_forecast appended after it."""
     events = [
-        {"event": "usage_observed", "data": json.dumps({"type": "usage_observed", "cost_usd": 0.01})},
-        {"event": "usage_observed", "data": json.dumps({"type": "usage_observed", "cost_usd": 0.02})},
+        {
+            "event": "usage_observed",
+            "data": json.dumps({"type": "usage_observed", "cost_usd": 0.01}),
+        },
+        {
+            "event": "usage_observed",
+            "data": json.dumps({"type": "usage_observed", "cost_usd": 0.02}),
+        },
     ]
     out = _simulate_pump(events, max_cost_usd=0.25)
     forecasts = [e for e in out if e["event"] == "cost_forecast"]
@@ -90,12 +97,13 @@ def test_cost_forecast_emitted_per_usage_observed() -> None:
 def test_cost_forecast_warns_at_80_percent() -> None:
     """At ≥80% of cap, warn_threshold_reached flips True."""
     events = [
-        {"event": "usage_observed", "data": json.dumps({"type": "usage_observed", "cost_usd": 0.20})},
+        {
+            "event": "usage_observed",
+            "data": json.dumps({"type": "usage_observed", "cost_usd": 0.20}),
+        },
     ]
     out = _simulate_pump(events, max_cost_usd=0.25)
-    forecast = json.loads(
-        next(e for e in out if e["event"] == "cost_forecast")["data"]
-    )
+    forecast = json.loads(next(e for e in out if e["event"] == "cost_forecast")["data"])
     assert forecast["cost_usd_so_far"] == 0.20
     assert forecast["fraction_used"] == 0.8
     assert forecast["warn_threshold_reached"] is True
@@ -107,12 +115,13 @@ def test_cost_forecast_safe_against_zero_cap() -> None:
     warn_threshold_reached stays False.
     """
     events = [
-        {"event": "usage_observed", "data": json.dumps({"type": "usage_observed", "cost_usd": 0.05})},
+        {
+            "event": "usage_observed",
+            "data": json.dumps({"type": "usage_observed", "cost_usd": 0.05}),
+        },
     ]
     out = _simulate_pump(events, max_cost_usd=0.0)
-    forecast = json.loads(
-        next(e for e in out if e["event"] == "cost_forecast")["data"]
-    )
+    forecast = json.loads(next(e for e in out if e["event"] == "cost_forecast")["data"])
     assert forecast["cost_usd_so_far"] == 0.05
     assert forecast["fraction_used"] is None
     assert forecast["warn_threshold_reached"] is False
@@ -124,7 +133,10 @@ def test_cost_forecast_ignores_unrelated_events() -> None:
     events = [
         {"event": "text_delta", "data": json.dumps({"type": "text_delta", "content": "hi"})},
         {"event": "span", "data": json.dumps({"type": "span", "subject": "tool_call"})},
-        {"event": "usage_observed", "data": json.dumps({"type": "usage_observed", "cost_usd": 0.01})},
+        {
+            "event": "usage_observed",
+            "data": json.dumps({"type": "usage_observed", "cost_usd": 0.01}),
+        },
         {"event": "turn_summary", "data": json.dumps({"type": "turn_summary", "cost_usd": 0.01})},
     ]
     out = _simulate_pump(events, max_cost_usd=0.25)
@@ -142,13 +154,9 @@ def test_production_emission_branch_matches_simulator() -> None:
 
     source = worker_mod.__file__
     assert source.endswith(".py")
-    with open(source, "r", encoding="utf-8") as fh:
-        body = fh.read()
+    body = Path(source).read_text(encoding="utf-8")
     assert "cost_forecast" in body, (
-        "agentic_worker no longer emits cost_forecast — Issue 9 SPA "
-        "layer regressed."
+        "agentic_worker no longer emits cost_forecast — Issue 9 SPA layer regressed."
     )
-    assert "warn_threshold_reached" in body, (
-        "cost_forecast event lost its 80% warn marker."
-    )
+    assert "warn_threshold_reached" in body, "cost_forecast event lost its 80% warn marker."
     assert "fraction_used" in body

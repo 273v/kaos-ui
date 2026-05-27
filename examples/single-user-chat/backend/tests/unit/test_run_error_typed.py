@@ -46,10 +46,7 @@ def test_budget_exceeded_body_maps_to_budget() -> None:
     body string is the load-bearing signal. Match the kaos-llm-core
     exception class name verbatim.
     """
-    assert (
-        classify_upstream_error(400, "BudgetExceeded: limit $0.25 exceeded")
-        == "budget"
-    )
+    assert classify_upstream_error(400, "BudgetExceeded: limit $0.25 exceeded") == "budget"
 
 
 @pytest.mark.unit
@@ -63,17 +60,13 @@ def test_circuit_breaker_body_maps_to_circuit_breaker() -> None:
 @pytest.mark.unit
 def test_tool_timeout_body_maps_to_tool_timeout() -> None:
     assert (
-        classify_upstream_error(400, "Tool kaos-web-fetch hit timeout after 30s")
-        == "tool_timeout"
+        classify_upstream_error(400, "Tool kaos-web-fetch hit timeout after 30s") == "tool_timeout"
     )
 
 
 @pytest.mark.unit
 def test_ungrounded_body_maps_to_grounding_refuse() -> None:
-    assert (
-        classify_upstream_error(400, "Refused: no_evidence in corpus")
-        == "grounding_refuse"
-    )
+    assert classify_upstream_error(400, "Refused: no_evidence in corpus") == "grounding_refuse"
 
 
 @pytest.mark.unit

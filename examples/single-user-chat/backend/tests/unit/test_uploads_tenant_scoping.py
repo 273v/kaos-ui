@@ -140,6 +140,5 @@ class TestReaderWriterAlignment:
         writer_prefix = _vfs_prefix(session_id, tenant_id)
 
         assert writer_prefix == reader_namespace, (
-            "writer prefix must equal reader namespace for any "
-            "bare-name tool lookup to succeed"
+            "writer prefix must equal reader namespace for any bare-name tool lookup to succeed"
         )

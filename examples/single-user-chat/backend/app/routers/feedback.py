@@ -122,9 +122,7 @@ async def submit_feedback(
     try:
         await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     # 2. Stamp the record server-side (never trust client clocks for
     #    audit). datetime.now(UTC) → ISO 8601 round-trip via pydantic.

@@ -36,8 +36,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,8 +48,9 @@ def test_corpus_markdown_omits_kaos_json_sidecar(monkeypatch: pytest.MonkeyPatch
     tried to feed it to kaos-content-stats; the tool then errored
     with "Unknown artifact" on a malpractice-grade surface.
     """
-    from kaos_ui.uploads import FileMeta, FileParseStatus
+    from kaos_ui.uploads import FileParseStatus
 
+    from app.models import FileMeta
     from app.services import uploads as uploads_mod
 
     fake_metas = [
@@ -58,8 +58,7 @@ def test_corpus_markdown_omits_kaos_json_sidecar(monkeypatch: pytest.MonkeyPatch
             filename="Toro 2022 Term Loan - Redline v1.docx",
             size_bytes=150_736,
             content_type=(
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document"
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ),
             uploaded_at=datetime.now(UTC),
             parse=FileParseStatus(status="ready"),
@@ -69,10 +68,7 @@ def test_corpus_markdown_omits_kaos_json_sidecar(monkeypatch: pytest.MonkeyPatch
         FileMeta(
             filename="states.xlsx",
             size_bytes=20_654,
-            content_type=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
-            ),
+            content_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             uploaded_at=datetime.now(UTC),
             parse=FileParseStatus(status="ready"),
         ),
@@ -105,8 +101,7 @@ def test_corpus_markdown_omits_kaos_json_sidecar(monkeypatch: pytest.MonkeyPatch
     )
     assert "sessions/01TESTSESSIONXXXXXXXXXX/files/states.xlsx" in markdown
     assert (
-        "sessions/01TESTSESSIONXXXXXXXXXX/files/Toro 2022 Term Loan - Redline v1.docx"
-        in markdown
+        "sessions/01TESTSESSIONXXXXXXXXXX/files/Toro 2022 Term Loan - Redline v1.docx" in markdown
     )
 
 
@@ -116,8 +111,9 @@ def test_corpus_markdown_omits_meta_json_sidecar(monkeypatch: pytest.MonkeyPatch
     also must not leak into the corpus markdown — same agent-confusion
     failure mode as ``.kaos.json``.
     """
-    from kaos_ui.uploads import FileMeta, FileParseStatus
+    from kaos_ui.uploads import FileParseStatus
 
+    from app.models import FileMeta
     from app.services import uploads as uploads_mod
 
     fake_metas = [

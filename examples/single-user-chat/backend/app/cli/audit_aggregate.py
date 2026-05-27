@@ -53,7 +53,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +163,7 @@ def _date_of_epoch(t: float | None) -> str | None:
     if t is None:
         return None
     try:
-        return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d")
+        return datetime.fromtimestamp(t, tz=UTC).strftime("%Y-%m-%d")
     except (TypeError, ValueError, OSError):
         return None
 
@@ -266,9 +266,7 @@ def _aggregate_run(
     )
 
 
-def aggregate(
-    vfs_root: Path, *, date: str, tenant_id: str | None = None
-) -> AggregateReport:
+def aggregate(vfs_root: Path, *, date: str, tenant_id: str | None = None) -> AggregateReport:
     """Walk the VFS and accumulate one audit row per completed turn
     that started on the target date.
 
@@ -341,9 +339,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = aggregate(vfs, date=args.date, tenant_id=args.tenant_id)
     if report.session_count == 0:
-        scope = (
-            f"tenant {args.tenant_id!r}" if args.tenant_id else "any tenant"
-        )
+        scope = f"tenant {args.tenant_id!r}" if args.tenant_id else "any tenant"
         print(
             f"warning: no sessions found under {vfs} for {scope}",
             file=sys.stderr,
