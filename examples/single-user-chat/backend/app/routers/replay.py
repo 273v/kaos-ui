@@ -100,24 +100,21 @@ async def replay_session(
     try:
         await store.get(session_id, tenant_id=tenant_id)
     except SessionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     # 2. Resolve persisted files.
     settings: AppSettings = request.app.state.app_settings
     runs_dir = _runs_dir(settings.vfs_path, session_id)
     files = _turn_files(runs_dir, turn)
     if not files:
-        detail = (
-            f"No persisted run events for session {session_id!r}"
-            + (f" at turn {turn}" if turn is not None else "")
+        detail = f"No persisted run events for session {session_id!r}" + (
+            f" at turn {turn}" if turn is not None else ""
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
     delay_seconds = delay_ms / 1000.0
 
-    async def generator() -> "asyncio.AsyncIterator[dict[str, str]]":
+    async def generator() -> asyncio.AsyncIterator[dict[str, str]]:
         # Header: tell the client what's about to flow so it can render
         # a banner / progress bar without parsing every line first.
         yield {

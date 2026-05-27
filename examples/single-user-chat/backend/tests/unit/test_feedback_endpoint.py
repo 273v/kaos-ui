@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
 _AUTH = "Bearer demo-token-must-be-at-least-32-chars-long-for-validation"
 
 
@@ -76,9 +75,7 @@ def test_feedback_up_appends_one_jsonl_line(
     body = r.json()
     assert "submitted_at" in body
 
-    log_path = (
-        tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
-    )
+    log_path = tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
     assert log_path.exists()
     lines = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
     assert len(lines) == 1
@@ -100,9 +97,7 @@ def test_feedback_down_with_note_persists_both(
         json={"value": "down", "note": "answer cited training memory, not the corpus"},
     )
     assert r.status_code == 202, r.text
-    log_path = (
-        tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
-    )
+    log_path = tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
     record = json.loads(log_path.read_text().splitlines()[0])
     assert record["value"] == "down"
     assert record["note"] == "answer cited training memory, not the corpus"
@@ -124,17 +119,13 @@ def test_repeated_feedback_appends_does_not_overwrite(
             json={"value": value},
         )
         assert r.status_code == 202
-    log_path = (
-        tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
-    )
+    log_path = tmp_path / ".kaos-vfs" / "single-user-chat" / "sessions" / sid / "feedback.jsonl"
     lines = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
     assert [r["value"] for r in lines] == ["up", "down", "up"]
 
 
 @pytest.mark.unit
-def test_feedback_rejects_unknown_value(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_feedback_rejects_unknown_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client, sid = _make_app(tmp_path, monkeypatch)
     r = client.post(
         f"/v1/chat/sessions/{sid}/messages/msg-4/feedback",

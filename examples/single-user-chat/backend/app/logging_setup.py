@@ -102,8 +102,7 @@ def configure(settings: AppSettings) -> None:
         # `[session=- trace=-]` propagation contract.
         handler.setFormatter(
             _HumanFormatter(
-                "%(asctime)s %(levelname)-7s %(name)s "
-                "[s=%(session_id)s t=%(trace_id)s] %(message)s"
+                "%(asctime)s %(levelname)-7s %(name)s [s=%(session_id)s t=%(trace_id)s] %(message)s"
             )
         )
     # #observability O0.1 — install ContextFilter so every log record

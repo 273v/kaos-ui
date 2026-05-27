@@ -15,10 +15,7 @@ from pathlib import Path
 
 import pytest
 
-
-_FIXTURE = Path(
-    "/home/mjbommar/projects/273v/kaos-office/tests/fixtures/xlsx/states.xlsx"
-)
+_FIXTURE = Path("/home/mjbommar/projects/273v/kaos-office/tests/fixtures/xlsx/states.xlsx")
 
 
 @pytest.mark.unit

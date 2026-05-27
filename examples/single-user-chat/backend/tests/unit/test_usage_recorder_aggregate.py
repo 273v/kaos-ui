@@ -3,7 +3,7 @@
 Pre-R2.3 (kaos-modules/docs/plans/2026-05-21-reliability-roadmap.md § R2.3),
 ``TurnUsageRecorder.snapshot()`` preferred ``turn_summary.cost_usd``
 (per-WORKER-iteration aggregate) over the running ``usage_observed`` sum.
-On critic-heavy turns this under-counted by 5-6× because GoalCheck / M2 /
+On critic-heavy turns this under-counted by 5-6x because GoalCheck / M2 /
 M3 / planner LLM calls fire OUTSIDE the worker's ``turn_summary`` and
 their cost ended up discarded.
 
@@ -94,7 +94,7 @@ class TestUsageSumFallback:
             {"cost_usd": 0.0022, "input_tokens": 20, "output_tokens": 15, "source": "planner"},
         )
 
-        cost, tokens = r.snapshot()
+        cost, _tokens = r.snapshot()
         # Sum of all four usage_observed events = 0.0091
         assert abs(cost - 0.0091) < 1e-9
         # Spot-check that this is the "true $0.0091 aggregate" the R2.3

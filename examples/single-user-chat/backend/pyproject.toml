@@ -77,7 +77,44 @@ dependencies = [
     # blocker plan §Issues 1+2+5+6+8+9 stack (matter_id, Runner-
     # default CircuitBreaker, ordinal coref, staleness gate, D3 URL
     # scrubber, per-tool cost cap; PR #69).
-    "kaos-agents>=0.1.11,<0.2",
+    # 2026-05-23: bumped floor to 0.1.14 — create_app(context_factory=...)
+    # threads the per-session ``KaosContext`` factory through to every
+    # per-request Runner the FastAPI handlers construct. Removes the
+    # last app/main.py monkey-patch on ``Runner.__init__`` —
+    # ``create_agent_app(runtime=runtime, context_factory=_spa_context_factory(runtime))``
+    # is now the supported public path.
+    # 2026-05-24: bumped floor to 0.1.15 — Playwright-default citation
+    # verifier (task #634). ``kaos_agents.citations.verifier`` now routes
+    # CourtListener lookups through kaos-web's BrowserClient when
+    # [browser] is installed (the SPA pins [browser] below). Opt-out via
+    # KAOS_AGENT_CITATION_VERIFIER_USE_BROWSER=0.
+    # 2026-05-24: bumped floor to 0.1.16 — corpus-stress P0 fixes
+    # (kaos-modules/docs/plans/2026-05-24-corpus-stress-suite-followup.md):
+    # (P0.2) ToolFitnessSignature gains a scale-aware ``corpus_size: int``
+    # input so the M1 ranker prefers corpus aggregators
+    # (kaos-agent-findings / kaos-agent-corpus-filter /
+    # kaos-content-search-document) over per-doc parsers when the deal
+    # room has >=20 documents; (P0.3) new
+    # ``KaosAgentSettings.chat_max_cost_usd: float | None = None`` cost
+    # cap with env override ``KAOS_AGENT_CHAT_MAX_COST_USD`` — typed
+    # BudgetExceeded(kind="chat_cost") + refusal TextDelta on cap
+    # exceeded (mirrors plan_max_cost_usd for the ChatAgent path);
+    # (P0.4) new M4 silent-incompleteness critic
+    # (``kaos_agents.planning.m4_completeness`` + new
+    # ``KaosAgentSettings.m4_completeness_model: str | None = None`` with
+    # env override ``KAOS_AGENT_M4_COMPLETENESS_MODEL``) composes the
+    # generic JudgeSignature with a COMPLETENESS rubric; fires after
+    # M3 grounding inside AgenticLoop. All three default to safe-no-
+    # behavior-change values — existing SPA backend sessions see no
+    # change unless the operator opts in via env.
+    # 2026-05-26: bumped floor to 0.1.21 — adds the OCR fallback in
+    # _build_corpus_view_from_documents (corpus-stress S03 cascade
+    # closure). FindingsAgent's eager pre-parse on a scanned PDF now
+    # falls through to Tesseract when parse_pdf_bytes returns empty
+    # body, recovering text so the agent can ground rather than emit
+    # "(empty)". Requires kaos-pdf[ocr]>=0.1.4 (pytesseract) to
+    # activate — see the kaos-pdf line below.
+    "kaos-agents>=0.1.21,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the
@@ -118,7 +155,14 @@ dependencies = [
     # DocumentView numbering-label preservation; kaos-pdf a7 ships
     # the structural-breadcrumbs path field on search-document hits.
     "kaos-content[markdown]>=0.1.0,<0.2",
-    "kaos-pdf>=0.1.0,<0.2",
+    # 2026-05-26: bumped to 0.1.4 + [ocr] extra. 0.1.4 ships the
+    # kaos-pdf-ocr-page MCP tool (Tesseract single-page OCR); the
+    # [ocr] extra pulls pytesseract so kaos-agents 0.1.21+'s OCR
+    # fallback in _build_corpus_view_from_documents can activate on
+    # scanned PDFs uploaded through the SPA (corpus-stress S03).
+    # System tesseract binary still required on host — see
+    # README install notes.
+    "kaos-pdf[ocr]>=0.1.4,<0.2",
     "kaos-office>=0.1.0,<0.2",
     # P2-1: legal citation extraction (60 typed Bluebook + financial + accounting kinds).
     "kaos-citations>=0.1.0,<0.2",
@@ -131,7 +175,11 @@ dependencies = [
     # Full bodies now addressable via structured_content.artifact_id.
     # 2026-05-18: bumped to 0.1.0a9 — VFS-FIX Stage 4 (path-resolution
     # helper + SES2 fetch-url remediation hint) now on PyPI.
-    "kaos-source>=0.1.0,<0.2",
+    # 2026-05-24: bumped to >=0.1.2 — kaos-source-fetch-url now defaults
+    # to Playwright (task #634) so the agent surface is uniform with
+    # kaos-web's fetch tools. use_browser=None auto-detects [browser];
+    # explicit False opts back into bare httpx for known-clean hosts.
+    "kaos-source>=0.1.2,<0.2",
     # P2-1c: web fetch + browser (Playwright) + netinfra (DNS / WHOIS /
     # TLS / TCP / UDP). 45 tools; browser tagged ["browser"], netinfra
     # tagged ["netinfra"] for the SessionPolicy derivation.
@@ -144,7 +192,18 @@ dependencies = [
     # SPA falls back to bare httpx and SEC.gov / Cloudflare / etc.
     # silently 403 the agent. Deploy must run
     # ``uv run playwright install chromium`` once after sync.
-    "kaos-web[browser]>=0.1.5,<0.2",
+    # 2026-05-24: bump to >=0.1.8 — the MCP tool schemas now default
+    # use_browser=None (auto-picks Playwright) AND _fetch_html sniffs
+    # response bodies for anti-bot interstitial fingerprints (FR /
+    # eCFR "Request Access", Cloudflare, datadome, Akamai, PerimeterX)
+    # and auto-retries on Playwright. Closes the silent-200 fabrication
+    # path observed on 2026-05-23 FR climate-disclosure session.
+    # 2026-05-24: bump to >=0.1.9 — Playwright-default contract extended
+    # to the 3 crawl/discovery MCP tools (kaos-web-discover-urls,
+    # kaos-web-batch-fetch, kaos-web-crawl-site) AND the public
+    # batch_fetch() / crawl_site() Python API. Completes the
+    # kaos-web side of task #634.
+    "kaos-web[browser]>=0.1.9,<0.2",
     # P2-1d: kaos-nlp-core content_type classifier — magic-byte
     # detection feeds the AgenticLoop's corpus_kinds Signature input.
     "kaos-nlp-core>=0.1.0,<0.2",

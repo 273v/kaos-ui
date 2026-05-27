@@ -14,7 +14,6 @@ ContextFilter, and the dev format string includes them.
 
 from __future__ import annotations
 
-import io
 import logging
 
 import pytest
@@ -119,6 +118,5 @@ def test_context_filter_installed_on_handler() -> None:
     root_handlers = logging.getLogger().handlers
     filters_across_handlers = [f for h in root_handlers for f in h.filters]
     assert any(isinstance(f, ContextFilter) for f in filters_across_handlers), (
-        "ContextFilter not installed on any root handler — observability "
-        "O0.1 regression"
+        "ContextFilter not installed on any root handler — observability O0.1 regression"
     )

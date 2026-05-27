@@ -32,6 +32,7 @@ from typing import Any
 
 from kaos_agents.api.settings import scope_session_id
 from kaos_core import KaosRuntime
+from kaos_core.types.enums import ArtifactRetentionPolicy, ArtifactRole
 
 from app.exceptions import AppError
 from app.logging_setup import app_logger
@@ -143,6 +144,48 @@ def _vfs_prefix(session_id: str, tenant_id: str | None = None) -> str:
     """Compute the on-disk VFS prefix for all uploads in one session."""
     scoped = _scoped_session_prefix(session_id, tenant_id)
     return f"sessions/{scoped}/files/"
+
+
+def _sidecar_path(
+    session_id: str, filename: str, suffix: str, *, tenant_id: str | None = None
+) -> str:
+    """Compute the on-disk path for one upload sidecar.
+
+    ``suffix`` is the literal trailing segment (``".kaos.json"`` for the
+    parsed AST sidecar, ``".meta.json"`` for the FileMeta sidecar).
+    Sidecars live OFF the agent-visible ``sessions/{scoped}/files/``
+    namespace so ``kaos-core-vfs-list`` doesn't surface them as picks
+    on retries (#583 — the root cause of the T6 broad-reliability
+    Chrome MCP matrix failure where the agent fed
+    ``Toro....docx.kaos.json`` to the PDF parser). The SPA reads
+    sidecars directly via ``runtime.vfs.read`` at this exact path so
+    nothing internal breaks; the legacy in-tree path
+    (``sessions/{scoped}/files/{filename}{suffix}``) is still consulted
+    by the read helpers as a backward-compat fallback so pre-refactor
+    sessions continue to load.
+    """
+    scoped = _scoped_session_prefix(session_id, tenant_id)
+    return f"sidecars/{scoped}/{filename}{suffix}"
+
+
+def _sidecar_prefix(session_id: str, tenant_id: str | None = None) -> str:
+    """Compute the sidecar prefix for one session (parallel to ``_vfs_prefix``)."""
+    scoped = _scoped_session_prefix(session_id, tenant_id)
+    return f"sidecars/{scoped}/"
+
+
+def _legacy_sidecar_path(
+    session_id: str, filename: str, suffix: str, *, tenant_id: str | None = None
+) -> str:
+    """Compute the pre-#583 in-tree sidecar path for backward-compat reads.
+
+    Pre-refactor sidecars co-located with the original under
+    ``sessions/{scoped}/files/{filename}{suffix}``. Readers (list,
+    backfill, file fetch, delete) consult this path when the new
+    out-of-tree location is empty so existing sessions don't lose
+    their parsed AST / meta sidecars after the upgrade.
+    """
+    return f"{_vfs_path(session_id, filename, tenant_id=tenant_id)}{suffix}"
 
 
 # ── parser dispatch ────────────────────────────────────────────────
@@ -482,6 +525,75 @@ def _serialize_doc(doc: Any) -> bytes:
     )
 
 
+# ── artifact registration ──────────────────────────────────────────
+
+
+async def _register_ast_artifact(
+    *,
+    runtime: KaosRuntime,
+    ast_sidecar_path: str,
+    session_id: str,
+    tenant_id: str | None,
+    filename: str,
+    vfs_path: str,
+    ext: str,
+) -> str | None:
+    """Register a parsed ContentDocument JSON sidecar as a kaos-core artifact.
+
+    Returns the bare ``artifact_id`` (a UUID — NOT the
+    ``kaos://artifacts/<id>`` URI) on success, or ``None`` if the
+    registration raised. Best-effort by contract: the upload pipeline
+    keeps going on failure because the file bytes + .kaos.json sidecar
+    are already persisted; the agent's fallback path is to call
+    ``kaos-office-parse-docx`` / ``kaos-pdf-extract-parse`` itself,
+    which returns a fresh artifact_id via the parse tool's
+    structuredContent.
+
+    Why pre-registering matters: kaos-content tools
+    (``kaos-content-search-document`` /
+    ``kaos-content-stats`` /
+    ``kaos-content-corpus-summarize``) resolve their ``artifact_id``
+    argument through ``runtime.artifacts.get(...)`` which raises
+    ``ResourceError("Unknown artifact", ...)`` when the id isn't
+    indexed. Pre-fix, the SPA wrote the .kaos.json sidecar to the VFS
+    but never registered it, so every NDA-Q&A turn errored out at the
+    first content-tool call. With the manifest indexed up front, the
+    agent's preferred direct-search path works.
+    """
+    scoped_session = _scoped_session_prefix(session_id, tenant_id)
+    try:
+        manifest = await runtime.artifacts.create_from_path(
+            ast_sidecar_path,
+            context_id=scoped_session,
+            session_id=scoped_session,
+            name=filename,
+            mime_type="application/json",
+            description=f"ContentDocument JSON for {filename}",
+            role=ArtifactRole.BODY,
+            provenance={
+                "source_filename": filename,
+                "source_vfs_path": vfs_path,
+                "ext": ext,
+                "uploaded_at": datetime.now(UTC).isoformat(),
+            },
+            retention_policy=ArtifactRetentionPolicy.SESSION,
+            metadata={"upload_source": "spa", "session_id": session_id},
+        )
+    except Exception as exc:
+        logger.warning(
+            "artifact registration failed for session=%s file=%s ast_path=%s: %s — "
+            "upload proceeds but agent's direct kaos-content-* path will fall back "
+            "to re-parsing from bytes on each call",
+            session_id,
+            filename,
+            ast_sidecar_path,
+            exc,
+            extra={"session_id": session_id, "upload_filename": filename},
+        )
+        return None
+    return manifest.artifact_id
+
+
 # ── public entrypoint ──────────────────────────────────────────────
 
 
@@ -551,13 +663,34 @@ async def store_and_parse(
     # 3. Persist the parsed AST sidecar (only on success).
     token_count: int | None = None
     summary: str | None = None
+    artifact_id_value: str | None = None
     parse_flags: dict[str, bool] = {
         "ocr_applied": False,
         "track_changes_detected": False,
     }
     if parsed_doc is not None and parse_status.status == "ready":
         ast_bytes = _serialize_doc(parsed_doc)
-        await vfs.write(f"{vfs_path}.kaos.json", ast_bytes)
+        ast_sidecar_path = _sidecar_path(session_id, filename, ".kaos.json", tenant_id=tenant_id)
+        await vfs.write(ast_sidecar_path, ast_bytes)
+        # Register the parsed ContentDocument as a kaos-core artifact so
+        # kaos-content tools (search-document / stats / corpus-summarize)
+        # can resolve the document by ``artifact_id`` without the agent
+        # having to re-parse the underlying .docx / .pdf on every call.
+        # The artifact body lives at the same VFS path as the .kaos.json
+        # sidecar; ``create_from_path`` wraps it with a manifest the
+        # artifact store can index. Wrapped in try/except so a transient
+        # artifact-store failure doesn't break the upload — the file
+        # bytes + .kaos.json sidecar are still persisted and the agent
+        # can fall back to parse-then-search instead of direct search.
+        artifact_id_value = await _register_ast_artifact(
+            runtime=runtime,
+            ast_sidecar_path=ast_sidecar_path,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            filename=filename,
+            vfs_path=vfs_path,
+            ext=ext,
+        )
         # B0.4 / B0.5: inspect the parsed doc for OCR provenance + DOCX
         # tracked-change annotations so the UI can render an honest
         # parse-mode banner.
@@ -581,9 +714,11 @@ async def store_and_parse(
         summary=summary,
         ocr_applied=parse_flags["ocr_applied"],
         track_changes_detected=parse_flags["track_changes_detected"],
+        artifact_id=artifact_id_value,
     )
     meta_bytes = meta.model_dump_json().encode("utf-8")
-    await vfs.write(f"{vfs_path}.meta.json", meta_bytes)
+    meta_sidecar_path = _sidecar_path(session_id, filename, ".meta.json", tenant_id=tenant_id)
+    await vfs.write(meta_sidecar_path, meta_bytes)
 
     # #589 / B1.6 — write the corpus headline into the agent's
     # ``SessionMemory.DOCUMENTS`` section so ``corpus_ever_attached``
@@ -601,9 +736,9 @@ async def store_and_parse(
     # the memory entry is missing. Log + continue.
     if parse_status.status == "ready":
         try:
+            from kaos_agents.api.settings import scope_session_id
             from kaos_agents.memory.store import SessionStore
             from kaos_agents.types.memory import MemoryType
-            from kaos_agents.api.settings import scope_session_id
 
             effective_sid = scope_session_id(session_id, tenant_id)
             store = SessionStore(runtime.vfs)
@@ -677,9 +812,28 @@ async def backfill_session_files(
     """
     from kaos_content import ContentDocument
 
-    prefix = _vfs_prefix(session_id, tenant_id)
-    paths = sorted(await runtime.vfs.list(prefix))
-    meta_paths = [p for p in paths if p.endswith(".meta.json")]
+    # Collect meta-sidecar paths from BOTH the new out-of-tree
+    # ``sidecars/{scoped}/`` location and the legacy in-tree
+    # ``sessions/{scoped}/files/`` location so pre-#583 sessions still
+    # backfill cleanly. Dedup by basename so a single file isn't
+    # processed twice when both locations carry the same sidecar.
+    new_prefix = _sidecar_prefix(session_id, tenant_id)
+    legacy_prefix = _vfs_prefix(session_id, tenant_id)
+    meta_paths: list[str] = []
+    seen_basenames: set[str] = set()
+    for prefix in (new_prefix, legacy_prefix):
+        try:
+            for p in sorted(await runtime.vfs.list(prefix)):
+                if not p.endswith(".meta.json"):
+                    continue
+                basename = p.rsplit("/", 1)[-1]
+                if basename in seen_basenames:
+                    continue
+                seen_basenames.add(basename)
+                meta_paths.append(p)
+        except Exception:
+            # A missing prefix on a fresh deployment is normal.
+            continue
     updated = 0
     for meta_path in meta_paths:
         try:
@@ -694,6 +848,10 @@ async def backfill_session_files(
         if not overwrite and meta.token_count is not None and meta.summary is not None:
             continue
         # AST sidecar path: strip the trailing .meta.json + add .kaos.json.
+        # The two siblings always live in the same directory regardless
+        # of whether we're in the new ``sidecars/`` tree or the legacy
+        # ``sessions/{scoped}/files/`` tree, so a literal in-place
+        # extension swap is correct for both.
         ast_path = meta_path[: -len(".meta.json")] + ".kaos.json"
         try:
             ast_raw = await runtime.vfs.read(ast_path)
@@ -717,6 +875,77 @@ async def backfill_session_files(
     return updated
 
 
+async def _backfill_artifact_id_if_missing(
+    *,
+    runtime: KaosRuntime,
+    meta: FileMeta,
+    meta_path: str,
+    session_id: str,
+    tenant_id: str | None,
+) -> FileMeta:
+    """If ``meta.artifact_id`` is None and a parsed .kaos.json sidecar
+    exists alongside ``meta_path``, register an artifact for it now
+    and rewrite the .meta.json sidecar with the new id.
+
+    Idempotent: once registered, future reads hit the populated id and
+    skip the backfill. Defensive: any failure (sidecar missing,
+    artifact-store error, meta rewrite error) logs a warning and
+    returns the original meta unchanged — the list endpoint must
+    never 500 because a single file's backfill failed.
+
+    Only runs when ``meta.parse.status == "ready"`` (a failed parse
+    has no .kaos.json sidecar to register).
+    """
+    if meta.artifact_id is not None or meta.parse.status != "ready":
+        return meta
+    # ``meta_path`` ends in ``.meta.json``; the .kaos.json sibling
+    # lives in the same directory regardless of whether we're under
+    # the new ``sidecars/{scoped}/`` tree or the legacy
+    # ``sessions/{scoped}/files/`` tree — same swap pattern the
+    # backfill_session_files helper uses.
+    ast_path = meta_path[: -len(".meta.json")] + ".kaos.json"
+    try:
+        if not await runtime.vfs.exists(ast_path):
+            return meta
+    except Exception as exc:
+        logger.warning(
+            "artifact_id backfill: vfs.exists(%s) raised %s — skipping",
+            ast_path,
+            exc,
+            extra={"session_id": session_id, "meta_path": meta_path},
+        )
+        return meta
+    ext = Path(meta.filename).suffix.lower()
+    vfs_path = _vfs_path(session_id, meta.filename, tenant_id=tenant_id)
+    artifact_id_value = await _register_ast_artifact(
+        runtime=runtime,
+        ast_sidecar_path=ast_path,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        filename=meta.filename,
+        vfs_path=vfs_path,
+        ext=ext,
+    )
+    if artifact_id_value is None:
+        return meta
+    updated = meta.model_copy(update={"artifact_id": artifact_id_value})
+    try:
+        await runtime.vfs.write(meta_path, updated.model_dump_json().encode("utf-8"))
+    except Exception as exc:
+        logger.warning(
+            "artifact_id backfill: meta sidecar rewrite failed for %s: %s — "
+            "artifact remains registered in-memory but the id will not survive "
+            "a backend restart; next list call will re-register",
+            meta_path,
+            exc,
+            extra={"session_id": session_id, "meta_path": meta_path},
+        )
+        # Even if the rewrite fails, the in-memory store has the
+        # manifest indexed for this process — return the updated meta
+        # so the response carries the id.
+    return updated
+
+
 async def list_session_files(
     *,
     runtime: KaosRuntime,
@@ -725,27 +954,57 @@ async def list_session_files(
 ) -> list[FileMeta]:
     """Return the FileMeta for every uploaded file in the session.
 
-    Walks the VFS prefix ``sessions/{id}/files/`` and reads each
-    ``*.meta.json`` sidecar. Files whose meta sidecar is missing or
-    unreadable are skipped (defensive — old or partially-written
-    uploads shouldn't 500 the list endpoint).
+    Walks both the new out-of-tree ``sidecars/{scoped}/`` prefix and
+    the legacy in-tree ``sessions/{scoped}/files/`` prefix, reading
+    every ``*.meta.json`` sidecar. New writes go to the out-of-tree
+    location (#583); we still read the legacy location so existing
+    sessions don't lose their file lists after the upgrade. Files
+    whose meta sidecar is missing or unreadable are skipped
+    (defensive — old or partially-written uploads shouldn't 500 the
+    list endpoint).
+
+    For sessions whose meta sidecars predate the ``artifact_id``
+    field, opportunistically register the .kaos.json sidecar as a
+    kaos-core artifact (so kaos-content tools can resolve it by id)
+    and rewrite the meta sidecar with the freshly-allocated id.
+    Best-effort — see :func:`_backfill_artifact_id_if_missing`.
     """
-    prefix = _vfs_prefix(session_id, tenant_id)
-    paths = await runtime.vfs.list(prefix)
+    new_prefix = _sidecar_prefix(session_id, tenant_id)
+    legacy_prefix = _vfs_prefix(session_id, tenant_id)
     out: list[FileMeta] = []
-    for path in sorted(paths):
-        if not path.endswith(".meta.json"):
-            continue
+    seen_basenames: set[str] = set()
+    for prefix in (new_prefix, legacy_prefix):
         try:
-            raw = await runtime.vfs.read(path)
-            out.append(FileMeta.model_validate_json(raw))
-        except Exception as exc:
-            logger.warning(
-                "skipping unreadable meta sidecar path=%s: %s",
-                path,
-                exc,
-                extra={"session_id": session_id, "meta_path": path},
+            paths = await runtime.vfs.list(prefix)
+        except Exception:
+            continue
+        for path in sorted(paths):
+            if not path.endswith(".meta.json"):
+                continue
+            basename = path.rsplit("/", 1)[-1]
+            if basename in seen_basenames:
+                # New-location sidecar wins; skip the legacy duplicate.
+                continue
+            seen_basenames.add(basename)
+            try:
+                raw = await runtime.vfs.read(path)
+                meta = FileMeta.model_validate_json(raw)
+            except Exception as exc:
+                logger.warning(
+                    "skipping unreadable meta sidecar path=%s: %s",
+                    path,
+                    exc,
+                    extra={"session_id": session_id, "meta_path": path},
+                )
+                continue
+            meta = await _backfill_artifact_id_if_missing(
+                runtime=runtime,
+                meta=meta,
+                meta_path=path,
+                session_id=session_id,
+                tenant_id=tenant_id,
             )
+            out.append(meta)
     return out
 
 
@@ -841,6 +1100,25 @@ async def render_session_corpus_markdown(
             f"- content_type: {meta.content_type or 'unknown'}",
             f"- VFS bytes: `{vfs_path}`",
         ]
+        if meta.artifact_id:
+            # Surface the pre-registered ContentDocument artifact_id so
+            # the agent can call ``kaos-content-search-document`` /
+            # ``kaos-content-stats`` / ``kaos-content-corpus-summarize``
+            # DIRECTLY without first re-parsing the .docx/.pdf into a
+            # fresh artifact via ``kaos-office-parse-docx`` /
+            # ``kaos-pdf-extract-parse``. The bare id (a bare UUID) is
+            # what the tool accepts. gpt-5.4-mini has been observed
+            # prepending ``kaos://artifacts/`` to the id (the URI scheme,
+            # not the id) and getting an "Unknown artifact" error back —
+            # call that out explicitly so the model picks the right
+            # surface on the first try.
+            header_lines.append(
+                f"- artifact_id: `{meta.artifact_id}` "
+                f"(pass DIRECTLY to kaos-content-search-document / "
+                f"kaos-content-stats / kaos-content-corpus-summarize — "
+                f"do NOT prepend `kaos://artifacts/`, that's the URI scheme, "
+                f"not the id)."
+            )
         if meta.parse.status != "ready":
             header_lines.append(
                 f"- parse: FAILED ({meta.parse.error or 'unknown'}) — "
@@ -876,8 +1154,16 @@ async def read_session_file(
     """
     safe = _safe_filename(filename)
     base = _vfs_path(session_id, safe, tenant_id=tenant_id)
-    meta_path = f"{base}.meta.json"
-    if not await runtime.vfs.exists(meta_path):
+    # Prefer the new out-of-tree sidecar; fall back to the legacy
+    # in-tree location so existing sessions don't 404 after the #583
+    # refactor migrated new writes off ``sessions/{scoped}/files/``.
+    new_meta_path = _sidecar_path(session_id, safe, ".meta.json", tenant_id=tenant_id)
+    legacy_meta_path = _legacy_sidecar_path(session_id, safe, ".meta.json", tenant_id=tenant_id)
+    if await runtime.vfs.exists(new_meta_path):
+        meta_path = new_meta_path
+    elif await runtime.vfs.exists(legacy_meta_path):
+        meta_path = legacy_meta_path
+    else:
         raise FileNotFoundError(
             what=f"no file {filename!r} in session {session_id}",
             how_to_fix="check GET /v1/chat/sessions/{id}/files for valid names",
@@ -909,18 +1195,34 @@ async def delete_session_file(
     """
     safe = _safe_filename(filename)
     base = _vfs_path(session_id, safe, tenant_id=tenant_id)
-    meta_path = f"{base}.meta.json"
+    new_meta_path = _sidecar_path(session_id, safe, ".meta.json", tenant_id=tenant_id)
+    new_ast_path = _sidecar_path(session_id, safe, ".kaos.json", tenant_id=tenant_id)
+    legacy_meta_path = _legacy_sidecar_path(session_id, safe, ".meta.json", tenant_id=tenant_id)
+    legacy_ast_path = _legacy_sidecar_path(session_id, safe, ".kaos.json", tenant_id=tenant_id)
 
-    if not await runtime.vfs.exists(meta_path):
+    # The new out-of-tree meta sidecar OR the legacy in-tree one
+    # confirms existence — delete must clean up whichever path the
+    # upload actually used.
+    has_new_meta = await runtime.vfs.exists(new_meta_path)
+    has_legacy_meta = await runtime.vfs.exists(legacy_meta_path)
+    if not has_new_meta and not has_legacy_meta:
         raise FileNotFoundError(
             what=f"no file {filename!r} in session {session_id}",
             how_to_fix="check GET /v1/chat/sessions/{id}/files for valid names",
         )
 
-    for path in (base, f"{base}.kaos.json"):
+    # Delete bytes + every sidecar that exists (best-effort on the AST
+    # siblings; a missing AST sibling is normal when the parse failed).
+    cleanup_paths = (
+        base,
+        new_ast_path,
+        legacy_ast_path,
+        new_meta_path,
+        legacy_meta_path,
+    )
+    for path in cleanup_paths:
         if await runtime.vfs.exists(path):
             await runtime.vfs.delete(path)
-    await runtime.vfs.delete(meta_path)
     logger.info(
         "deleted upload session=%s file=%s",
         session_id,

@@ -109,9 +109,7 @@ class SessionStore:
         data = meta.model_dump_json().encode("utf-8")
         await self._vfs.write(path, data)
 
-    async def _read_meta(
-        self, session_id: str, *, tenant_id: str | None = None
-    ) -> SessionMeta:
+    async def _read_meta(self, session_id: str, *, tenant_id: str | None = None) -> SessionMeta:
         path = self._meta_path(session_id, tenant_id=tenant_id)
         if not await self._vfs.exists(path):
             raise SessionNotFoundError(
@@ -191,9 +189,7 @@ class SessionStore:
         await self._write_meta(meta, tenant_id=tenant_id)
         return meta
 
-    async def get(
-        self, session_id: str, *, tenant_id: str | None = None
-    ) -> SessionMeta:
+    async def get(self, session_id: str, *, tenant_id: str | None = None) -> SessionMeta:
         return await self._read_meta(session_id, tenant_id=tenant_id)
 
     async def list(
@@ -428,9 +424,7 @@ class SessionStore:
         await self._write_meta(new_meta, tenant_id=tenant_id)
         return new_meta
 
-    async def archive(
-        self, session_id: str, *, tenant_id: str | None = None
-    ) -> datetime:
+    async def archive(self, session_id: str, *, tenant_id: str | None = None) -> datetime:
         """Move metadata under archived/. Idempotent."""
         import contextlib
 

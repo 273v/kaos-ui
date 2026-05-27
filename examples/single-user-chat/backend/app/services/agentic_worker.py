@@ -259,9 +259,7 @@ def make_worker(
                         "data": json.dumps(
                             {
                                 "type": "cost_forecast",
-                                "cost_usd_so_far": round(
-                                    usage_sum_cost_usd, 6
-                                ),
+                                "cost_usd_so_far": round(usage_sum_cost_usd, 6),
                                 "max_cost_usd": max_cost_usd,
                                 "fraction_used": (
                                     round(usage_sum_cost_usd / max_cost_usd, 4)

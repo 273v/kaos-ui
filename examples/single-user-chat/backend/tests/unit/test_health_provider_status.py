@@ -85,6 +85,7 @@ def test_health_degraded_when_no_providers(
             monkeypatch.delenv(v, raising=False)
 
     from fastapi.testclient import TestClient
+
     from app.main import create_app
 
     client = TestClient(create_app())
@@ -112,6 +113,7 @@ def test_health_ok_when_at_least_one_provider(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     from fastapi.testclient import TestClient
+
     from app.main import create_app
 
     client = TestClient(create_app())

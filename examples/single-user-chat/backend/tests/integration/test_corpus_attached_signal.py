@@ -27,10 +27,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
-_FIXTURE = Path(
-    "/home/mjbommar/projects/273v/kaos-office/tests/fixtures/xlsx/states.xlsx"
-)
+_FIXTURE = Path("/home/mjbommar/projects/273v/kaos-office/tests/fixtures/xlsx/states.xlsx")
 _AUTH = "Bearer demo-token-must-be-at-least-32-chars-long-for-validation"
 
 
@@ -57,6 +54,7 @@ def test_upload_writes_to_session_memory_documents(
 
     # Drop cached app module so the next import sees fresh env.
     import sys
+
     for mod in list(sys.modules):
         if mod.startswith("app."):
             del sys.modules[mod]
@@ -94,9 +92,10 @@ def test_upload_writes_to_session_memory_documents(
     import asyncio
 
     async def _check():
-        from kaos_agents.memory.store import SessionStore
         from kaos_agents.api.settings import scope_session_id
+        from kaos_agents.memory.store import SessionStore
         from kaos_agents.types.memory import MemoryType
+
         runtime = app.state.kaos_runtime
         # Upload handler computes tenant_id via require_auth →
         # ``app.state.api_settings.tenant_id()`` (sha256(token)[:12])

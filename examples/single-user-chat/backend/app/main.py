@@ -27,35 +27,15 @@ import contextlib
 
 import httpx
 from kaos_agents.api.server import create_app as create_agent_app
-
-# ---------------------------------------------------------------------------
-# URI contract redesign (kaos-core 0.1.0a10) — Stage 3 wiring.
-# The SPA uploads files into ``sessions/<sid>/files/<name>``. The 0.1.0a10
-# resolver routes bare-name tool inputs through ``context.default_vfs_namespace``,
-# so every KaosContext built downstream by kaos-agents must carry "files/" for
-# the agent's bare-name lookups to land. kaos-agents 0.1.0a14 doesn't yet
-# construct a per-session KaosContext with the host's namespace (will ship in
-# 0.1.0a15+); until then we patch ``KaosContext.__init__`` to default the
-# namespace to "files/" when the caller doesn't supply one. Idempotent.
-# ---------------------------------------------------------------------------
-# kaos-agents Runner only builds a KaosContext when ``corpus`` is set; for
-# normal chat turns it passes ``context=None`` to ``bridge_runtime_tools``,
-# which means tools fall back to a runtime-less stub context with no VFS.
-# Patch the internal-agent builder to materialise a real session-scoped
-# context with ``default_vfs_namespace`` set to the SPA upload prefix so
-# file-input tools resolve bare names like ``"EMNA Mutual NDA.docx"`` to
-# the on-disk session VFS at ``sessions/<sid>/files/<name>``.
-#
-# Because the SPA runtime VFS uses GLOBAL isolation (see
-# build_chat_runtime), context_id is NOT prepended automatically — the
-# session prefix has to be in the namespace string itself.
-#
-# Will be obsolete once kaos-agents 0.1.0a15 builds the per-session
-# context natively + the SPA backend switches to PER_CONTEXT isolation.
-from kaos_agents.runtime.runner import Runner as _Runner
-from kaos_core.base.context import KaosContext as _KaosContext
+from kaos_core.base.context import KaosContext
 from kaos_ui.agents import build_chat_runtime
 
+# Note: app._request_ctx.current_tenant_id is no longer read by the
+# context_factory below — kaos-agents already scopes session_id via
+# scope_session_id() before invoking the factory, so the on-disk path
+# layout is encoded into session_id itself. The ContextVar plumbing in
+# app/routers/chat.py still sets/resets the value for any other code
+# that wants per-request tenant introspection (e.g. logging, telemetry).
 from app.logging_setup import app_logger, configure
 from app.persistence.sessions import SessionStore
 from app.routers import (
@@ -68,88 +48,61 @@ from app.routers import (
     models,
     replay,
     runs,
+    vfs,
 )
 from app.settings import AppSettings
 
-if not getattr(_Runner, "_spa_context_injection_patch_applied", False):
-    _original_build_internal = _Runner._build_internal_agent
 
-    def _patched_build_internal(self, session_id, *args, **kwargs):  # type: ignore[no-untyped-def]
-        # Always construct a fresh per-session context so the namespace
-        # tracks the request's session_id. SPA uploads land at
-        # ``sessions/<sid>/files/<name>`` on disk (global-isolation VFS).
-        if self._runtime is not None:
-            namespace = f"sessions/{session_id}/files/"
-            self._context = _KaosContext(
-                session_id=session_id,
-                runtime=self._runtime,
-                vfs=self._runtime.vfs,
-                default_vfs_namespace=namespace,
-            )
-        return _original_build_internal(self, session_id, *args, **kwargs)
+# ---------------------------------------------------------------------------
+# Per-session ``KaosContext`` factory. The SPA writes uploads into a
+# tenant-scoped namespace (``sessions/{tenant}:{sid}/files/`` under bearer
+# auth, or ``sessions/{sid}/files/`` in localhost-dev mode — see
+# ``app/services/uploads.py::_scoped_session_prefix``). Tool calls that
+# accept bare filenames need the same namespace on
+# ``context.default_vfs_namespace`` for kaos-core's path resolver to land
+# at the on-disk file.
+#
+# kaos-agents 0.1.14 threads this factory through
+# :func:`kaos_agents.api.server.create_app` and stores it on
+# ``app.state.context_factory``; the per-request ``Runner(...)``
+# constructions at ``/v1/sessions/{id}/messages`` and
+# ``/v1/sessions/{id}/runs/{rid}/resume`` both pick it up automatically.
+# No host-side patching of Runner internals is required — the
+# kaos-agents server picks the factory off ``app.state`` itself.
+# ---------------------------------------------------------------------------
+def _spa_context_factory(runtime):  # type: ignore[no-untyped-def]
+    """Return a ``(session_id) -> KaosContext`` factory closing over ``runtime``.
 
-    _Runner._build_internal_agent = _patched_build_internal  # ty: ignore[invalid-assignment]
-    _Runner._spa_context_injection_patch_applied = True  # ty: ignore[unresolved-attribute]
+    The session_id passed in is already in its on-disk-scoped form
+    (``{tenant}:{raw_sid}`` under bearer auth, just ``{raw_sid}`` in
+    localhost-dev mode) because kaos-agents' route handlers run
+    ``scope_session_id(raw_sid, tenant_id)`` before constructing the
+    per-request Runner. So we just plug session_id into the namespace
+    string verbatim and let kaos-core's path resolver land at the
+    on-disk file.
+    """
 
+    def _factory(session_id: str) -> KaosContext:
+        # kaos-agents' ``/v1/sessions/{id}/messages`` handler ALREADY
+        # scopes the session_id via ``scope_session_id(raw_sid, tenant_id)``
+        # before constructing the Runner — see
+        # ``kaos_agents/api/server.py::start_turn``. So the ``session_id``
+        # we receive here is already the on-disk-scoped form
+        # ``{tenant}:{raw_sid}`` under bearer-auth mode, or just
+        # ``{raw_sid}`` in localhost-dev. Re-prepending the tenant from
+        # the ContextVar would produce the double-prefix bug observed in
+        # session 01KSBJ5DAYX149A45ER4PK770R (path resolved to
+        # ``sessions/{tenant}:{tenant}:{sid}/files/...`` → "not found").
+        # Trust the already-scoped session_id and use it verbatim.
+        namespace = f"sessions/{session_id}/files/"
+        return KaosContext(
+            session_id=session_id,
+            runtime=runtime,
+            vfs=runtime.vfs,
+            default_vfs_namespace=namespace,
+        )
 
-# #583 — Filter SPA sidecars from the agent-visible VFS listing.
-# ``app/services/uploads.py`` writes two sidecars next to every
-# uploaded file:
-#   - ``<file>.kaos.json`` — parsed ContentDocument AST sidecar
-#   - ``<file>.meta.json`` — FileMeta sidecar (size, parse status, etc.)
-# Both live in the same ``sessions/{sid}/files/`` namespace as the
-# original. When the agent calls ``kaos-core-vfs-list``, it sees ALL
-# three entries per uploaded file and picks the sidecar instead of
-# the original on retries — discovered via T6 in the broad-reliability
-# Chrome MCP matrix where the agent tried to parse
-# ``Toro....docx.kaos.json`` (application/json) with the PDF parser.
-# Strip sidecars from the agent-visible listing at the tool-result
-# post-processing step. The SPA reads sidecars directly via
-# ``runtime.vfs.read`` — bypasses the agent-facing tool surface — so
-# nothing internal breaks.
-import kaos_core.tools as _kaos_core_tools  # noqa: E402
-
-if not getattr(_kaos_core_tools.VFSListTool, "_spa_sidecar_filter_applied", False):
-    _original_vfs_list_execute = _kaos_core_tools.VFSListTool.execute
-
-    _SPA_SIDECAR_SUFFIXES: tuple[str, ...] = (".kaos.json", ".meta.json")
-
-    async def _patched_vfs_list_execute(self, inputs, context=None):  # type: ignore[no-untyped-def]
-        result = await _original_vfs_list_execute(self, inputs, context=context)
-        # Tool errors short-circuit — passthrough.
-        if result.isError:
-            return result
-        out = result.structuredContent
-        if not isinstance(out, dict):
-            return result
-        items = out.get("items")
-        if not isinstance(items, list):
-            return result
-        filtered = [
-            p for p in items
-            if not (isinstance(p, str) and p.endswith(_SPA_SIDECAR_SUFFIXES))
-        ]
-        if len(filtered) == len(items):
-            return result  # nothing to strip — passthrough
-        out["items"] = filtered
-        out["count"] = len(filtered)
-        # Re-render the agent-visible summary text (lives in
-        # ``content[0].text`` for dict-shaped tool results — see
-        # ``ToolResult.create_success``).
-        path_label = out.get("path") or "/"
-        new_summary = f"{len(filtered)} item(s) at '{path_label}'"
-        if out.get("has_more"):
-            new_summary += " (more available)"
-        if result.content and hasattr(result.content[0], "text"):
-            result.content[0].text = new_summary  # ty: ignore[invalid-assignment]
-        return result
-
-    # Method-level monkey-patch — `execute` is async on the class. Use
-    # ``setattr`` so the unbound function becomes a bound method on
-    # instances created later by ``register_kaos_tools``.
-
-    _kaos_core_tools.VFSListTool.execute = _patched_vfs_list_execute  # ty: ignore[invalid-assignment]
-    _kaos_core_tools.VFSListTool._spa_sidecar_filter_applied = True  # ty: ignore[unresolved-attribute]
+    return _factory
 
 
 def create_app(settings: AppSettings | None = None):
@@ -199,7 +152,7 @@ def create_app(settings: AppSettings | None = None):
         ", ".join(f"{g}={n}" for g, n in group_counts.items()) if group_counts else "(none)",
     )
 
-    app = create_agent_app(runtime=runtime)
+    app = create_agent_app(runtime=runtime, context_factory=_spa_context_factory(runtime))
 
     app.state.app_settings = settings
     app.state.kaos_runtime = runtime
@@ -235,6 +188,7 @@ def create_app(settings: AppSettings | None = None):
     # ``/runs/active`` and ``/runs/{run_id}/events``.
     app.include_router(runs.router, prefix="/v1/chat")
     app.include_router(files.router, prefix="/v1/chat")
+    app.include_router(vfs.router, prefix="/v1/chat")
     app.include_router(citations.router, prefix="/v1/chat")
     # Plan Issue 10 layer 2 — message-level thumbs feedback.
     app.include_router(feedback.router, prefix="/v1/chat")

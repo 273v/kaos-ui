@@ -153,7 +153,7 @@ class RunEventLog:
         # the active-pointer never points at a nonexistent log.
         try:
             await vfs.write(log._log_path, b"")
-        except Exception:  # noqa: BLE001 — VFS errors must not break the turn
+        except Exception:
             logger.warning(
                 "run_log.open: failed to create empty log session=%s run=%s",
                 session_id,
@@ -172,7 +172,7 @@ class RunEventLog:
         }
         try:
             await vfs.write(log._pointer_path, json.dumps(pointer).encode("utf-8"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "run_log.open: failed to write active pointer session=%s run=%s",
                 session_id,
@@ -212,7 +212,7 @@ class RunEventLog:
             await self._vfs.write(self._log_path, existing + line.encode("utf-8"))
             if sequence > self._last_seq:
                 self._last_seq = sequence
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "run_log.append: write failed session=%s run=%s seq=%d event=%s",
                 self._session_id,
@@ -232,7 +232,7 @@ class RunEventLog:
         try:
             raw = await self._vfs.read(self._pointer_path)
             current = json.loads(raw.decode("utf-8"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Pointer was never written (open() failed) or was
             # subsequently deleted. Reconstruct from local state so the
             # SPA still gets a clean terminal pointer.
@@ -252,7 +252,7 @@ class RunEventLog:
         current["last_seq"] = self._last_seq
         try:
             await self._vfs.write(self._pointer_path, json.dumps(current).encode("utf-8"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "run_log.mark_done: failed to update pointer session=%s run=%s",
                 self._session_id,
@@ -276,7 +276,7 @@ async def read_active_pointer(*, vfs: VirtualFileSystem, session_id: str) -> dic
         if not isinstance(data, dict):
             return None
         return data
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("read_active_pointer: malformed pointer session=%s", session_id)
         return None
 

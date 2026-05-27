@@ -16,6 +16,7 @@ export { FileChips } from "./FileChips.js";
 export { CitationsPanel } from "./CitationsPanel.js";
 export { DocumentExplorer } from "./DocumentExplorer.js";
 export type { AskAboutSelection } from "./DocumentExplorer.js";
+export { VfsExplorer } from "./VfsExplorer.js";
 export { EmptyState } from "./EmptyState.js";
 export { ErrorBanner } from "./ErrorBanner.js";
 export { SkeletonLine, SkeletonRow } from "./Skeleton.js";

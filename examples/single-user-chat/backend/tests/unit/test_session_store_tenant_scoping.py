@@ -172,15 +172,9 @@ class TestListFiltering:
     @pytest.mark.asyncio
     async def test_list_filters_to_calling_tenant(self):
         s = _store()
-        await s.create(
-            title="A1", model="m", system_prompt="p", tenant_id="tenant-a"
-        )
-        await s.create(
-            title="A2", model="m", system_prompt="p", tenant_id="tenant-a"
-        )
-        await s.create(
-            title="B1", model="m", system_prompt="p", tenant_id="tenant-b"
-        )
+        await s.create(title="A1", model="m", system_prompt="p", tenant_id="tenant-a")
+        await s.create(title="A2", model="m", system_prompt="p", tenant_id="tenant-a")
+        await s.create(title="B1", model="m", system_prompt="p", tenant_id="tenant-b")
 
         a_summaries, _ = await s.list(tenant_id="tenant-a")
         b_summaries, _ = await s.list(tenant_id="tenant-b")
@@ -201,9 +195,7 @@ class TestListFiltering:
         tenant-scoped sessions written by a prior auth'd run on the
         same disk."""
         s = _store()
-        await s.create(
-            title="dev session", model="m", system_prompt="p", tenant_id=None
-        )
+        await s.create(title="dev session", model="m", system_prompt="p", tenant_id=None)
         await s.create(
             title="tenant session",
             model="m",
@@ -247,9 +239,7 @@ class TestDevModeBackwardCompat:
     async def test_dev_mode_patch_persists(self):
         s = _store()
         sid = "01DEV"
-        await s.create(
-            title="dev", model="m", system_prompt="p", session_id=sid, tenant_id=None
-        )
+        await s.create(title="dev", model="m", system_prompt="p", session_id=sid, tenant_id=None)
         await s.patch(sid, title="dev-renamed", tenant_id=None)
         meta = await s.get(sid, tenant_id=None)
         assert meta.title == "dev-renamed"

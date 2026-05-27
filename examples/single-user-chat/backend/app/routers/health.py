@@ -46,18 +46,24 @@ router = APIRouter(tags=["health"])
 _PROVIDER_ENV_VARS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("openai", ("KAOS_LLM_OPENAI_API_KEY", "OPENAI_API_KEY")),
     ("anthropic", ("KAOS_LLM_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")),
-    ("google", (
-        "KAOS_LLM_GOOGLE_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-    )),
+    (
+        "google",
+        (
+            "KAOS_LLM_GOOGLE_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+        ),
+    ),
     ("xai", ("KAOS_LLM_XAI_API_KEY", "XAI_API_KEY")),
     ("groq", ("KAOS_LLM_GROQ_API_KEY", "GROQ_API_KEY")),
     ("mistral", ("KAOS_LLM_MISTRAL_API_KEY", "MISTRAL_API_KEY")),
-    ("openrouter", (
-        "KAOS_LLM_OPENROUTER_API_KEY",
-        "OPENROUTER_API_KEY",
-    )),
+    (
+        "openrouter",
+        (
+            "KAOS_LLM_OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+        ),
+    ),
 )
 
 

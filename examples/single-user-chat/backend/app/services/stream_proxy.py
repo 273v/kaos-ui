@@ -329,9 +329,7 @@ async def stream_chat(
                         # Plan Issue 6: typed category so the SPA UI can
                         # branch without parsing free-text. Literal value
                         # is one of ``RUN_ERROR_CATEGORIES``.
-                        "error_category": classify_upstream_error(
-                            response.status_code, body_str
-                        ),
+                        "error_category": classify_upstream_error(response.status_code, body_str),
                         "what": f"Upstream kaos-agents returned {response.status_code}",
                         "how_to_fix": (
                             "Check backend logs and KAOS_AGENTS_API_API_TOKEN. "

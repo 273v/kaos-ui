@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
 _AUTH = "Bearer demo-token-must-be-at-least-32-chars-long-for-validation"
 _TOKEN_HASH_PREFIX = None  # filled in by _make_app
 
@@ -216,9 +215,7 @@ def test_regenerate_out_of_range_returns_422(
 
 
 @pytest.mark.unit
-def test_regenerate_no_memory_returns_404(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_regenerate_no_memory_returns_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fresh session with zero turns — regenerate is undefined here.
     Return 404 so the SPA can show "nothing to regenerate yet" rather
     than a generic 500."""
@@ -299,9 +296,7 @@ def test_edit_prior_at_assistant_idx_returns_422(
 
 
 @pytest.mark.unit
-def test_edit_prior_rejects_empty_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_edit_prior_rejects_empty_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pydantic min_length=1 — empty body is invalid (a "deleted"
     message is not a use case we support; the user can regenerate to
     drop a turn instead).
