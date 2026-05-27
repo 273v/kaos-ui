@@ -6,6 +6,42 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] — 2026-05-26
+
+Adds the `<VfsExplorer>` component + `useSessionVfs` hook + `vfs.ts`
+API client for the new session VFS explorer panel
+(see `kaos-modules/docs/plans/2026-05-26-spa-vfs-explorer-design.md`).
+Peer of `<DocumentExplorer>`, NOT a replacement: Documents stays the
+user-facing "files I uploaded" affordance; the VFS panel surfaces the
+full session VFS subtree (`sessions/{scoped}/**`) for operator
+debugging — agent-written artifacts, the toolcalls JSONL recorder,
+and (opt-in) the SPA's parse-sidecar internals.
+
+### Added
+
+- **`<VfsExplorer>`** (`src/chat/VfsExplorer.tsx`) — tree-left +
+  preview-right layout, per-node metadata + URI copy, sidecar
+  exclusion default-on with a "Sidecars" toggle, manual refresh,
+  error-count footer. Mirrors the `<DocumentExplorer>` chrome so
+  the two panels read as siblings.
+- **`useSessionVfs(sessionId, options)`** (`src/hooks/use-vfs.ts`) —
+  TanStack Query hook against `GET /v1/chat/sessions/{id}/vfs`.
+  Polls every 5s while the panel is open (Stage 2 SSE is deferred —
+  see design doc Stage 2 deferral note). `enabled: false` when the
+  panel is closed so closed sessions don't poll.
+- **`vfs.ts` API client** (`src/lib/vfs.ts`) — `listSessionVfs`,
+  `groupVfsNodes`, + the `VfsNode` / `VfsListResponse` /
+  `ListVfsOptions` wire types matching the SPA backend's Pydantic
+  shapes.
+
+### Backend dependency
+
+The new panel requires a SPA backend exposing
+`GET /v1/chat/sessions/{id}/vfs` (added in single-user-chat backend
+0.1.4 / kaos-ui 0.1.0a15). Older backends will 404 the request and
+the panel will show an empty tree with no entries — graceful
+degradation, no crash.
+
 ## [0.1.0-alpha.9] — 2026-05-20
 
 The chronological chat-transcript redesign. Lands the
