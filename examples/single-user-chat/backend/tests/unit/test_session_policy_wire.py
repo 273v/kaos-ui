@@ -39,10 +39,13 @@ def test_default_construction_matches_research_persona() -> None:
 
 def test_loop_budget_defaults() -> None:
     """The three independent loop limiters carry the design-doc defaults
-    (3 iterations / $0.25 / 60s)."""
+    (3 iterations / $2.00 / 60s). The cost cap was raised $0.25 → $2.00
+    on 2026-05-29 after the NDA matrix showed legitimate 5-doc Opus turns
+    (~$0.43) getting cut off mid-synthesis; iteration + wall-clock remain
+    the primary runaway guards."""
     wire = SessionPolicyWire()
     assert wire.max_loop_iterations == 3
-    assert wire.max_loop_cost_usd == pytest.approx(0.25)
+    assert wire.max_loop_cost_usd == pytest.approx(2.00)
     assert wire.max_loop_wall_clock_seconds == pytest.approx(60.0)
 
 
