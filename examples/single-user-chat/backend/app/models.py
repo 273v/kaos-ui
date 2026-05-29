@@ -220,13 +220,15 @@ class SessionPolicyWire(BaseModel):
         ),
     )
     max_loop_cost_usd: float = Field(
-        default=0.25,
+        default=2.00,
         gt=0.0,
         le=10.0,
         description=(
             "Hard cap on cumulative LLM cost per turn (planner + "
-            "critic + worker). Default $0.25; increase for "
-            "Sonnet-class drafting workflows."
+            "critic + worker). Default $2.00 — clears legitimate "
+            "multi-document reviews (the NDA matrix showed 5-doc Opus "
+            "turns up to ~$0.43); iteration + wall-clock caps are the "
+            "primary runaway guards. Lower it for stricter cost control."
         ),
     )
     max_loop_wall_clock_seconds: float = Field(
@@ -533,7 +535,7 @@ class SessionMeta(BaseModel):
                 "auto_elevate": True,
                 "auto_loop": True,
                 "max_loop_iterations": 3,
-                "max_loop_cost_usd": 0.25,
+                "max_loop_cost_usd": 2.00,
                 "max_loop_wall_clock_seconds": 60.0,
             }
             d.pop("tools_enabled", None)
@@ -727,7 +729,7 @@ class ToolSetUpdateBody(BaseModel):
         default=None,
         gt=0.0,
         le=10.0,
-        description="Hard cap on cumulative LLM cost per turn. $0.01-$10 (default $0.25).",
+        description="Hard cap on cumulative LLM cost per turn. $0.01-$10 (default $2.00).",
     )
     max_loop_wall_clock_seconds: float | None = Field(
         default=None,
