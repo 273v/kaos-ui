@@ -123,7 +123,7 @@ dependencies = [
     # kaos-agent-interpret-extraction tools + bridge wiring in
     # BaseAgent/ResearchAgent for corpus + RESEARCH prompts). Tool
     # count 14 → 16. Pulls kaos-llm-core>=0.1.7 transitively.
-    "kaos-agents>=0.1.25,<0.2",
+    "kaos-agents>=0.1.27,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the
