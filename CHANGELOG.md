@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — SPA chat router honors the configured planner / goal-check models
+
+The single-user-chat backend's `app/routers/chat.py` called
+`kaos_agents.patterns.agentic_loop.run_agentic_turn(...)` without the
+`planner_model` / `goal_check_model` keyword arguments, so the loop ran
+with `goal_check_model=None` regardless of the `AppSettings`
+`agentic_planner_model` / `agentic_goal_check_model` values (both defined
+with Sonnet-tier defaults but never consumed — dead config).
+
+With no goal-check model the kaos-agents 0.1.27 completeness gate
+(`_draft_is_complete`) short-circuits to "incomplete", so the budget /
+"work-in-progress" footer was appended to **complete** deliverables. The
+2026-05-30 NDA persona matrix (20 runs) measured Sonnet 4.6 at 4/10 strict
+but ~9/10 by-content — five of its six strict failures were this footer on
+correct, grounded answers. The router now threads both settings into the
+loop, re-enabling footer suppression and lifting planner routing to the
+configured tier. Either setting may be set to `None`
+(`APP_AGENTIC_PLANNER_MODEL` / `APP_AGENTIC_GOAL_CHECK_MODEL`) to fall back
+to the kaos-agents Signature defaults. Regression:
+`tests/integration/test_chat_agentic_loop.py::test_router_threads_planner_and_goal_check_models_from_settings`.
+
 ## [0.1.0a14] — 2026-05-23
 
 audit-04 remediation: Family D classifier + README count drift.

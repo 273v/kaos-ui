@@ -216,6 +216,40 @@ def test_router_passes_available_groups_and_corpus_headlines(
     assert isinstance(captured["corpus_headlines"], str)
 
 
+def test_router_threads_planner_and_goal_check_models_from_settings(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the chat router MUST pass the AppSettings
+    ``agentic_planner_model`` / ``agentic_goal_check_model`` into
+    ``run_agentic_turn``.
+
+    Pre-fix the call omitted both, so the loop ran with
+    ``goal_check_model=None``. With no goal-check model the 0.1.27
+    completeness gate (``_draft_is_complete``) short-circuits to
+    "incomplete" and the budget / "work-in-progress" footer is emitted on
+    COMPLETE deliverables (NDA persona matrix 2026-05-30: Sonnet 4/10
+    strict, ~9/10 by-content — 5 of 6 strict fails were that footer on
+    correct, grounded answers). A non-None ``goal_check_model`` is the
+    precondition for footer suppression, so this asserts the wiring AND
+    the default-on invariant.
+    """
+    from app.settings import AppSettings
+
+    settings = AppSettings()
+    captured = _patch_agentic_turn(monkeypatch)
+    sid = _create_session(client)
+
+    client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "hi"})
+
+    # Both models reach the loop, sourced from settings (Sonnet-tier by
+    # default — see AppSettings).
+    assert captured["goal_check_model"] == settings.agentic_goal_check_model
+    assert captured["planner_model"] == settings.agentic_planner_model
+    # The footer-suppression precondition: a goal-check model MUST be set
+    # by default so `_draft_is_complete` can actually run the judge.
+    assert captured["goal_check_model"] is not None
+
+
 def test_message_count_increments_on_successful_turn(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -265,14 +299,20 @@ def test_run_id_encodes_pre_turn_message_count(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The run_id encodes ``message_count // 2`` measured BEFORE the
-    turn — so the very first turn gets ``turn-0`` and the SPA's
-    tool-call sidecar lookup stays consistent."""
+    turn — so the very first turn gets index 0 and the SPA's tool-call
+    sidecar lookup stays consistent.
+
+    The run_id format is ``turn-{idx:04d}-{6 hex chars}`` (chat.py ~L601),
+    matching the ``runs/turn-NNNN-XXXX.jsonl`` sidecar naming. The first
+    turn therefore reads ``turn-0000-<hex>`` — assert the zero-padded
+    index prefix rather than an exact string (a stale ``== "turn-0"``
+    predated the :04d + hex-suffix format)."""
     captured = _patch_agentic_turn(monkeypatch)
     sid = _create_session(client)
 
     r = client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "first"})
     assert r.status_code == 200
-    assert captured["run_id"] == "turn-0"
+    assert captured["run_id"].startswith("turn-0000-")
 
 
 def test_chat_router_passes_policy_through_unchanged(
