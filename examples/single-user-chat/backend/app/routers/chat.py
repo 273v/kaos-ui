@@ -913,6 +913,24 @@ async def send_message(
                 # recent_turns: deferred to TR-13 (deeper context). The
                 # planner tolerates an empty string.
                 recent_turns="",
+                # The per-iteration planner + GoalChecker models. These
+                # were defined in AppSettings (`agentic_planner_model` /
+                # `agentic_goal_check_model`, Sonnet-tier defaults) but
+                # were never threaded into the loop, so the loop fell back
+                # to kaos-agents' Signature defaults (Haiku-tier) AND —
+                # critically — ran with `goal_check_model=None`. With no
+                # goal-check model the 0.1.27 completeness gate
+                # (`_draft_is_complete`) short-circuits to "incomplete",
+                # so the budget / "work-in-progress" footer was emitted on
+                # COMPLETE deliverables (NDA persona matrix 2026-05-30:
+                # Sonnet 4/10 strict, ~9/10 by-content — 5 of 6 fails were
+                # this footer on correct, grounded answers). Honoring the
+                # two settings re-enables footer suppression and lifts the
+                # planner routing to the configured tier. Set either to
+                # None (env `APP_AGENTIC_*`) to fall back to the kaos-agents
+                # Signature defaults.
+                planner_model=settings.agentic_planner_model,
+                goal_check_model=settings.agentic_goal_check_model,
                 m2_consistency_model=m2_consistency_model,
                 m3_grounding_model=m3_grounding_model,
             ):
