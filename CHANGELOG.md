@@ -5,7 +5,21 @@ All notable changes to `kaos-ui` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0a15] — 2026-05-31
+
+> **Scope note (read first).** The chat turn-lifecycle fixes below are
+> delivered to the *frontend* via the separately-versioned
+> `@273v/kaos-ui-react` library (`0.1.0-alpha.11`); the `web:spa`
+> template now floats `@273v/kaos-ui-react ^0.1.0-alpha.11` so a fresh
+> `kaos-ui new web:spa` picks up the client-side fix. The **backend**
+> half of the redesign (detached runs + persist/stream locks +
+> run-scoped `mark_done`) currently lives in the `single-user-chat`
+> **example** (`routers/chat.py`), which uses a different backend layout
+> than the template (`services/chat.py.tmpl`). Porting it into the
+> template's service-layer backend is tracked as follow-up — a scaffold
+> from this release does **not** yet ship the backend detached-run
+> behavior. What the *template* gains in this release is the frontend
+> tooling upgrade and the `kaos-ui-react` alpha.11 client fix.
 
 ### Fixed — a turn now survives navigating away mid-stream (detached runs)
 
@@ -97,6 +111,10 @@ example so generated projects build clean on the new toolchain:
 - Added an ambient `fontsource.d.ts` shim so the CSS-only
   `@fontsource-variable/*` side-effect imports satisfy TS 6's stricter
   side-effect-import check (TS2882).
+- Floated the template's `@273v/kaos-ui-react` dependency from
+  `^0.1.0-alpha.0` to `^0.1.0-alpha.11` so a fresh `kaos-ui new web:spa`
+  resolves the alpha.11 library (carrying the client-side turn-lifecycle
+  fix) instead of an older alpha.
 
 Build, typecheck, Vitest (144 tests), and Biome lint all pass on the
 upgraded toolchain.
