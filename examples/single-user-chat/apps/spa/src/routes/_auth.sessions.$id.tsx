@@ -226,36 +226,57 @@ function ChatDetail() {
   const wasPendingRef = useRef(false);
   useEffect(() => {
     if (wasPendingRef.current && !stream.state.pending) {
-      // Turn-lifecycle redesign (2026-05-31): refresh only the session
-      // META (title / message_count) and the sidebar LIST here. We no
-      // longer invalidate the message-HISTORY query on turn completion.
+      // On the pending true→false edge (a turn we watched stream),
+      // refresh session META (title / message_count), the sidebar LIST,
+      // AND the message HISTORY.
       //
-      // The `useSendMessage` reducer is the single source of truth for
-      // the transcript and ALREADY contains this turn (the optimistic
-      // user row + the streamed assistant row). Refetching history on
-      // completion was both unnecessary AND harmful: the immediate
-      // invalidate fires at stream-end while the canonical-turn persist
-      // is still draining, so the refetch could resolve with a server
-      // snapshot MISSING the just-finished turn — which the old
-      // reset-replace then wiped from the transcript (the "flash and
-      // disappear" follow-up bug). History now refetches only on cold
-      // load / session switch / window-focus, and is reconciled
-      // non-destructively (see `reconcileServerHistory`).
-      const invalidateMeta = () => {
+      // Re-adding the history refetch here is SAFE now: the
+      // `useSendMessage` reducer is the single source of truth and
+      // `reconcileServerHistory` merges a refetch NON-destructively (it
+      // fills in server-confirmed rows but never deletes an
+      // optimistic / streaming / terminal-error row — and protects rows
+      // positioned beyond the server snapshot, i.e. a turn whose persist
+      // is still draining). So the refetch that used to "flash and
+      // disappear" the follow-up can no longer wipe it; it only makes
+      // the transcript eventually-consistent with the server.
+      const invalidate = () => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+        void queryClient.invalidateQueries({
+          queryKey: [...queryKeys.session(id), "history"],
+        });
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       };
-      invalidateMeta();
-      // The first-turn title is written by the backend's post-stream
-      // persist task, which can land AFTER this edge — re-invalidate the
-      // META once more so the header/sidebar pick it up. (This no longer
-      // touches the transcript, so it cannot wipe anything.)
-      const t = setTimeout(invalidateMeta, 1200);
+      invalidate();
+      // The first-turn title + the canonical-turn persist land AFTER this
+      // edge (post-stream BackgroundTask), so re-invalidate ~1.2s later
+      // to pick them up. Non-destructive thanks to reconcile.
+      const t = setTimeout(invalidate, 1200);
       wasPendingRef.current = stream.state.pending;
       return () => clearTimeout(t);
     }
     wasPendingRef.current = stream.state.pending;
   }, [stream.state.pending, id, queryClient]);
+
+  // A run can also reach a terminal state while the user is NOT watching
+  // its live stream — they sent a query then navigated to another session
+  // while it was still "thinking", or it finished detached. `useActiveRun`
+  // polls while a run is running; when its status transitions
+  // running→terminal we refetch the message history so the
+  // off-screen-completed turn appears (reconcile applies it
+  // non-destructively). This is the fix for "sent a query, navigated away
+  // mid-thinking, came back and the turn was gone": the turn DID persist
+  // server-side — we just weren't pulling it back into the transcript.
+  const prevRunStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const status = activeRun.data?.status ?? null;
+    if (prevRunStatusRef.current === "running" && status !== null && status !== "running") {
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.session(id), "history"],
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+    }
+    prevRunStatusRef.current = status;
+  }, [activeRun.data?.status, id, queryClient]);
 
   const onSubmit = () => {
     const text = input.trim();

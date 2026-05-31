@@ -60,5 +60,11 @@ export function useActiveRun(sessionId: string | null) {
     enabled: !!sessionId,
     staleTime: 5_000,
     refetchOnWindowFocus: true,
+    // Poll WHILE a run is in flight so the SPA notices when it reaches a
+    // terminal state — even if the user navigated away from the live
+    // stream (or it finished detached). The route refetches the message
+    // history on that running→terminal transition so a turn that
+    // completed off-screen still appears. Stops polling once terminal.
+    refetchInterval: (query) => (query.state.data?.status === "running" ? 3_000 : false),
   });
 }
