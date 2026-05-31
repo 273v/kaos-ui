@@ -12,7 +12,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useTransport } from "../lib/transport.js";
-import { type ListVfsOptions, type VfsListResponse, listSessionVfs } from "../lib/vfs.js";
+import { type ListVfsOptions, listSessionVfs, type VfsListResponse } from "../lib/vfs.js";
 
 const VFS_POLL_INTERVAL_MS = 5000;
 

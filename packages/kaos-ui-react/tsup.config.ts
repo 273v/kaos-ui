@@ -30,21 +30,12 @@ export default defineConfig({
   clean: true,
   treeshake: true,
   // React + react-dom + TanStack Query are peer deps; never bundle them.
-  external: [
-    "react",
-    "react-dom",
-    "react/jsx-runtime",
-    "@tanstack/react-query",
-    "tailwindcss",
-  ],
+  external: ["react", "react-dom", "react/jsx-runtime", "@tanstack/react-query", "tailwindcss"],
   // Copy the static CSS (theme tokens + markdown + jsontree styles)
   // into dist/ so the `./styles.css` subpath export resolves to a
   // real file in the published tarball.
   onSuccess: async () => {
     mkdirSync(resolve("dist"), { recursive: true });
-    copyFileSync(
-      resolve("src/theme/tokens.css"),
-      resolve("dist/styles.css"),
-    );
+    copyFileSync(resolve("src/theme/tokens.css"), resolve("dist/styles.css"));
   },
 });

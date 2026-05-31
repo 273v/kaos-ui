@@ -248,7 +248,7 @@ export function repairAndParseJson<T = unknown>(raw: string | undefined): T | nu
     } else if (/[0-9-]/.test(ch as string) && depth > 0) {
       // Number literal. Consume digits / decimal / exponent.
       let j = i;
-      while (j < raw.length && /[0-9eE+.\-]/.test(raw[j] as string)) {
+      while (j < raw.length && /[0-9eE+.-]/.test(raw[j] as string)) {
         j++;
       }
       lastSafePos = j;
@@ -561,7 +561,7 @@ export function extractErrorEnvelope(preview: string | undefined): {
     const statusRaw = statusMatch?.[1];
     if (statusRaw) payload.http_status = Number(statusRaw);
   }
-  if (!payload || payload.error !== true) return null;
+  if (payload?.error !== true) return null;
   const message = typeof payload.message === "string" ? payload.message : "";
   if (!message) return null;
   const locator =

@@ -41,7 +41,7 @@ const TOKEN_RE =
   // 4) numbers (incl. scientific)
   /(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|/.source +
   // 5) punctuation
-  /([{}\[\],])/.source;
+  /([{}[\],])/.source;
 
 const TOKEN = new RegExp(TOKEN_RE, "g");
 

@@ -18,7 +18,7 @@
  * a helpful error from `useTransport()` if it's used outside.
  */
 
-import { type ReactNode, createContext, useContext, useMemo } from "react";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 export interface Transport {
   /**

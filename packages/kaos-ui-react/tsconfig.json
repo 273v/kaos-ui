@@ -22,10 +22,11 @@
     "declarationMap": false,
     "sourceMap": false,
     "noEmit": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    // tsup's dts (rollup-plugin-dts) injects a `baseUrl` internally, which
+    // TypeScript 6 flags as deprecated (TS5101). We don't set baseUrl
+    // ourselves; this silences the tooling-injected one until tsup stops
+    // emitting it. Remove once tsup no longer injects baseUrl.
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"]

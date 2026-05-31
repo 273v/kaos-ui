@@ -22,16 +22,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  type TranscriptState,
   applyEvent,
   clearCapabilityRequest,
   initialState,
   markAborted,
   pushUserAndAssistantPlaceholder,
+  type TranscriptState,
 } from "../lib/event-handler.js";
 import type { KaosAgentEvent } from "../lib/events.js";
 import { readSseStream } from "../lib/streaming.js";
-import { type Transport, joinUrl, useTransport } from "../lib/transport.js";
+import { joinUrl, type Transport, useTransport } from "../lib/transport.js";
 
 export interface UseSendMessageOptions {
   sessionId: string;

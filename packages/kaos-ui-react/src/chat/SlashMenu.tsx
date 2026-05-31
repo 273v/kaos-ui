@@ -131,7 +131,6 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
     <div
       ref={rootRef}
       tabIndex={-1}
-      // biome-ignore lint/a11y/useSemanticElements: custom ARIA combobox/listbox popup; a native <select> cannot render the rich skill rows (icon + name + description).
       role="listbox"
       id={listId}
       aria-label="Slash command skills"
@@ -144,7 +143,6 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
           <button
             key={s.id}
             type="button"
-            // biome-ignore lint/a11y/useSemanticElements: ARIA listbox option with rich custom content (icon + name + description); a native <option> permits text only.
             role="option"
             aria-selected={i === active}
             onMouseEnter={() => setActive(i)}

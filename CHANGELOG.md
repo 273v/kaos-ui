@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — web:spa template + kaos-ui-react upgraded to latest frontend deps
+
+Bumped the `web:spa` template (and the `single-user-chat` example +
+`@273v/kaos-ui-react` library) to the current major versions: Vite 6 → 8,
+Vitest 3 → 4, TypeScript 5 → 6, Zod 3 → 4, lucide-react 0.x → 1.x,
+`@vitejs/plugin-react` 4 → 6, happy-dom 15 → 20, `@hey-api/openapi-ts`
+0.64 → 0.97, `@types/node` 22 → 25, and Biome to 2.4.16 (the library
+config migrated off the legacy 1.9.4 schema). React stays on 19 and
+Tailwind on 4 (already latest majors).
+
+Migration carried by the upgrade, applied to both the template and the
+example so generated projects build clean on the new toolchain:
+
+- Removed `baseUrl` from the SPA/UI `tsconfig.json` files (deprecated in
+  TS 6; `paths` resolve relative to the tsconfig without it).
+- Added an ambient `fontsource.d.ts` shim so the CSS-only
+  `@fontsource-variable/*` side-effect imports satisfy TS 6's stricter
+  side-effect-import check (TS2882).
+
+Build, typecheck, Vitest (144 tests), and Biome lint all pass on the
+upgraded toolchain.
+
 ### Fixed — SPA chat router honors the configured planner / goal-check models
 
 The single-user-chat backend's `app/routers/chat.py` called
