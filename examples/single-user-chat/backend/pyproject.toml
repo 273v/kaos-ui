@@ -212,7 +212,12 @@ dependencies = [
     # kaos-web-batch-fetch, kaos-web-crawl-site) AND the public
     # batch_fetch() / crawl_site() Python API. Completes the
     # kaos-web side of task #634.
-    "kaos-web[browser]>=0.1.9,<0.2",
+    # 2026-05-31: bump to >=0.1.11 — page tools (search-page, get-text,
+    # get-markdown, get-tables) now resolve their own kaos://artifacts/
+    # / kaos://content/ handles instead of re-fetching them through the
+    # URL-security gate (which correctly blocked the non-http kaos://
+    # scheme). Fixes "fetch this large page, then search it" composition.
+    "kaos-web[browser]>=0.1.11,<0.2",
     # P2-1d: kaos-nlp-core content_type classifier — magic-byte
     # detection feeds the AgenticLoop's corpus_kinds Signature input.
     "kaos-nlp-core>=0.1.0,<0.2",
