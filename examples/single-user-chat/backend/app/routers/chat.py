@@ -510,7 +510,7 @@ async def send_message(
     from starlette.background import BackgroundTask
 
     from app.services.persist_turn import persist_turn_completion
-    from app.services.run_log import RunEventLog, read_active_pointer
+    from app.services.run_log import RunEventLog
     from app.services.tool_call_recorder import TurnToolCallRecorder, TurnUsageRecorder
 
     recorder = TurnToolCallRecorder()
@@ -532,7 +532,11 @@ async def send_message(
     # 409 path before any side effects. Released in ``_do_persist``
     # AFTER the SSE response body is fully sent (the lock lifetime
     # must span the streaming response, not just the handler).
-    from app.services.locks import get_session_lock, is_session_running
+    from app.services.locks import (
+        get_session_lock,
+        get_session_persist_lock,
+        is_session_running,
+    )
 
     if is_session_running(session_id):
         raise HTTPException(
@@ -561,37 +565,29 @@ async def send_message(
             _session_lock.release()
             _lock_released = True
 
-    # SSE resume Stage 1: refuse a second concurrent POST. If
-    # ``runs/active.json`` still says ``running`` for this session, the
-    # SPA should be calling ``GET /runs/{run_id}/events`` instead. The
-    # 409 body carries enough information for the SPA to open the
-    # resume stream without re-querying ``runs/active``.
-    if runtime is not None:
-        try:
-            active = await read_active_pointer(vfs=runtime.vfs, session_id=session_id)
-        except Exception:
-            active = None
-        if active is not None and active.get("status") == "running":
-            # B1.2: release the lock we acquired above before raising the
-            # soft-409 — otherwise the next POST would deadlock on a
-            # never-released asyncio.Lock.
-            _release_session_lock()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "run_in_progress",
-                    "what": "Another turn is still streaming for this session.",
-                    "how_to_fix": (
-                        "Wait for the existing run to finish or open "
-                        "GET /v1/chat/sessions/{id}/runs/{run_id}/events to resume it."
-                    ),
-                    "run_id": active.get("run_id"),
-                    "started_at": active.get("started_at"),
-                    "alternative_tool": (
-                        f"GET /v1/chat/sessions/{session_id}/runs/{active.get('run_id', '')}/events"
-                    ),
-                },
-            )
+    # Turn-lifecycle redesign (2026-05-31): the per-session stream lock
+    # acquired above is now the AUTHORITATIVE concurrent-stream guard,
+    # and it is released at stream-end (the generator's ``finally``),
+    # NOT after persist. So once we hold the lock, no stream is in
+    # flight for this session in this process. A ``runs/active.json``
+    # pointer that still reads ``running`` here is therefore either
+    #   (a) a turn that is *draining* — its stream ended, the lock is
+    #       free, only its persist BackgroundTask is still running, OR
+    #   (b) a stale pointer left by a crashed/restarted process.
+    # In BOTH cases it is correct to start the next turn: the new run's
+    # ``run_log.open`` below overwrites the pointer, and ``mark_done``
+    # is run-scoped so the draining turn cannot clobber it.
+    #
+    # The prior *soft-409 on the pointer* lived here and was the
+    # band-aid that made fast follow-ups fail (the pointer flips to
+    # terminal only inside the post-stream persist task, so a follow-up
+    # in the draining window 409'd ~50% of the time). It is intentionally
+    # removed. Genuine in-process concurrency is still rejected by the
+    # hard lock check above; multi-process deployments need a shared
+    # lock (see ``app/services/locks.py`` — out of scope for the
+    # single-process reference SPA). The ``GET /runs/active`` +
+    # ``GET /runs/{run_id}/events`` resume path is unchanged for the
+    # genuine reload-mid-stream case.
 
     # Run id: deterministic ``turn-{idx:04d}`` prefix + 6 hex chars of
     # randomness. The prefix keeps log files sortable per session; the
@@ -668,6 +664,14 @@ async def send_message(
         property the 2026-05-18 persona matrix found missing in the
         prior finally-block implementation.
         """
+        # Serialize persists across turns. The STREAM lock was already
+        # released by the generator's ``finally`` at stream-end, so the
+        # next turn may already be streaming while this runs — the next
+        # turn's stream does NOT wait on this lock, only its own persist
+        # does, which preserves turn-order appends without re-coupling
+        # "session free for the next turn" to "prior turn persisted".
+        _persist_lock = get_session_persist_lock(session_id)
+        await _persist_lock.acquire()
         try:
             if not persist_snapshot["captured"]:
                 # Defensive: the generator should always populate the
@@ -735,13 +739,12 @@ async def send_message(
                         session_id,
                         run_id,
                     )
-            # B1.2: release the per-session asyncio.Lock acquired at the
-            # top of the handler. Must run AFTER the SSE body is fully
-            # sent (Starlette's BackgroundTask contract) — releasing
-            # earlier would let a concurrent POST race the persist work.
-            # Idempotent: if the early-409 path already released, this
-            # is a no-op.
-            _release_session_lock()
+            # Release the PERSIST lock. The STREAM lock is no longer
+            # released here — the generator's ``finally`` releases it at
+            # stream-end (the decoupling that fixes the 409 follow-up
+            # race). Persist-lock release is unconditional: we acquired
+            # it at the top of this task.
+            _persist_lock.release()
 
     # Per-run sequence fallback used when an event payload doesn't
     # carry ``payload["sequence"]`` (defensive — every kaos-agents
@@ -1074,6 +1077,19 @@ async def send_message(
             # served on the same asyncio task doesn't inherit this
             # turn's tenant. Reset is safe even after an exception.
             current_tenant_id.reset(_tenant_ctx_token)
+
+            # CORE FIX (turn-lifecycle redesign): release the STREAM lock
+            # the instant the SSE body finishes streaming — NOT after
+            # persist. This is what makes a follow-up message succeed
+            # instead of 409'ing: the session is "free for the next turn"
+            # as soon as the stream ends, and the prior turn's persist
+            # runs lock-free in the BackgroundTask (serialized by the
+            # separate persist lock). ``_release_session_lock`` is
+            # SYNCHRONOUS (a plain ``Lock.release()``, no ``await``), so
+            # unlike the persist work it CANNOT be cancelled by a client
+            # disconnect — it always runs in this ``finally``. Idempotent
+            # if already released.
+            _release_session_lock()
 
     return EventSourceResponse(
         event_generator(),

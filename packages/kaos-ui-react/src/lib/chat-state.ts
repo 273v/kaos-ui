@@ -196,6 +196,24 @@ export interface ChatMessage {
    * CapabilityApproval card after the user clicks.
    */
   capability_request?: CapabilityRequestSnapshot;
+  /**
+   * Stable per-send idempotency/correlation key minted client-side when
+   * the user submits (the user row and its assistant placeholder share
+   * it). Used by the history reconciler to match an optimistic user row
+   * to the server's persisted copy so a background history refetch can
+   * fill it in WITHOUT deleting the optimistic/streaming row. Absent on
+   * rows hydrated from server history (matched by ordinal instead).
+   */
+  clientKey?: string;
+  /**
+   * Provenance of this row in the single-source-of-truth reducer:
+   * `"optimistic"` = added locally by `send()` and not yet confirmed by
+   * the server; `"server"` = hydrated from / confirmed by history.
+   * The reconciler NEVER deletes an `"optimistic"`, `streaming`, or
+   * terminal-`error` row when a racing history refetch resolves — that
+   * deletion was the "flash and disappear" follow-up bug.
+   */
+  origin?: "optimistic" | "server";
 }
 
 export type TurnStatusKind =

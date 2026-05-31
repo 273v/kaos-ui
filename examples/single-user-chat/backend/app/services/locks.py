@@ -39,15 +39,40 @@ from contextlib import asynccontextmanager
 # for the reference SPA (single user, dozens of sessions per day).
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 
+# Per-session lock that serializes the post-stream persist work
+# (``_do_persist``) across turns. DISTINCT from the stream lock above.
+# The turn-lifecycle redesign (2026-05-31) releases the stream lock the
+# instant the SSE body finishes, so the session is free for the next
+# turn's stream while the prior turn's persist (canonical-turn write +
+# title heuristic + meta bump) is still running. This lock keeps those
+# persists from interleaving (turn N+1 persisting before turn N). The
+# next turn's STREAM never waits on it — only the next turn's persist
+# does — so "session free for the next turn" is no longer coupled to
+# "prior turn fully persisted" (the root cause of the 409 follow-up bug).
+_SESSION_PERSIST_LOCKS: dict[str, asyncio.Lock] = {}
+
 
 def get_session_lock(session_id: str) -> asyncio.Lock:
-    """Return the lock for ``session_id``, creating it on first call.
+    """Return the stream lock for ``session_id``, creating it on first call.
+
+    Held for the lifetime of the SSE stream only (acquired at POST,
+    released in the generator's ``finally`` when the body is fully
+    sent). A concurrent POST sees ``locked()`` and 409s.
 
     Safe to call from any coroutine on the same event loop —
     ``dict.setdefault`` is atomic from the perspective of the single
     asyncio event loop (no ``await`` between check and insert).
     """
     return _SESSION_LOCKS.setdefault(session_id, asyncio.Lock())
+
+
+def get_session_persist_lock(session_id: str) -> asyncio.Lock:
+    """Return the persist lock for ``session_id`` (serializes ``_do_persist``).
+
+    Acquired by each turn's BackgroundTask so post-stream persist work
+    runs in turn order even though the stream lock is released earlier.
+    """
+    return _SESSION_PERSIST_LOCKS.setdefault(session_id, asyncio.Lock())
 
 
 def is_session_running(session_id: str) -> bool:

@@ -27,7 +27,9 @@ import {
   initialState,
   markAborted,
   pushUserAndAssistantPlaceholder,
+  reconcileServerHistory,
   type TranscriptState,
+  truncateFrom,
 } from "../lib/event-handler.js";
 import type { KaosAgentEvent } from "../lib/events.js";
 import { readSseStream } from "../lib/streaming.js";
@@ -69,6 +71,15 @@ export interface UseSendMessageResult {
    * deny_stop).
    */
   clearCapability: (messageId: string) => void;
+  /**
+   * Drop the given message and every row after it from the local
+   * transcript. Used by edit-prior / regenerate so the
+   * single-source-of-truth reducer truncates in step with the backend's
+   * SessionMemory rewind — without a destructive history-refetch-replace
+   * (which is what made follow-up sends "flash and disappear"). Call
+   * before re-sending the edited / regenerated message.
+   */
+  truncate: (messageId: string) => void;
   rawEvents: DebugEvent[];
 }
 
@@ -119,16 +130,21 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // value, not a stale closure. Without it, two rapid submits both see
   // state.pending=false at function-close time and both kick off SSE.
   const pendingRef = useRef(false);
-  // pendingKindRef distinguishes WHO set ``pendingRef=true``. A live
-  // ``send()`` is "send"; a background ``_resumeRun()`` is "resume".
-  // When the user actively submits a new message and a resume happens
-  // to be in flight, the resume stream may be hung waiting for a close
-  // frame the server never sends. Without this distinction the send
-  // would silently exit at the ``if (pendingRef.current) return``
-  // gate, producing the "I typed and nothing happened" failure mode
-  // (tasks #459 / #351, reproduced 6 times in the 2026-05-19 session).
-  // With this distinction, send() preempts an in-flight resume.
-  const pendingKindRef = useRef<"send" | "resume" | null>(null);
+  // Follow-up sends issued while a stream/resume is in flight are
+  // QUEUED here and flushed when the in-flight turn settles — never
+  // dropped. This replaces the old `pendingKindRef` + `setTimeout(0)`
+  // resume-preemption dance (tasks #459/#351): with the backend now
+  // releasing the session lock at stream-end (not after persist), a
+  // queued follow-up runs the instant the current turn ends, with no
+  // 409 and no silent "I typed and nothing happened" drop.
+  const sendQueueRef = useRef<string[]>([]);
+  // Always-latest `send`, so the stream `finally` can flush the queue
+  // without capturing a stale closure.
+  const sendRef = useRef<((message: string) => Promise<void>) | null>(null);
+  const flushQueue = useCallback(() => {
+    const next = sendQueueRef.current.shift();
+    if (next !== undefined) void sendRef.current?.(next);
+  }, []);
   // Last sessionId we hydrated against. Lets the reset effect tell
   // "background history refetch for the same session" (don't reset
   // mid-stream) apart from "user navigated to a different session"
@@ -165,37 +181,39 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // leak its transcript into the new one.
   useEffect(() => {
     const sessionChanged = lastSessionIdRef.current !== opts.sessionId;
-    if (pendingRef.current && !sessionChanged) {
-      // Same-session refetch while streaming — leave the SSE alone.
-      return;
-    }
-    // Session changed OR no stream in flight → tear down + hydrate.
-    abortRef.current?.abort();
-    setRawEvents([]);
-    eventCounter.current = 0;
-    pendingRef.current = false;
-    // P0 — keep `attachedRunIdRef` populated across same-session
-    // history refetches. The reference is consulted by the
-    // `_resumeRun` useEffect to decide whether a freshly-discovered
-    // `resumeFrom.runId` belongs to a run THIS hook instance already
-    // attached to. Pre-fix this got nulled on every same-session
-    // history refetch (which happens on turn completion), so the
-    // next `useActiveRun` poll — if it returned the just-finished
-    // run's pointer with stale `status="running"` because the
-    // BackgroundTask hadn't flipped it yet — would re-fire
-    // `_resumeRun`, set `pendingRef=true`, and silently block the
-    // user's next `send()` for ~100-500ms. The classic "I typed,
-    // textarea cleared, nothing happened" follow-up regression.
-    // Only null this when the session actually changes.
     if (sessionChanged) {
+      // Navigation to a DIFFERENT session: hard reset + tear down any
+      // in-flight stream (staying in lane on the old session would leak
+      // its transcript into the new one). This is the ONLY path allowed
+      // to discard transcript state.
+      abortRef.current?.abort();
+      setRawEvents([]);
+      eventCounter.current = 0;
+      pendingRef.current = false;
+      sendQueueRef.current = [];
       attachedRunIdRef.current = null;
       lastEventIdRef.current = null;
+      lastSessionIdRef.current = opts.sessionId;
+      setState(
+        opts.initialMessages && opts.initialMessages.length > 0
+          ? { ...initialState, messages: opts.initialMessages }
+          : initialState,
+      );
+      return;
     }
-    lastSessionIdRef.current = opts.sessionId;
+    // SAME session, new `initialMessages` reference = a background
+    // history refetch (turn-completion invalidate, the +1200ms title
+    // re-invalidate, window-focus, etc.). RECONCILE it into the reducer
+    // — never reset. This is the core client-side fix for the "flash and
+    // disappear" follow-up bug: a refetch can only fill in
+    // server-confirmed rows; it can NEVER delete an optimistic,
+    // streaming, or terminal-error row. Safe even mid-stream — the
+    // streaming assistant row is a live row and is preserved, so we no
+    // longer need the old "skip reset while pending" special-case (which
+    // also meant a focus-refetch mid-stream silently dropped the
+    // server's settled prefix).
     if (opts.initialMessages && opts.initialMessages.length > 0) {
-      setState({ ...initialState, messages: opts.initialMessages });
-    } else {
-      setState(initialState);
+      setState((prev) => reconcileServerHistory(prev, opts.initialMessages ?? []));
     }
   }, [opts.sessionId, opts.initialMessages]);
 
@@ -213,7 +231,6 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
         return;
       }
       pendingRef.current = true;
-      pendingKindRef.current = "resume";
       // The resume stream paints into the same placeholder shape the
       // live path uses, so the streaming-assistant message has to
       // exist before the first text_delta arrives. We don't know the
@@ -270,12 +287,11 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
         }
       } finally {
         pendingRef.current = false;
-        if (pendingKindRef.current === "resume") {
-          pendingKindRef.current = null;
-        }
+        // Flush any follow-up the user queued while the resume ran.
+        flushQueue();
       }
     },
-    [opts.sessionId, transport, appendDebug],
+    [opts.sessionId, transport, appendDebug, flushQueue],
   );
 
   // Open the resume stream when `resumeFrom` is set on mount or
@@ -297,29 +313,28 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   const send = useCallback(
     async (message: string) => {
       if (pendingRef.current) {
-        // Preempt a hung resume — user intent supersedes a background
-        // SSE that may be stuck waiting for a close frame the server
-        // never emitted. Without this, the "I typed `sure` and nothing
-        // happened" failure mode silently drops the user's send (tasks
-        // #459 / #351). Aborting the resume stream triggers its catch
-        // + finally clause, which flips ``pendingRef`` back to false
-        // and clears the ``"resume"`` kind. The await-microtask gives
-        // the finally clause a tick to run before we re-check.
-        if (pendingKindRef.current === "resume") {
-          abortRef.current?.abort();
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 0);
-          });
-        }
-        if (pendingRef.current) return;
+        // A stream (live send OR resume) is in flight. QUEUE the
+        // follow-up instead of dropping it; it flushes the instant the
+        // current turn settles (see `flushQueue` in the stream
+        // `finally`). With the backend releasing the session lock at
+        // stream-end, the flushed send finds the lock free — no 409,
+        // no silent drop. This replaces the old resume-preemption dance.
+        sendQueueRef.current.push(message);
+        return;
       }
       pendingRef.current = true;
-      pendingKindRef.current = "send";
+      // Stable per-send correlation/idempotency key. The optimistic
+      // user row + assistant placeholder carry it so a racing history
+      // refetch can reconcile (fill-in), never delete, this turn's rows.
+      const clientKey =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `ck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Optimistic push.
-      setState((prev) => pushUserAndAssistantPlaceholder(prev, message).state);
+      // Optimistic push (tagged origin:"optimistic" + clientKey).
+      setState((prev) => pushUserAndAssistantPlaceholder(prev, message, clientKey).state);
 
       const url = joinUrl(transport, `/sessions/${encodeURIComponent(opts.sessionId)}/messages`);
       const token = transport.getToken?.();
@@ -329,6 +344,10 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            // Idempotency key (Stripe-style): lets the backend dedupe a
+            // retried/double-fired POST onto the same run instead of
+            // starting a second one. Harmless if the server ignores it.
+            "X-Idempotency-Key": clientKey,
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ message }),
@@ -363,13 +382,18 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
         }
       } finally {
         pendingRef.current = false;
-        if (pendingKindRef.current === "send") {
-          pendingKindRef.current = null;
-        }
+        // Flush a queued follow-up (if any) now that the lock is free.
+        flushQueue();
       }
     },
-    [opts.sessionId, transport, appendDebug],
+    [opts.sessionId, transport, appendDebug, flushQueue],
   );
+
+  // Keep `sendRef` pointed at the latest `send` so `flushQueue` (called
+  // from a stream `finally`) never invokes a stale closure.
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
@@ -379,7 +403,11 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
     setState((prev) => clearCapabilityRequest(prev, messageId));
   }, []);
 
-  return { state, send, abort, clearCapability, rawEvents };
+  const truncate = useCallback((messageId: string) => {
+    setState((prev) => truncateFrom(prev, messageId));
+  }, []);
+
+  return { state, send, abort, clearCapability, truncate, rawEvents };
 }
 
 // Silence the unused-import warning on `Transport` — it's exported

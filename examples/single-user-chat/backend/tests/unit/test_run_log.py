@@ -132,6 +132,54 @@ async def test_mark_done_flips_pointer_and_stamps_completed_at(vfs: Any) -> None
     assert pointer2["status"] == "error"
 
 
+async def test_mark_done_is_run_scoped_and_does_not_clobber_a_newer_run(vfs: Any) -> None:
+    """Turn-lifecycle redesign: ``mark_done`` must only flip the pointer
+    when it still refers to THIS run.
+
+    Because the stream lock is released at stream-end (not after persist),
+    the NEXT turn can open its run — overwriting ``active.json`` with its
+    own ``run_id`` + ``status="running"`` — BEFORE the prior turn's
+    persist BackgroundTask reaches ``mark_done``. An unconditional flip
+    would clobber the newer run's "running" pointer back to "done" and
+    make the SPA's resume poll miss the live run.
+    """
+    from app.services.run_log import RunEventLog, read_active_pointer
+
+    sid = "sess-runscoped"
+    # Turn N opens.
+    log_n = await RunEventLog.open(
+        runtime=_StubRuntime(vfs),
+        session_id=sid,
+        run_id="turn-0000-aaa",
+        model="anthropic:claude-haiku-4-5",
+        turn_index=0,
+    )
+    # Turn N+1 opens (allowed now — N's stream lock was already freed),
+    # overwriting the active pointer to itself, status=running.
+    log_n1 = await RunEventLog.open(
+        runtime=_StubRuntime(vfs),
+        session_id=sid,
+        run_id="turn-0001-bbb",
+        model="anthropic:claude-haiku-4-5",
+        turn_index=1,
+    )
+
+    # Turn N's late persist task marks itself done — must be a NO-OP on
+    # the pointer (which now belongs to the running turn N+1).
+    await log_n.mark_done(status="done")
+    pointer = await read_active_pointer(vfs=vfs, session_id=sid)
+    assert pointer is not None
+    assert pointer["run_id"] == "turn-0001-bbb"
+    assert pointer["status"] == "running", "draining turn N clobbered turn N+1's pointer"
+
+    # Turn N+1 marking itself done DOES flip — it owns the pointer.
+    await log_n1.mark_done(status="done")
+    pointer2 = await read_active_pointer(vfs=vfs, session_id=sid)
+    assert pointer2 is not None
+    assert pointer2["run_id"] == "turn-0001-bbb"
+    assert pointer2["status"] == "done"
+
+
 async def test_read_active_pointer_returns_none_when_absent(vfs: Any) -> None:
     from app.services.run_log import read_active_pointer
 

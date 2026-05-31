@@ -247,6 +247,22 @@ class RunEventLog:
                 "turn_index": None,
             }
 
+        # Run-scoped: only flip the pointer if it still refers to THIS
+        # run. Under the turn-lifecycle redesign the stream lock is
+        # released at stream-end, so the *next* turn can open its run
+        # (overwriting active.json with its own run_id + status=running)
+        # before this turn's persist BackgroundTask reaches mark_done.
+        # An unconditional flip here would clobber the newer run's
+        # "running" pointer back to "done" and make the SPA's resume
+        # poll miss the live run. Skip when the pointer has moved on.
+        if current.get("run_id") not in (self._run_id, None):
+            logger.debug(
+                "run_log.mark_done: pointer advanced to run=%s, skipping flip of run=%s",
+                current.get("run_id"),
+                self._run_id,
+            )
+            return
+
         current["status"] = status
         current["completed_at"] = completed_at
         current["last_seq"] = self._last_seq

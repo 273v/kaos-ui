@@ -8,6 +8,7 @@ import pytest
 
 from app.services.locks import (
     get_session_lock,
+    get_session_persist_lock,
     is_session_running,
     session_lock,
 )
@@ -78,4 +79,61 @@ async def test_session_lock_release_on_exception() -> None:
         async with session_lock(sid):
             raise _Boom()
 
+    assert is_session_running(sid) is False
+
+
+# --- Turn-lifecycle redesign (2026-05-31): stream lock vs persist lock ---
+
+
+@pytest.mark.unit
+def test_persist_lock_is_distinct_from_stream_lock() -> None:
+    """The persist lock must be a SEPARATE object from the stream lock —
+    they protect different phases (the stream vs the post-stream persist)
+    and must be independently held/released.
+    """
+    sid = "two-locks-session"
+    assert get_session_persist_lock(sid) is not get_session_lock(sid)
+    # ...but each is a stable singleton per session.
+    assert get_session_persist_lock(sid) is get_session_persist_lock(sid)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_session_is_free_for_next_turn_while_persist_still_running() -> None:
+    """The core invariant of the follow-up-send fix.
+
+    Models the redesigned lifecycle:
+      1. A turn streams        → stream lock held; session is "running".
+      2. Stream ends           → the generator's ``finally`` releases the
+                                  STREAM lock (synchronously), while the
+                                  post-stream ``_do_persist`` task holds
+                                  the PERSIST lock.
+      3. "Draining" window     → persist is still running, but the stream
+                                  lock is free.
+
+    A follow-up POST gates on ``is_session_running`` (the stream lock).
+    Pre-fix, the stream lock was released only AFTER persist, so a
+    follow-up in the draining window 409'd ~50% of the time. Post-fix,
+    ``is_session_running`` reports the session FREE during draining, so
+    the follow-up is accepted — no 409.
+    """
+    sid = "draining-session"
+    stream_lock = get_session_lock(sid)
+    persist_lock = get_session_persist_lock(sid)
+
+    # 1. Streaming.
+    await stream_lock.acquire()
+    assert is_session_running(sid) is True
+
+    # 2. _do_persist starts (persist lock), then the generator releases
+    #    the stream lock at stream-end.
+    await persist_lock.acquire()
+    stream_lock.release()
+
+    # 3. Draining: persist still running, but the session is FREE for the
+    #    next turn. This is the assertion the bug violated.
+    assert is_session_running(sid) is False
+    assert persist_lock.locked() is True
+
+    persist_lock.release()
     assert is_session_running(sid) is False
