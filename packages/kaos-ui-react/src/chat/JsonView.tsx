@@ -114,8 +114,8 @@ export function JsonView({ value, maxHeight = 320, truncated = false }: Props) {
       </pre>
       {truncated && (
         <div className="px-3 py-1 border-t border-border/60 text-[10px] italic text-muted-foreground bg-muted/30">
-          kaos-agents truncated the wire preview at ~200 chars; only the fields
-          shown above arrived intact.
+          kaos-agents truncated the wire preview at ~200 chars; only the fields shown above arrived
+          intact.
         </div>
       )}
     </div>

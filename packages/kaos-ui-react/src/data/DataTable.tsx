@@ -163,9 +163,7 @@ function defaultRenderer<R>(col: Column<R>, value: R[keyof R]): React.ReactNode 
     case "date":
       return fmtDate(value);
     case "code":
-      return (
-        <code className="font-mono text-[12.5px] text-foreground/85">{String(value)}</code>
-      );
+      return <code className="font-mono text-[12.5px] text-foreground/85">{String(value)}</code>;
     case "badge":
       return (
         <span className="inline-flex items-center rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-foreground/80">
@@ -250,17 +248,11 @@ export function DataTable<Row extends Record<string, unknown>>({
       if (vb == null) return -1;
       // Number-shaped types compare numerically; everything else
       // compares lexicographically via String() for stability.
-      if (
-        col.kind === "number" ||
-        col.kind === "currency" ||
-        col.kind === "percent"
-      ) {
+      if (col.kind === "number" || col.kind === "currency" || col.kind === "percent") {
         return (va as number) - (vb as number);
       }
       if (col.kind === "date") {
-        return (
-          new Date(va as string).valueOf() - new Date(vb as string).valueOf()
-        );
+        return new Date(va as string).valueOf() - new Date(vb as string).valueOf();
       }
       return String(va).localeCompare(String(vb));
     };
@@ -288,13 +280,12 @@ export function DataTable<Row extends Record<string, unknown>>({
         )}
         <colgroup>
           {columns.map((col) => (
-            <col
-              key={col.id}
-              style={col.width ? { width: col.width } : undefined}
-            />
+            <col key={col.id} style={col.width ? { width: col.width } : undefined} />
           ))}
         </colgroup>
-        <thead className={stickyHeader ? "sticky top-0 z-[1] bg-muted/40 backdrop-blur" : "bg-muted/40"}>
+        <thead
+          className={stickyHeader ? "sticky top-0 z-[1] bg-muted/40 backdrop-blur" : "bg-muted/40"}
+        >
           <tr className={DENSITY_ROW[density]}>
             {columns.map((col) => {
               const isActive = sortId === col.id;
@@ -377,9 +368,7 @@ export function DataTable<Row extends Record<string, unknown>>({
                   const value = row[col.id] as Row[keyof Row];
                   const align = alignmentFor(col);
                   const numericFont =
-                    col.kind === "number" ||
-                    col.kind === "currency" ||
-                    col.kind === "percent";
+                    col.kind === "number" || col.kind === "currency" || col.kind === "percent";
                   return (
                     <td
                       key={col.id}

@@ -163,7 +163,6 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // user tabs away + back. The session-change branch below ALWAYS
   // tears down the stream — staying in lane on the OLD session would
   // leak its transcript into the new one.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is deliberately a dep — initialMessages reference may be cache-stable across a session switch, so we MUST also reset on id change.
   useEffect(() => {
     const sessionChanged = lastSessionIdRef.current !== opts.sessionId;
     if (pendingRef.current && !sessionChanged) {
@@ -283,7 +282,6 @@ export function useSendMessage(opts: UseSendMessageOptions): UseSendMessageResul
   // changes from `null` → run id. The effect is gated by
   // `attachedRunIdRef` so a TanStack-Query refetch of `useActiveRun`
   // (which returns a stable run id) doesn't reopen the stream.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately keying on resumeFrom.runId, not the wrapper object.
   useEffect(() => {
     const runId = opts.resumeFrom?.runId ?? null;
     if (!runId) return;

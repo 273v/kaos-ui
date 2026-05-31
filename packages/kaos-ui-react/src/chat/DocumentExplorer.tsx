@@ -8,9 +8,9 @@
  */
 
 import {
+  Check,
   ChevronDown,
   ChevronRight,
-  Check,
   Download,
   FileText,
   Loader2,
@@ -287,8 +287,14 @@ function FileCard({
                 }
               }}
               disabled={removing}
-              title={confirmRemove ? `Click again to confirm removing ${file.filename}` : `Remove ${file.filename}`}
-              aria-label={confirmRemove ? `Confirm remove ${file.filename}` : `Remove ${file.filename}`}
+              title={
+                confirmRemove
+                  ? `Click again to confirm removing ${file.filename}`
+                  : `Remove ${file.filename}`
+              }
+              aria-label={
+                confirmRemove ? `Confirm remove ${file.filename}` : `Remove ${file.filename}`
+              }
               className={`p-1 disabled:opacity-60 disabled:cursor-not-allowed ${
                 confirmRemove
                   ? "text-destructive hover:text-destructive/80"

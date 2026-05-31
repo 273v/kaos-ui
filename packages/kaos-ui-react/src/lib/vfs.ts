@@ -80,8 +80,7 @@ export async function listSessionVfs(
     throw {
       status: response.status,
       what:
-        detail?.what ??
-        (typeof body.detail === "string" ? body.detail : `HTTP ${response.status}`),
+        detail?.what ?? (typeof body.detail === "string" ? body.detail : `HTTP ${response.status}`),
       how_to_fix: detail?.how_to_fix,
     };
   }

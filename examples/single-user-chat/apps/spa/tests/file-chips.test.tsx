@@ -112,9 +112,7 @@ describe("<FileChips>", () => {
 
   it("calls onRemove with the filename when X is clicked", () => {
     const onRemove = vi.fn();
-    render(
-      <FileChips files={[makeFile("a.pdf")]} onRemove={onRemove} maxVisible={3} />,
-    );
+    render(<FileChips files={[makeFile("a.pdf")]} onRemove={onRemove} maxVisible={3} />);
     fireEvent.click(screen.getByLabelText("Remove a.pdf"));
     expect(onRemove).toHaveBeenCalledWith("a.pdf");
   });

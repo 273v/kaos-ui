@@ -80,9 +80,7 @@ function patchPlanStep(
 ): ChatMessage[] {
   const target = currentAssistant(messages);
   if (!target || !target.plan) return messages;
-  const newSteps = target.plan.steps.map((s) =>
-    s.step_id === stepId ? { ...s, ...updates } : s,
-  );
+  const newSteps = target.plan.steps.map((s) => (s.step_id === stepId ? { ...s, ...updates } : s));
   return messages.map((m) =>
     m.id === target.id && m.plan ? { ...m, plan: { ...m.plan, steps: newSteps } } : m,
   );
@@ -611,10 +609,7 @@ export function markAborted(state: TranscriptState): TranscriptState {
  * dismissed, or denied an elevation request. Idempotent — no-op
  * if no matching message or the snapshot is already cleared.
  */
-export function clearCapabilityRequest(
-  state: TranscriptState,
-  messageId: string,
-): TranscriptState {
+export function clearCapabilityRequest(state: TranscriptState, messageId: string): TranscriptState {
   let mutated = false;
   const next = state.messages.map((m) => {
     if (m.id !== messageId || !m.capability_request) return m;

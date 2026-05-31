@@ -77,9 +77,10 @@ function bucketize(
   startOfToday.setHours(0, 0, 0, 0);
   const baseline = startOfToday.valueOf();
 
-  const out: { bucket: Bucket; items: SessionSummary[] }[] = BUCKETS.map(
-    (b) => ({ bucket: b, items: [] }),
-  );
+  const out: { bucket: Bucket; items: SessionSummary[] }[] = BUCKETS.map((b) => ({
+    bucket: b,
+    items: [],
+  }));
   for (const s of items) {
     const age = Math.max(0, baseline - bucketTs(s));
     // Today = anything from `baseline` forward (incl. future-ish

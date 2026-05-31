@@ -12,13 +12,10 @@ export function usePatchToolSet(sessionId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ToolSetUpdateBody) =>
-      apiJson<SessionMeta>(
-        `/v1/chat/sessions/${encodeURIComponent(sessionId)}/tool-set`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        },
-      ),
+      apiJson<SessionMeta>(`/v1/chat/sessions/${encodeURIComponent(sessionId)}/tool-set`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: (data) => {
       qc.setQueryData(queryKeys.session(sessionId), data);
       qc.invalidateQueries({ queryKey: queryKeys.sessions() });

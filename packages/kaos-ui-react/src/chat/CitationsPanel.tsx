@@ -71,9 +71,7 @@ function prettyKind(kind: string): string {
 // Coarse category coloring for kind badges. Maps each citation kind
 // to one of five visual buckets so the user can scan a mixed-kind
 // list and see the dominant domain at a glance.
-function kindCategory(
-  kind: string,
-): "legal" | "finance" | "accounting" | "identifier" | "other" {
+function kindCategory(kind: string): "legal" | "finance" | "accounting" | "identifier" | "other" {
   const FINANCE = new Set([
     "sec_filing",
     "sec_release",

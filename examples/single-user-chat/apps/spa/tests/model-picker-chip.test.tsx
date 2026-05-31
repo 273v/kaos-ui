@@ -28,7 +28,7 @@ describe("<ModelPickerChip>", () => {
       data: undefined,
       isLoading: true,
       error: null,
-    } as ReturnType<typeof useModels>);
+    } as unknown as ReturnType<typeof useModels>);
 
     render(<ModelPickerChip value="anthropic:claude-haiku-4-5" onChange={() => {}} />);
 
@@ -56,7 +56,7 @@ describe("<ModelPickerChip>", () => {
       },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useModels>);
+    } as unknown as ReturnType<typeof useModels>);
 
     const onChange = vi.fn();
     render(<ModelPickerChip value="anthropic:claude-haiku-4-5" onChange={onChange} />);
@@ -83,7 +83,7 @@ describe("<ModelPickerChip>", () => {
       },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useModels>);
+    } as unknown as ReturnType<typeof useModels>);
 
     render(<ModelPickerChip value="anthropic:claude-haiku-4-5" onChange={() => {}} disabled />);
 

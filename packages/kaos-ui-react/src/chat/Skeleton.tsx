@@ -57,13 +57,9 @@ export function SkeletonRow({
 }: RowProps) {
   const rows = Array.from({ length: Math.max(count, 0) });
   return (
-    <div role="status" aria-live="polite" aria-label="Loading">
+    <output className="block" aria-live="polite" aria-label="Loading">
       {rows.map((_, rowIdx) => (
-        <div
-          // biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows are content-free.
-          key={rowIdx}
-          className={`flex items-start gap-2 py-2 ${className}`}
-        >
+        <div key={rowIdx} className={`flex items-start gap-2 py-2 ${className}`}>
           {leadingShape && (
             <div
               className="h-8 w-8 rounded-md bg-muted/60 animate-pulse motion-reduce:animate-none shrink-0"
@@ -72,16 +68,12 @@ export function SkeletonRow({
           )}
           <div className="flex-1 space-y-1.5 min-w-0">
             {Array.from({ length: Math.max(lines, 1) }).map((__, lineIdx) => (
-              <SkeletonLine
-                // biome-ignore lint/suspicious/noArrayIndexKey: skeleton lines are content-free.
-                key={lineIdx}
-                widthClass={lineIdx === lines - 1 ? "w-2/3" : "w-full"}
-              />
+              <SkeletonLine key={lineIdx} widthClass={lineIdx === lines - 1 ? "w-2/3" : "w-full"} />
             ))}
           </div>
         </div>
       ))}
       <span className="sr-only">Loading…</span>
-    </div>
+    </output>
   );
 }

@@ -13,13 +13,13 @@
 // same public surface (`@273v/kaos-ui-react/lib`) that any consumer
 // would.
 
+import type { KaosAgentEvent } from "@273v/kaos-ui-react/lib";
 import {
   applyEvent,
   initialState,
   pushUserAndAssistantPlaceholder,
   type TranscriptState,
 } from "@273v/kaos-ui-react/lib";
-import type { KaosAgentEvent } from "@273v/kaos-ui-react/lib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 function makeStream(): KaosAgentEvent[] {

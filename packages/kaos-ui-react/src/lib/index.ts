@@ -6,6 +6,8 @@ export type {
   ToolPolicySnapshot,
   ChatMessage,
   TurnStatusKind,
+  PlanStep,
+  PlanSnapshot,
 } from "./chat-state.js";
 export { newId } from "./chat-state.js";
 

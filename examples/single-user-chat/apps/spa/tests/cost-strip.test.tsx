@@ -51,11 +51,7 @@ describe("<CostStrip> planner row (TR-10)", () => {
   });
 
   it("aggregates across multiple planner events", () => {
-    render(
-      <CostStrip
-        events={[usage({}), policy(0.001), policy(0.002), policy(0.0015)]}
-      />,
-    );
+    render(<CostStrip events={[usage({}), policy(0.001), policy(0.002), policy(0.0015)]} />);
     expect(screen.getByText(/3 turns/)).toBeInTheDocument();
     // 0.001 + 0.002 + 0.0015 = 0.0045
     expect(screen.getByText(/\$0\.0045/)).toBeInTheDocument();

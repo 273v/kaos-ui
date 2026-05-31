@@ -194,20 +194,20 @@ export function repairAndParseJson<T = unknown>(raw: string | undefined): T | nu
   // Walk the string, find the last position we can safely truncate at.
   let depth = 0;
   let inString = false;
-  let escape = false;
+  let escaped = false;
   let lastSafePos = -1;
   // Track the opening character of each level so we know how to close.
   const opens: string[] = [];
 
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
-    if (escape) {
-      escape = false;
+    if (escaped) {
+      escaped = false;
       continue;
     }
     if (inString) {
       if (ch === "\\") {
-        escape = true;
+        escaped = true;
       } else if (ch === '"') {
         inString = false;
         // Don't mark lastSafePos here — a closed string could be a
@@ -324,16 +324,16 @@ function extractBalancedObjects<T = Record<string, unknown>>(raw: string): T[] {
   let depth = 0;
   let start = -1;
   let inString = false;
-  let escape = false;
+  let escaped = false;
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
-    if (escape) {
-      escape = false;
+    if (escaped) {
+      escaped = false;
       continue;
     }
     if (inString) {
       if (ch === "\\") {
-        escape = true;
+        escaped = true;
       } else if (ch === '"') {
         inString = false;
       }

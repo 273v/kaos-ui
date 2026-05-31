@@ -81,6 +81,7 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
   }, [skills, query]);
 
   // Reset active item when the filtered set changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: filtered.length is an intentional re-run trigger (reset selection when the result-set size changes); the effect deliberately does not read it.
   useEffect(() => {
     setActive(0);
   }, [filtered.length]);
@@ -129,6 +130,8 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
   return (
     <div
       ref={rootRef}
+      tabIndex={-1}
+      // biome-ignore lint/a11y/useSemanticElements: custom ARIA combobox/listbox popup; a native <select> cannot render the rich skill rows (icon + name + description).
       role="listbox"
       id={listId}
       aria-label="Slash command skills"
@@ -141,6 +144,7 @@ export function SlashMenu({ skills, query, open, onPick, onClose }: SlashMenuPro
           <button
             key={s.id}
             type="button"
+            // biome-ignore lint/a11y/useSemanticElements: ARIA listbox option with rich custom content (icon + name + description); a native <option> permits text only.
             role="option"
             aria-selected={i === active}
             onMouseEnter={() => setActive(i)}

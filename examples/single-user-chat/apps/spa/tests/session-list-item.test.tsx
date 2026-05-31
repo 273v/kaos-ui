@@ -9,8 +9,8 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 const patchMutate = vi.fn();
@@ -24,6 +24,7 @@ vi.mock("@/hooks/use-archive-session", () => ({
 }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...rest }: { children: ReactNode; [k: string]: unknown }) => (
+    // biome-ignore lint/a11y/useValidAnchor: test double for the router <Link>; the href is irrelevant to these assertions.
     <a href="#" {...rest}>
       {children}
     </a>
