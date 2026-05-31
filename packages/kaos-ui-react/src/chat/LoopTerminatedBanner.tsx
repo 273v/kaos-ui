@@ -96,8 +96,7 @@ export function LoopTerminatedBanner({ termination }: Props) {
           </p>
           <p className="tabular-nums opacity-70">
             {termination.iterations_used} iteration
-            {termination.iterations_used === 1 ? "" : "s"} ·{" "}
-            {formatCost(termination.cost_usd)} ·{" "}
+            {termination.iterations_used === 1 ? "" : "s"} · {formatCost(termination.cost_usd)} ·{" "}
             {formatWallClock(termination.wall_clock_ms)}
           </p>
         </div>

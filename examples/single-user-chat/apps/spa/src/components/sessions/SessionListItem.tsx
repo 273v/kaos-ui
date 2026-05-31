@@ -15,8 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useArchiveSession } from "@/hooks/use-archive-session";
 import { useHealth } from "@/hooks/use-health";
 import { usePatchMeta } from "@/hooks/use-patch-meta";
-import type { SessionSummary } from "@/lib/api-types";
 import { apiFetch } from "@/lib/api-fetch";
+import type { SessionSummary } from "@/lib/api-types";
 
 interface Props {
   session: SessionSummary;

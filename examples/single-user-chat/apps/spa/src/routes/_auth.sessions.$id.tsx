@@ -168,9 +168,7 @@ function ChatDetail() {
   // instead of waiting for the user to send a fresh message.
   const activeRun = useActiveRun(id);
   const resumeFrom =
-    activeRun.data && activeRun.data.status === "running"
-      ? { runId: activeRun.data.run_id }
-      : null;
+    activeRun.data && activeRun.data.status === "running" ? { runId: activeRun.data.run_id } : null;
   const stream = useSendMessage({ sessionId: id, initialMessages, resumeFrom });
   const citations = useCitations(id, stream.state.messages);
 
@@ -694,7 +692,9 @@ function ChatDetail() {
         <DropZone onDrop={onAttach} disabled={!meta} />
 
         {uploadError && (
-          <div className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
+          <div
+            className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}
+          >
             <div
               role="alert"
               className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
@@ -713,7 +713,9 @@ function ChatDetail() {
         )}
 
         {files.data && files.data.files.length > 0 && (
-          <div className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
+          <div
+            className={`mx-auto px-4 ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}
+          >
             <FileChips
               files={files.data.files}
               onRemove={(name) => removeFile.mutate(name)}
@@ -758,7 +760,9 @@ function ChatDetail() {
             us swap server-loaded skill registries in later without
             changing the component API.
           */}
-          <div className={`mx-auto px-4 pointer-events-none ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}>
+          <div
+            className={`mx-auto px-4 pointer-events-none ${transcriptWide ? "max-w-[min(96ch,90vw)]" : "max-w-3xl"}`}
+          >
             <div className="relative pointer-events-auto">
               <SlashMenu
                 skills={BUILTIN_SKILLS}
@@ -808,9 +812,7 @@ function ChatDetail() {
         }
         onRemove={(filename) => removeFile.mutate(filename)}
         removing={
-          removeFile.variables && removeFile.isPending
-            ? new Set([removeFile.variables])
-            : undefined
+          removeFile.variables && removeFile.isPending ? new Set([removeFile.variables]) : undefined
         }
         onAskAboutSelection={onAskAboutSelection}
         onDownload={async (filename) => {

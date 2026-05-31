@@ -205,12 +205,34 @@ html.dark,
   hyphens: manual;
   -webkit-hyphens: manual;
 }
-.kaos-md h1 { font-size: 1.5em;   margin: 2em 0 0.5em; }
-.kaos-md h2 { font-size: 1.25em;  margin: 1.75em 0 0.5em; }
-.kaos-md h3 { font-size: 1.125em; margin: 1.5em 0 0.4em; }
-.kaos-md h4 { font-size: 1em;     margin: 1.25em 0 0.35em; font-weight: 650; }
-.kaos-md h5 { font-size: 0.9375em; margin: 1em 0 0.3em; text-transform: uppercase; letter-spacing: 0.04em; }
-.kaos-md h6 { font-size: 0.875em; margin: 1em 0 0.3em; color: hsl(var(--kaos-muted-foreground)); }
+.kaos-md h1 {
+  font-size: 1.5em;
+  margin: 2em 0 0.5em;
+}
+.kaos-md h2 {
+  font-size: 1.25em;
+  margin: 1.75em 0 0.5em;
+}
+.kaos-md h3 {
+  font-size: 1.125em;
+  margin: 1.5em 0 0.4em;
+}
+.kaos-md h4 {
+  font-size: 1em;
+  margin: 1.25em 0 0.35em;
+  font-weight: 650;
+}
+.kaos-md h5 {
+  font-size: 0.9375em;
+  margin: 1em 0 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kaos-md h6 {
+  font-size: 0.875em;
+  margin: 1em 0 0.3em;
+  color: hsl(var(--kaos-muted-foreground));
+}
 .kaos-md :where(h1, h2, h3, h4, h5, h6):first-child {
   margin-top: 0;
 }
@@ -240,8 +262,14 @@ html.dark,
 /* ─── Emphasis ─────────────────────────────────────────────────────
  * Bold is 700 (was 600) so it visually distinguishes from heading
  * weight inside body prose. Inter Variable supports the full range. */
-.kaos-md strong, .kaos-md b { font-weight: 700; }
-.kaos-md em, .kaos-md i { font-style: italic; }
+.kaos-md strong,
+.kaos-md b {
+  font-weight: 700;
+}
+.kaos-md em,
+.kaos-md i {
+  font-style: italic;
+}
 .kaos-md mark {
   background: hsl(var(--kaos-primary) / 0.18);
   color: inherit;
@@ -254,30 +282,50 @@ html.dark,
  * the text aligns with the surrounding paragraph baseline. Item-to-
  * item gap is small (0.3em) but item-to-list gap matches paragraph
  * rhythm (0.9em) so a list reads as one block, not as N paragraphs. */
-.kaos-md ul, .kaos-md ol {
+.kaos-md ul,
+.kaos-md ol {
   margin: 0 0 0.9em 0;
   padding-left: 1.625em;
 }
-.kaos-md ul { list-style: disc; }
-.kaos-md ol { list-style: decimal; }
-.kaos-md li { margin: 0; padding-left: 0.25em; }
-.kaos-md li + li { margin-top: 0.3em; }
-.kaos-md li > p { margin: 0 0 0.5em 0; }
-.kaos-md li > p:last-child { margin-bottom: 0; }
-.kaos-md li > ul, .kaos-md li > ol {
+.kaos-md ul {
+  list-style: disc;
+}
+.kaos-md ol {
+  list-style: decimal;
+}
+.kaos-md li {
+  margin: 0;
+  padding-left: 0.25em;
+}
+.kaos-md li + li {
+  margin-top: 0.3em;
+}
+.kaos-md li > p {
+  margin: 0 0 0.5em 0;
+}
+.kaos-md li > p:last-child {
+  margin-bottom: 0;
+}
+.kaos-md li > ul,
+.kaos-md li > ol {
   margin: 0.3em 0 0 0;
 }
-.kaos-md ol ol { list-style: lower-alpha; }
-.kaos-md ol ol ol { list-style: lower-roman; }
-.kaos-md ul ul { list-style: circle; }
+.kaos-md ol ol {
+  list-style: lower-alpha;
+}
+.kaos-md ol ol ol {
+  list-style: lower-roman;
+}
+.kaos-md ul ul {
+  list-style: circle;
+}
 
 /* ─── Inline code ──────────────────────────────────────────────────
  * Subtle muted background, no border (border + bg is double chrome).
  * Slightly smaller than body (0.875em) compensates for monospace
  * x-height running larger than the proportional body font. */
 .kaos-md code {
-  font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco,
-    Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.875em;
   font-feature-settings: "ss02", "calt";
   padding: 0.125em 0.375em;
@@ -290,8 +338,7 @@ html.dark,
  * No border — let the background carry the "this is a different
  * register" signal. Matches Stripe/Anthropic console aesthetic. */
 .kaos-md pre {
-  font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco,
-    Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace), SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.875em;
   line-height: 1.5;
   padding: 0.875em 1em;
@@ -308,7 +355,7 @@ html.dark,
   background: transparent;
   border: 0;
   font-size: inherit;
-  font-feature-settings: "calt";  /* drop the "ss02" inline-only feature */
+  font-feature-settings: "calt"; /* drop the "ss02" inline-only feature */
 }
 
 /* ─── Blockquote ───────────────────────────────────────────────────
@@ -321,7 +368,9 @@ html.dark,
   border-left: 3px solid hsl(var(--kaos-muted-foreground) / 0.35);
   color: hsl(var(--kaos-muted-foreground));
 }
-.kaos-md blockquote > :last-child { margin-bottom: 0; }
+.kaos-md blockquote > :last-child {
+  margin-bottom: 0;
+}
 .kaos-md blockquote p {
   text-align: left;
   hyphens: manual;
@@ -358,9 +407,16 @@ html.dark,
   hyphens: manual;
   -webkit-hyphens: manual;
 }
-.kaos-md tbody tr:last-child td { border-bottom: 0; }
-.kaos-md tbody tr:hover { background: hsl(var(--kaos-muted) / 0.3); }
-.kaos-md td p, .kaos-md th p { margin: 0; }
+.kaos-md tbody tr:last-child td {
+  border-bottom: 0;
+}
+.kaos-md tbody tr:hover {
+  background: hsl(var(--kaos-muted) / 0.3);
+}
+.kaos-md td p,
+.kaos-md th p {
+  margin: 0;
+}
 
 /* ─── Links ────────────────────────────────────────────────────────
  * Underline always present (a11y); thicker than browser default
@@ -393,10 +449,19 @@ html.dark,
 /* ─── Definition lists, keyboard, samp, kbd ────────────────────────
  * Markdown rarely emits these, but rendered HTML can; keep them in
  * the same visual register so they don't stand out as un-styled. */
-.kaos-md dl { margin: 0 0 0.9em 0; }
-.kaos-md dt { font-weight: 600; margin-top: 0.6em; }
-.kaos-md dt:first-child { margin-top: 0; }
-.kaos-md dd { margin: 0 0 0.6em 1.5em; }
+.kaos-md dl {
+  margin: 0 0 0.9em 0;
+}
+.kaos-md dt {
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+.kaos-md dt:first-child {
+  margin-top: 0;
+}
+.kaos-md dd {
+  margin: 0 0 0.6em 1.5em;
+}
 .kaos-md kbd {
   font-family: var(--font-mono, ui-monospace), monospace;
   font-size: 0.8125em;
@@ -409,11 +474,16 @@ html.dark,
 
 /* ─── Sup/Sub — footnote refs ──────────────────────────────────────
  * Browser default sup/sub fonts oversize and break baseline. Trim. */
-.kaos-md sup, .kaos-md sub {
+.kaos-md sup,
+.kaos-md sub {
   font-size: 0.75em;
   line-height: 0;
   vertical-align: baseline;
   position: relative;
 }
-.kaos-md sup { top: -0.45em; }
-.kaos-md sub { bottom: -0.2em; }
+.kaos-md sup {
+  top: -0.45em;
+}
+.kaos-md sub {
+  bottom: -0.2em;
+}

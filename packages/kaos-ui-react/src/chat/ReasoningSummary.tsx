@@ -48,8 +48,7 @@ export function ReasoningSummary({ goal }: Props) {
   // Body sentence: rationale wins; if absent, fall back to the
   // forward-looking note (next_action for replan; missing for
   // insufficient_evidence).
-  const summary =
-    goal.rationale || goal.next_action || goal.missing || "";
+  const summary = goal.rationale || goal.next_action || goal.missing || "";
 
   return (
     <details
@@ -69,10 +68,7 @@ export function ReasoningSummary({ goal }: Props) {
         </span>
         <CircleDashed className="mt-0.5 h-3 w-3 text-foreground/30 not-italic" />
         <span className="flex-1 min-w-0 leading-snug">
-          <span className="not-italic font-medium text-foreground/70">
-            {hint}.
-          </span>{" "}
-          {summary}
+          <span className="not-italic font-medium text-foreground/70">{hint}.</span> {summary}
         </span>
       </summary>
       <div className="mt-2 ml-5 pl-3 border-l border-border/60 text-xs space-y-2">
@@ -84,9 +80,7 @@ export function ReasoningSummary({ goal }: Props) {
         )}
         {goal.next_action && (
           <p className="text-foreground/70 leading-relaxed">
-            <span className="not-italic font-medium text-foreground/55">
-              Next action:{" "}
-            </span>
+            <span className="not-italic font-medium text-foreground/55">Next action: </span>
             {goal.next_action}
           </p>
         )}

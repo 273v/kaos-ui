@@ -45,7 +45,6 @@ export function safeRedirect(raw: string | undefined): string {
   // visual-confusion tricks (zero-width space, RTL override, etc.).
   // Same-app paths only need ASCII; consumers wanting real Unicode
   // in URLs should percent-encode (which is ASCII-safe).
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately filters control chars.
   if (!/^[\x20-\x7e]+$/.test(raw)) return "/sessions";
   return raw;
 }

@@ -5,7 +5,7 @@
 
 import { ToolCallBlock } from "@273v/kaos-ui-react/chat";
 import type { ToolCallSummary } from "@273v/kaos-ui-react/lib";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 function makeCall(overrides: Partial<ToolCallSummary> = {}): ToolCallSummary {
@@ -95,9 +95,7 @@ describe("<ToolCallBlock>", () => {
   });
 
   it("shows 'running…' instead of a preview when no result_preview yet", () => {
-    render(
-      <ToolCallBlock call={makeCall({ status: "running", result_preview: undefined })} />,
-    );
+    render(<ToolCallBlock call={makeCall({ status: "running", result_preview: undefined })} />);
     expect(screen.getByText(/running/)).toBeInTheDocument();
   });
 
@@ -110,9 +108,7 @@ describe("<ToolCallBlock>", () => {
 
   it("falls back to a humanized label for unknown tool ids", () => {
     render(
-      <ToolCallBlock
-        call={makeCall({ name: "kaos-future-tool-x", result_preview: undefined })}
-      />,
+      <ToolCallBlock call={makeCall({ name: "kaos-future-tool-x", result_preview: undefined })} />,
     );
     expect(screen.getByText("Future Tool X")).toBeInTheDocument();
   });
@@ -126,7 +122,9 @@ describe("<ToolCallBlock>", () => {
     });
     render(<ToolCallBlock call={call} defaultOpen />);
     // Header surfaces the doc title condensed.
-    expect(screen.getByText(/Regulation S-P: Privacy of Consumer Financial Information/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Regulation S-P: Privacy of Consumer Financial Information/),
+    ).toBeInTheDocument();
     // Expanded body: doc card with citation.
     expect(screen.getByText(/89 FR 47688/)).toBeInTheDocument();
     // Args summary in header shows derived "doc 2024-11116" since args_preview is empty.

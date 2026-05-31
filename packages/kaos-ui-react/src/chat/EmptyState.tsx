@@ -31,8 +31,7 @@ interface Props {
 
 export function EmptyState({ icon, title, description, action, compact = false }: Props) {
   return (
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className={`flex flex-col items-center text-center text-muted-foreground ${
         compact ? "py-4 px-2 gap-1.5" : "py-8 px-4 gap-2"
@@ -48,6 +47,6 @@ export function EmptyState({ icon, title, description, action, compact = false }
         </p>
       )}
       {action && <div className={compact ? "mt-1" : "mt-2"}>{action}</div>}
-    </div>
+    </output>
   );
 }

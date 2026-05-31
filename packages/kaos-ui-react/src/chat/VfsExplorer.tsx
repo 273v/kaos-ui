@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { groupVfsNodes, type VfsNode } from "../lib/vfs.js";
+import { type VfsNode, groupVfsNodes } from "../lib/vfs.js";
 import { EmptyState } from "./EmptyState.js";
 
 interface Props {
@@ -122,10 +122,7 @@ function NodeRow({
         }`}
       >
         <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-        <span
-          className="text-xs font-mono truncate flex-1"
-          title={node.relative_path}
-        >
+        <span className="text-xs font-mono truncate flex-1" title={node.relative_path}>
           {node.relative_path}
         </span>
         <span className="text-[10px] text-muted-foreground tabular-nums flex-shrink-0">
@@ -149,10 +146,7 @@ function PreviewPane({ node }: { node: VfsNode | null }) {
   return (
     <div className="flex-1 overflow-y-auto px-3 py-3 text-xs">
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span
-          className="font-mono text-[11px] break-all"
-          title={node.relative_path}
-        >
+        <span className="font-mono text-[11px] break-all" title={node.relative_path}>
           {node.relative_path}
         </span>
         <NodeBadge node={node} />
@@ -160,10 +154,7 @@ function PreviewPane({ node }: { node: VfsNode | null }) {
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
         <dt className="text-muted-foreground">Path</dt>
         <dd className="flex items-center gap-1.5 min-w-0">
-          <code
-            className="font-mono text-[10px] truncate flex-1"
-            title={node.path}
-          >
+          <code className="font-mono text-[10px] truncate flex-1" title={node.path}>
             {node.path}
           </code>
           <button
@@ -180,17 +171,13 @@ function PreviewPane({ node }: { node: VfsNode | null }) {
             <ClipboardCopy className="h-3 w-3" />
           </button>
           {copied && (
-            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-              copied
-            </span>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">copied</span>
           )}
         </dd>
         <dt className="text-muted-foreground">Size</dt>
         <dd className="tabular-nums">{formatSize(node.size_bytes)}</dd>
         <dt className="text-muted-foreground">MIME</dt>
-        <dd className="font-mono text-[10px] break-all">
-          {node.mime_type ?? "—"}
-        </dd>
+        <dd className="font-mono text-[10px] break-all">{node.mime_type ?? "—"}</dd>
         <dt className="text-muted-foreground">Modified</dt>
         <dd>{formatRelativeTime(node.modified_at)}</dd>
         {node.parse_status && (
@@ -258,12 +245,8 @@ export function VfsExplorer({
         <div className="flex items-center gap-2 min-w-0">
           <FolderTree className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">VFS</span>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {nodes.length}
-          </span>
-          {loading && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-          )}
+          <span className="text-xs text-muted-foreground tabular-nums">{nodes.length}</span>
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -274,20 +257,14 @@ export function VfsExplorer({
                 ? "Hide internal .kaos.json / .meta.json sidecars"
                 : "Show internal .kaos.json / .meta.json sidecars"
             }
-            aria-label={
-              showSidecars ? "Hide sidecars" : "Show sidecars"
-            }
+            aria-label={showSidecars ? "Hide sidecars" : "Show sidecars"}
             className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-2 py-1 rounded-md border ${
               showSidecars
                 ? "border-accent text-accent bg-accent/10"
                 : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
           >
-            {showSidecars ? (
-              <Settings2 className="h-3 w-3" />
-            ) : (
-              <EyeOff className="h-3 w-3" />
-            )}
+            {showSidecars ? <Settings2 className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
             Sidecars
           </button>
           {onRefresh && (

@@ -36,9 +36,10 @@ function formatTokens(n: number): string {
  * events in the session. Each turn emits at most one — sum across the
  * stream. Hidden when zero (no planner runs OR auto_narrow=False).
  */
-function aggregatePlannerCost(
-  events: ReadonlyArray<KaosAgentEvent | { event: KaosAgentEvent }>,
-): { cost_usd: number; calls: number } {
+function aggregatePlannerCost(events: ReadonlyArray<KaosAgentEvent | { event: KaosAgentEvent }>): {
+  cost_usd: number;
+  calls: number;
+} {
   let total = 0;
   let calls = 0;
   for (const item of events) {

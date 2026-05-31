@@ -30,9 +30,7 @@ export function ElevationPill({ elevations, onPinToSession }: Props) {
 
   // Collapse across iterations — the user only cares about WHICH groups
   // were added, not the per-iteration breakdown.
-  const allGroups = Array.from(
-    new Set(elevations.flatMap((e) => e.elevated_groups)),
-  ).sort();
+  const allGroups = Array.from(new Set(elevations.flatMap((e) => e.elevated_groups))).sort();
 
   if (allGroups.length === 0) return null;
   // Latest rationale wins (most recent iteration explains why we ended here).

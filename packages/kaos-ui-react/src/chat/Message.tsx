@@ -41,8 +41,8 @@ import { CapabilityApproval, type CapabilityDecision } from "./CapabilityApprova
 import { ElevationPill } from "./ElevationPill.js";
 import { GoalCheckBadge } from "./GoalCheckBadge.js";
 import { LoopTerminatedBanner } from "./LoopTerminatedBanner.js";
-import { ReasoningSummary } from "./ReasoningSummary.js";
 import { PlanCard } from "./PlanCard.js";
+import { ReasoningSummary } from "./ReasoningSummary.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
 import { ToolPolicyBadge } from "./ToolPolicyBadge.js";
 import { UsageChip } from "./UsageChip.js";
@@ -72,11 +72,7 @@ interface Props {
    * `useSendMessage().clearCapability(messageId)`). When omitted,
    * the approval card renders disabled.
    */
-  onCapabilityDecide?(
-    decision: CapabilityDecision,
-    groups: string[],
-    messageId: string,
-  ): void;
+  onCapabilityDecide?(decision: CapabilityDecision, groups: string[], messageId: string): void;
   /**
    * Plan Issue 10 layer 2 — host receives thumbs-up / thumbs-down
    * feedback per assistant message and posts to the SPA backend's
@@ -160,14 +156,8 @@ function CopyMessageButton({ text }: { text: string }) {
         "hover:bg-muted/60 transition-colors"
       }
     >
-      {state === "copied" ? (
-        <Check className="h-3 w-3" />
-      ) : (
-        <Copy className="h-3 w-3" />
-      )}
-      <span className="hidden sm:inline">
-        {state === "copied" ? "Copied" : "Copy"}
-      </span>
+      {state === "copied" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      <span className="hidden sm:inline">{state === "copied" ? "Copied" : "Copy"}</span>
     </button>
   );
 }
@@ -207,9 +197,7 @@ function FeedbackButtons({
         title={submitted === "up" ? "Thanks — recorded" : "Helpful"}
         aria-label="Mark answer helpful"
         aria-pressed={submitted === "up"}
-        className={
-          submitted === "up" ? `${baseClass} text-foreground bg-muted/60` : baseClass
-        }
+        className={submitted === "up" ? `${baseClass} text-foreground bg-muted/60` : baseClass}
       >
         <ThumbsUp className="h-3 w-3" />
       </button>
@@ -219,9 +207,7 @@ function FeedbackButtons({
         title={submitted === "down" ? "Thanks — recorded" : "Not helpful"}
         aria-label="Mark answer not helpful"
         aria-pressed={submitted === "down"}
-        className={
-          submitted === "down" ? `${baseClass} text-foreground bg-muted/60` : baseClass
-        }
+        className={submitted === "down" ? `${baseClass} text-foreground bg-muted/60` : baseClass}
       >
         <ThumbsDown className="h-3 w-3" />
       </button>
@@ -271,11 +257,7 @@ function RegenerateButton({
         busy ? "opacity-60 cursor-wait" : ""
       }`}
     >
-      {busy ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : (
-        <RotateCw className="h-3 w-3" />
-      )}
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
       <span>{busy ? "Regenerating…" : "Regenerate"}</span>
     </button>
   );
@@ -344,7 +326,6 @@ function EditPriorButton({
         rows={Math.min(8, Math.max(2, draft.split("\n").length))}
         className="w-full resize-y rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         aria-label="Edit message"
-        autoFocus
       />
       <div className="flex items-center justify-end gap-2">
         <button
@@ -427,10 +408,7 @@ export function Message({
       : "py-6 space-y-3";
 
   return (
-    <article
-      className={articleClass}
-      aria-label={`${roleLabel} message`}
-    >
+    <article className={articleClass} aria-label={`${roleLabel} message`}>
       <header
         // Sticky role header — pins the role chip + dot to the top
         // of the scroll viewport while a long message is being read.
@@ -447,13 +425,7 @@ export function Message({
         // `top: 0` is relative to the transcript scroll container.
         // `-mx-1 px-1` extends the blur past the article's text
         // column so it visually covers the gutter too.
-        className={
-          "mb-2 flex items-center gap-1.5 " +
-          "sticky top-0 z-10 -mx-1 px-1 py-1 " +
-          (isUser
-            ? ""
-            : "bg-[oklch(0.984_0.003_85_/_0.85)] backdrop-blur-sm")
-        }
+        className={`mb-2 flex items-center gap-1.5 sticky top-0 z-10 -mx-1 px-1 py-1 ${isUser ? "" : "bg-[oklch(0.984_0.003_85_/_0.85)] backdrop-blur-sm"}`}
       >
         {/* Role marker dot — colored bullet preceding the role label.
          * Amber (accent) for assistant signals "the AI's voice"; stone
@@ -462,48 +434,33 @@ export function Message({
          * a card around the assistant prose. */}
         <span
           aria-hidden
-          className={
-            "inline-block h-1.5 w-1.5 rounded-full " +
-            (isError
+          className={`inline-block h-1.5 w-1.5 rounded-full ${
+            isError
               ? "bg-destructive"
               : isUser
                 ? "bg-foreground/30"
                 : isTool
                   ? "bg-foreground/40"
-                  : "bg-accent")
-          }
+                  : "bg-accent"
+          }`}
         />
         <span
-          className={
-            "text-[11px] uppercase tracking-[0.08em] font-medium " +
-            (isError
-              ? "text-destructive"
-              : isUser
-                ? "text-foreground/55"
-                : "text-foreground/70")
-          }
+          className={`text-[11px] uppercase tracking-[0.08em] font-medium ${isError ? "text-destructive" : isUser ? "text-foreground/55" : "text-foreground/70"}`}
         >
           {roleLabel}
         </span>
       </header>
 
-      {isAssistant && message.tool_policy && (
-        <ToolPolicyBadge policy={message.tool_policy} />
-      )}
+      {isAssistant && message.tool_policy && <ToolPolicyBadge policy={message.tool_policy} />}
 
       {isAssistant && message.elevations && message.elevations.length > 0 && (
-        <ElevationPill
-          elevations={message.elevations}
-          onPinToSession={onPinElevationToSession}
-        />
+        <ElevationPill elevations={message.elevations} onPinToSession={onPinElevationToSession} />
       )}
 
       {/* Reasoning summary — rendered ABOVE the answer body so the
           reader sees the critic's verdict before scrolling through
           the full prose. Collapsed by default; click to expand. */}
-      {isAssistant && message.goal_check && (
-        <ReasoningSummary goal={message.goal_check} />
-      )}
+      {isAssistant && message.goal_check && <ReasoningSummary goal={message.goal_check} />}
 
       {/*
         Chronological intra-turn order (2026-05-19 redesign):
@@ -530,10 +487,7 @@ export function Message({
       )}
 
       {isAssistant && message.tool_calls && message.tool_calls.length > 0 && (
-        <ToolCallTimeline
-          calls={message.tool_calls}
-          verboseTools={verboseTools}
-        />
+        <ToolCallTimeline calls={message.tool_calls} verboseTools={verboseTools} />
       )}
 
       <div
@@ -543,7 +497,9 @@ export function Message({
           // User + tool + error turns are pre-wrapped plain text and
           // use the chrome-body size (15px) so the user's question
           // doesn't look like a heading next to the answer.
-          (isAssistant ? "kaos-md max-w-none " : "text-[15px] leading-relaxed whitespace-pre-wrap ") +
+          (isAssistant
+            ? "kaos-md max-w-none "
+            : "text-[15px] leading-relaxed whitespace-pre-wrap ") +
           (isError ? "text-destructive" : "text-foreground")
         }
       >
@@ -590,9 +546,7 @@ export function Message({
         />
       )}
 
-      {isAssistant && message.goal_check && (
-        <GoalCheckBadge goal={message.goal_check} />
-      )}
+      {isAssistant && message.goal_check && <GoalCheckBadge goal={message.goal_check} />}
 
       {isAssistant && message.loop_termination && (
         <LoopTerminatedBanner termination={message.loop_termination} />
@@ -610,9 +564,7 @@ export function Message({
           {onRegenerate ? (
             <RegenerateButton messageId={message.id} onRegenerate={onRegenerate} />
           ) : null}
-          {onFeedback ? (
-            <FeedbackButtons messageId={message.id} onFeedback={onFeedback} />
-          ) : null}
+          {onFeedback ? <FeedbackButtons messageId={message.id} onFeedback={onFeedback} /> : null}
         </div>
       )}
 
@@ -712,16 +664,18 @@ function ToolCallTimeline({
           <span className="text-[10px] uppercase tracking-[0.08em] font-medium text-foreground/55 shrink-0">
             Activity
           </span>
-          <span aria-hidden className="text-foreground/30">·</span>
+          <span aria-hidden className="text-foreground/30">
+            ·
+          </span>
           <span className="text-[11px] tabular-nums text-foreground/65 shrink-0">
             {calls.length} calls
           </span>
-          <span aria-hidden className="text-foreground/30">·</span>
+          <span aria-hidden className="text-foreground/30">
+            ·
+          </span>
           <span className="text-[11px] font-mono text-foreground/55 truncate min-w-0">
             {visibleNames.join(", ")}
-            {extraNames > 0 && (
-              <span className="text-foreground/40"> +{extraNames} more</span>
-            )}
+            {extraNames > 0 && <span className="text-foreground/40"> +{extraNames} more</span>}
           </span>
         </button>
       </div>
@@ -737,17 +691,23 @@ function ToolCallTimeline({
           collapse, also offers a click target to re-collapse. */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-foreground/55">
         <span>Activity</span>
-        <span aria-hidden className="text-foreground/30">·</span>
+        <span aria-hidden className="text-foreground/30">
+          ·
+        </span>
         <span className="tabular-nums">
           {calls.length} {calls.length === 1 ? "call" : "calls"}
         </span>
-        <span aria-hidden className="text-foreground/30">·</span>
+        <span aria-hidden className="text-foreground/30">
+          ·
+        </span>
         <span className="font-mono text-foreground/40 normal-case tracking-normal">
           chronological
         </span>
         {userExpanded && (
           <>
-            <span aria-hidden className="text-foreground/30">·</span>
+            <span aria-hidden className="text-foreground/30">
+              ·
+            </span>
             <button
               type="button"
               onClick={() => setUserExpanded(false)}
@@ -764,7 +724,9 @@ function ToolCallTimeline({
             prop. */}
         {calls.length > 1 && (
           <>
-            <span aria-hidden className="text-foreground/30">·</span>
+            <span aria-hidden className="text-foreground/30">
+              ·
+            </span>
             <button
               type="button"
               onClick={() => setForceAllOpen((prev) => !prev)}
@@ -789,25 +751,16 @@ function ToolCallTimeline({
           {/* Per-call ordinal — anchors each card to its place
               in the timeline. Numbered 1-based so the user can
               reference "call 3" out loud. */}
-          <div
-            aria-hidden
-            className="flex w-6 shrink-0 flex-col items-center pt-1"
-          >
+          <div aria-hidden className="flex w-6 shrink-0 flex-col items-center pt-1">
             <span className="font-mono text-[10px] text-foreground/45 tabular-nums">
               {String(i + 1).padStart(2, "0")}
             </span>
-            {i < calls.length - 1 && (
-              <span className="mt-1 flex-1 w-px bg-border" />
-            )}
+            {i < calls.length - 1 && <span className="mt-1 flex-1 w-px bg-border" />}
           </div>
           <div className="flex-1 min-w-0">
             <ToolCallBlock
               call={tc}
-              defaultOpen={
-                verboseTools ||
-                tc.status === "error" ||
-                tc.status === "running"
-              }
+              defaultOpen={verboseTools || tc.status === "error" || tc.status === "running"}
               forceOpen={forceAllOpen ?? undefined}
             />
           </div>

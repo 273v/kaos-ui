@@ -15,14 +15,13 @@ describe("repairAndParseJson", () => {
 
   it("returns the parse result unchanged when input is valid JSON", () => {
     expect(repairAndParseJson('{"a":1}')).toEqual({ a: 1 });
-    expect(repairAndParseJson('[1,2,3]')).toEqual([1, 2, 3]);
+    expect(repairAndParseJson("[1,2,3]")).toEqual([1, 2, 3]);
   });
 
   it("recovers the first complete record when an inner string is truncated", () => {
     // Simulates kaos-agents' 200-char wire truncation landing mid-string
     // on the second field's value.
-    const truncated =
-      '{"results": [{"document_number": "2024-30494", "title": "EDGAR Filer';
+    const truncated = '{"results": [{"document_number": "2024-30494", "title": "EDGAR Filer';
     const out = repairAndParseJson<{ results: Array<Record<string, unknown>> }>(truncated);
     expect(out).not.toBeNull();
     expect(out?.results).toHaveLength(1);

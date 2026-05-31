@@ -11,8 +11,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { type ListVfsOptions, type VfsListResponse, listSessionVfs } from "../lib/vfs.js";
 import { useTransport } from "../lib/transport.js";
+import { type ListVfsOptions, type VfsListResponse, listSessionVfs } from "../lib/vfs.js";
 
 const VFS_POLL_INTERVAL_MS = 5000;
 

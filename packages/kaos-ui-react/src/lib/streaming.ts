@@ -83,9 +83,7 @@ export async function readSseStream(
   return { events: drainSseResponse(response), runId };
 }
 
-async function* drainSseResponse(
-  response: Response,
-): AsyncIterableIterator<StreamEvent> {
+async function* drainSseResponse(response: Response): AsyncIterableIterator<StreamEvent> {
   if (!response.body) {
     // Defensive — readSseStream already throws on a missing body,
     // but TS doesn't carry that invariant through into the generator.

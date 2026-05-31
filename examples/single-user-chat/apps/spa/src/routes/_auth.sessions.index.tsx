@@ -106,13 +106,10 @@ function SessionsEmpty() {
       // The session creates with the research-persona default.
       // For drafting/forensics, immediately PATCH the policy.
       if (persona !== "research") {
-        await apiJson<SessionMeta>(
-          `/v1/chat/sessions/${encodeURIComponent(session.id)}/tool-set`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ persona }),
-          },
-        );
+        await apiJson<SessionMeta>(`/v1/chat/sessions/${encodeURIComponent(session.id)}/tool-set`, {
+          method: "PATCH",
+          body: JSON.stringify({ persona }),
+        });
       }
       return session;
     },
@@ -148,9 +145,7 @@ function SessionsEmpty() {
     <div className="min-h-full flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-3xl">
         <header className="text-center mb-10">
-          <h1 className="text-4xl font-serif font-light mb-2">
-            What can I help with?
-          </h1>
+          <h1 className="text-4xl font-serif font-light mb-2">What can I help with?</h1>
           <p className="text-sm text-muted-foreground">
             Start a conversation below — or press{" "}
             <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono">
@@ -174,9 +169,7 @@ function SessionsEmpty() {
                     <card.Icon className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm leading-tight mb-1">
-                      {card.label}
-                    </p>
+                    <p className="font-medium text-sm leading-tight mb-1">{card.label}</p>
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       {card.description}
                     </p>
@@ -204,10 +197,7 @@ function SessionsEmpty() {
         </div>
 
         {(createSession.isError || createWithPersona.isError) && (
-          <p
-            role="alert"
-            className="mt-6 text-center text-xs text-destructive"
-          >
+          <p role="alert" className="mt-6 text-center text-xs text-destructive">
             Couldn't start a new session. Check that the backend is reachable.
           </p>
         )}

@@ -200,6 +200,7 @@ export function useAutoScroll(
   // state which depends on IO that may not have fired yet) so a
   // user who just scrolled up doesn't get yanked back when content
   // arrives in the same tick.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on contentSignal only — this is a content-arrival reaction; re-running on mode / scrollToBottom / setter identity would cause spurious scroll jumps.
   useEffect(() => {
     const scroller = scrollRef.current;
     // Initial pin: fire on the first contentSignal change that
@@ -215,8 +216,7 @@ export function useAutoScroll(
       return;
     }
     if (mode === "follow" && scroller) {
-      const dist =
-        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       if (dist <= NEAR_BOTTOM_PX) {
         scrollToBottom("smooth");
         setHasNewContent(false);
@@ -278,8 +278,7 @@ export function useAutoScroll(
     let suppressUntil = 0;
     const onScroll = () => {
       if (performance.now() < suppressUntil) return;
-      const dist =
-        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       if (dist > NEAR_BOTTOM_PX + RESUME_FOLLOW_PX) {
         setMode((m) => (m === "follow" ? "paused" : m));
       } else if (dist <= NEAR_BOTTOM_PX) {
@@ -354,9 +353,7 @@ export function useAutoScroll(
   // FOLLOW mode we're tracking the bottom, so the pill should be
   // hidden — unless we're transiently at !atBottom right after a
   // mode change, which is fine because IO will resolve it next tick.
-  const showPill =
-    (mode === "paused" && !atBottom) ||
-    (mode === "locked" && hasNewContent);
+  const showPill = (mode === "paused" && !atBottom) || (mode === "locked" && hasNewContent);
 
   return useMemo(
     () => ({

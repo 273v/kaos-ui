@@ -35,12 +35,7 @@ interface Props {
   onToggleLock(): void;
 }
 
-export function JumpToLatestPill({
-  mode,
-  hasNewContent,
-  onJumpToLatest,
-  onToggleLock,
-}: Props) {
+export function JumpToLatestPill({ mode, hasNewContent, onJumpToLatest, onToggleLock }: Props) {
   // The container is `position: absolute` inside the transcript
   // scroll container — it stays glued to the visible bottom-right
   // regardless of scroll position. pointer-events: none on the
@@ -74,10 +69,7 @@ export function JumpToLatestPill({
         >
           {/* Amber accent dot — same visual vocabulary as the
               assistant role marker, signals "new agent activity". */}
-          <span
-            aria-hidden
-            className="inline-block h-1.5 w-1.5 rounded-full bg-accent"
-          />
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
           <span>Jump to latest</span>
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
@@ -97,14 +89,11 @@ export function JumpToLatestPill({
             ? "Scroll locked at this position. Click to unlock + jump to latest."
             : "Lock the scroll position so new messages don't move the view."
         }
-        className={
-          "pointer-events-auto inline-flex h-8 w-8 items-center justify-center " +
-          "rounded-full border " +
-          (mode === "locked"
+        className={`pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-full border ${
+          mode === "locked"
             ? "border-accent bg-accent text-accent-foreground shadow-[0_2px_6px_oklch(0_0_0_/_0.1)]"
-            : "border-[oklch(0.88_0.005_80)] bg-[oklch(0.984_0.003_85)] text-foreground/70 hover:text-foreground hover:bg-[oklch(0.965_0.005_85)] shadow-[0_1px_3px_oklch(0_0_0_/_0.06)]") +
-          " focus:outline-none focus-visible:ring-1 focus-visible:ring-[oklch(0.708_0.008_80)] transition-colors"
-        }
+            : "border-[oklch(0.88_0.005_80)] bg-[oklch(0.984_0.003_85)] text-foreground/70 hover:text-foreground hover:bg-[oklch(0.965_0.005_85)] shadow-[0_1px_3px_oklch(0_0_0_/_0.06)]"
+        } focus:outline-none focus-visible:ring-1 focus-visible:ring-[oklch(0.708_0.008_80)] transition-colors`}
       >
         {mode === "locked" ? (
           <Lock className="h-3.5 w-3.5" aria-hidden />

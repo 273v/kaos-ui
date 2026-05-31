@@ -191,17 +191,13 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
       );
       const cost = Math.max(
         0.01,
-        Math.min(
-          10,
-          Number.parseFloat(maxCostUsd) || (meta.policy?.max_loop_cost_usd ?? 0.25),
-        ),
+        Math.min(10, Number.parseFloat(maxCostUsd) || (meta.policy?.max_loop_cost_usd ?? 0.25)),
       );
       const wall = Math.max(
         1,
         Math.min(
           600,
-          Number.parseFloat(maxWallSeconds) ||
-            (meta.policy?.max_loop_wall_clock_seconds ?? 60),
+          Number.parseFloat(maxWallSeconds) || (meta.policy?.max_loop_wall_clock_seconds ?? 60),
         ),
       );
       await patchToolSet.mutateAsync({
@@ -471,7 +467,9 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                       onChange={(e) => setMaxCostUsd(e.target.value)}
                       className="w-full text-sm bg-background border border-input rounded-md px-2 py-1.5 tabular-nums"
                     />
-                    <p className="mt-1 text-[10px] text-muted-foreground">$0.01–$10 (default $0.25)</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      $0.01–$10 (default $0.25)
+                    </p>
                   </div>
                   <div>
                     <label
@@ -494,8 +492,8 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                   </div>
                 </div>
                 <p className="mt-2 text-[11px] text-muted-foreground leading-snug">
-                  Three independent hard caps. The loop terminates when ANY cap fires — usually
-                  the cost cap. Defense-in-depth against runaway iterations.
+                  Three independent hard caps. The loop terminates when ANY cap fires — usually the
+                  cost cap. Defense-in-depth against runaway iterations.
                 </p>
               </fieldset>
 

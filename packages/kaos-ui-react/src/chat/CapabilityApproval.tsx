@@ -22,11 +22,7 @@ import { Check, X } from "lucide-react";
 
 import type { CapabilityRequestSnapshot } from "../lib/chat-state.js";
 
-export type CapabilityDecision =
-  | "enable_turn"
-  | "enable_session"
-  | "deny_continue"
-  | "deny_stop";
+export type CapabilityDecision = "enable_turn" | "enable_session" | "deny_continue" | "deny_stop";
 
 interface Props {
   /** Snapshot from the pending `capability_requested` event. */
@@ -53,9 +49,7 @@ export function CapabilityApproval({ request, onDecide }: Props) {
   return (
     <div className="my-3 rounded-md border border-warn/40 bg-warn/5 p-3 text-sm">
       <header className="mb-2 flex items-center gap-1.5">
-        <span className="font-semibold text-foreground">
-          Capability requested
-        </span>
+        <span className="font-semibold text-foreground">Capability requested</span>
         <span className="text-xs text-muted-foreground">iteration {iteration}</span>
       </header>
       <p className="mb-2 text-muted-foreground">{justification}</p>

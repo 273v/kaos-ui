@@ -50,10 +50,7 @@ export function GoalCheckBadge({ goal }: Props) {
     goal;
 
   // Color + icon driven by kind. Green/amber/gray per the design doc.
-  const variants: Record<
-    GoalCheckSnapshot["kind"],
-    { cls: string; Icon: typeof CheckCircle2 }
-  > = {
+  const variants: Record<GoalCheckSnapshot["kind"], { cls: string; Icon: typeof CheckCircle2 }> = {
     satisfied: {
       cls: "border-success/40 bg-success/5 text-success-foreground hover:bg-success/10",
       Icon: CheckCircle2,

@@ -12,10 +12,9 @@
  *     route — typing `/` as the first char of an empty composer.)
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Skill, SlashMenu } from "@273v/kaos-ui-react/chat";
 import { fireEvent, render, screen } from "@testing-library/react";
-
-import { SlashMenu, type Skill } from "@273v/kaos-ui-react/chat";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const SKILLS: Skill[] = [
   {
@@ -66,9 +65,7 @@ describe("<SlashMenu>", () => {
   });
 
   it("renders all skills when query is empty", () => {
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={vi.fn()} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText("Search corpus")).toBeTruthy();
     expect(screen.getByText("Redline")).toBeTruthy();
   });
@@ -83,22 +80,14 @@ describe("<SlashMenu>", () => {
 
   it("renders an empty-state message when no skills match", () => {
     render(
-      <SlashMenu
-        skills={SKILLS}
-        query="nomatch"
-        open={true}
-        onPick={vi.fn()}
-        onClose={vi.fn()}
-      />,
+      <SlashMenu skills={SKILLS} query="nomatch" open={true} onPick={vi.fn()} onClose={vi.fn()} />,
     );
     expect(screen.getByText(/No skills match/)).toBeTruthy();
   });
 
   it("mouse-down on a skill row fires onPick", () => {
     const onPick = vi.fn();
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />);
     fireEvent.mouseDown(screen.getByText("Search corpus"));
     expect(onPick).toHaveBeenCalledTimes(1);
     expect(onPick).toHaveBeenCalledWith(SKILLS[0]);
@@ -111,9 +100,7 @@ describe("<SlashMenu>", () => {
     // a skill behind their back.
     makeComposer(false);
     const onPick = vi.fn();
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />);
     fireEvent.keyDown(document, { key: "Enter" });
     expect(onPick).not.toHaveBeenCalled();
   });
@@ -121,9 +108,7 @@ describe("<SlashMenu>", () => {
   it("Enter on document picks the active skill when composer IS focused", () => {
     makeComposer(true);
     const onPick = vi.fn();
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={onPick} onClose={vi.fn()} />);
     fireEvent.keyDown(document, { key: "Enter" });
     expect(onPick).toHaveBeenCalledWith(SKILLS[0]);
   });
@@ -131,9 +116,7 @@ describe("<SlashMenu>", () => {
   it("Escape on document closes the menu when composer is focused", () => {
     makeComposer(true);
     const onClose = vi.fn();
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={onClose} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={onClose} />);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -141,9 +124,7 @@ describe("<SlashMenu>", () => {
   it("Escape on document is IGNORED when composer is NOT focused", () => {
     makeComposer(false);
     const onClose = vi.fn();
-    render(
-      <SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={onClose} />,
-    );
+    render(<SlashMenu skills={SKILLS} query="" open={true} onPick={vi.fn()} onClose={onClose} />);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
   });
