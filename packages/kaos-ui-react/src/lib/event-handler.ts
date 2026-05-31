@@ -79,7 +79,7 @@ function patchPlanStep(
   updates: Partial<PlanStep>,
 ): ChatMessage[] {
   const target = currentAssistant(messages);
-  if (!target || !target.plan) return messages;
+  if (!target?.plan) return messages;
   const newSteps = target.plan.steps.map((s) => (s.step_id === stepId ? { ...s, ...updates } : s));
   return messages.map((m) =>
     m.id === target.id && m.plan ? { ...m, plan: { ...m.plan, steps: newSteps } } : m,

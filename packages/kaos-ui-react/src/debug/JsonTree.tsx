@@ -19,9 +19,8 @@
  * Tailwind (the JSON viewer is supposed to look the same everywhere).
  */
 
-import { useMemo, useState } from "react";
-
 import { ChevronDown, ChevronRight, Copy, Link2 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 export interface JsonTreeProps {
   /** The value to render. Strings, numbers, booleans, null, objects, arrays. */
@@ -88,7 +87,7 @@ function JsonNode(props: NodeProps) {
 
   const isObj = value !== null && typeof value === "object" && !Array.isArray(value);
   const isArr = Array.isArray(value);
-  const isComplex = isObj || isArr;
+  const _isComplex = isObj || isArr;
 
   const keyEl =
     keyLabel === undefined ? null : (

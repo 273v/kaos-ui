@@ -229,7 +229,7 @@ function ArtifactCard({ record }: { record: Record<string, unknown> }) {
   const name =
     (record.name as string | undefined) ??
     (record.title as string | undefined) ??
-    (sourceUri ? (sourceUri.split("/").filter(Boolean).pop() ?? "") : "") ??
+    (sourceUri ? sourceUri.split("/").filter(Boolean).pop() : undefined) ??
     artifactId.slice(0, 8);
   const Icon = pickArtifactIcon(mimeType);
   const [copied, setCopied] = useState(false);
@@ -331,11 +331,7 @@ function extractFoundCount(lead: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function StructuredResultBody({
-  presentation,
-}: {
-  presentation: FormattedToolCall;
-}) {
+function StructuredResultBody({ presentation }: { presentation: FormattedToolCall }) {
   const { result_kind, result_records, result_lead } = presentation;
   if (result_records.length === 0) return null;
   // Stage C (no-hardcoded-caps-and-artifact-first-tool-results plan):

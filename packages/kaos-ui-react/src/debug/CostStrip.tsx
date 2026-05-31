@@ -61,17 +61,17 @@ export function CostStrip({ events, perModel = true, className }: CostStripProps
 
   if (total.calls === 0) {
     return (
-      <div
+      <section
         className={`text-xs text-muted-foreground italic px-3 py-1.5 ${className ?? ""}`}
         aria-label="Session cost"
       >
         No usage observed yet.
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className={`text-xs ${className ?? ""}`} aria-label="Session cost">
+    <section className={`text-xs ${className ?? ""}`} aria-label="Session cost">
       <div className="flex items-center gap-3 px-3 py-1.5 tabular-nums">
         <span className="inline-flex items-center gap-1 font-medium">
           <DollarSign className="h-3 w-3 text-muted-foreground" />
@@ -109,6 +109,6 @@ export function CostStrip({ events, perModel = true, className }: CostStripProps
           </span>
         </div>
       )}
-    </div>
+    </section>
   );
 }

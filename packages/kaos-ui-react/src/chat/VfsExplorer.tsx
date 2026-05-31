@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { type VfsNode, groupVfsNodes } from "../lib/vfs.js";
+import { groupVfsNodes, type VfsNode } from "../lib/vfs.js";
 import { EmptyState } from "./EmptyState.js";
 
 interface Props {

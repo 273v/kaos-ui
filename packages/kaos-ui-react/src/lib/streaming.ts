@@ -18,7 +18,7 @@
  * the request body. `eventsource-parser` just parses bytes.
  */
 
-import { type EventSourceMessage, createParser } from "eventsource-parser";
+import { createParser, type EventSourceMessage } from "eventsource-parser";
 
 export interface StreamEvent {
   /** SSE `event:` field (defaults to `"message"` per spec). */

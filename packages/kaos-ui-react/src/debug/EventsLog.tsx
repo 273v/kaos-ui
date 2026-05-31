@@ -63,6 +63,7 @@ export function EventsLog({ events, filter, className }: EventsLogProps) {
   return (
     <div
       ref={ref}
+      role="log"
       className={`flex-1 overflow-y-auto text-xs font-mono ${className ?? ""}`}
       aria-label="Events log"
     >
