@@ -557,6 +557,7 @@ export function applyEvent(state: TranscriptState, event: KaosAgentEvent): Trans
 export function pushUserAndAssistantPlaceholder(
   state: TranscriptState,
   message: string,
+  clientKey?: string,
 ): { state: TranscriptState; assistantId: string } {
   const assistantId = newId();
   const now = Date.now();
@@ -567,7 +568,15 @@ export function pushUserAndAssistantPlaceholder(
       status: { kind: "thinking" },
       messages: [
         ...state.messages,
-        { id: newId(), role: "user", content: message, created_at: now, streaming: false },
+        {
+          id: newId(),
+          role: "user",
+          content: message,
+          created_at: now,
+          streaming: false,
+          clientKey,
+          origin: "optimistic",
+        },
         {
           id: assistantId,
           role: "assistant",
@@ -575,11 +584,88 @@ export function pushUserAndAssistantPlaceholder(
           created_at: now,
           streaming: true,
           started_at: now,
+          clientKey,
+          origin: "optimistic",
         },
       ],
     },
     assistantId,
   };
+}
+
+/**
+ * Reconcile a server-history snapshot INTO the reducer state without
+ * destroying in-flight optimistic / streaming / terminal-error rows.
+ *
+ * This replaces the old `setState({ ...initialState, messages:
+ * serverHistory })` same-session reset, which was the "flash and
+ * disappear" bug: a background history refetch (fired on turn
+ * completion, and again +1200ms later) would overwrite the transcript
+ * with a server snapshot that did not yet include the just-sent
+ * follow-up, deleting the optimistic row and any error banner.
+ *
+ * Merge rules (single-source-of-truth: the reducer always wins for
+ * live rows):
+ *  - Rows that are still `origin:"optimistic"`, `streaming`, or a
+ *    terminal `error` are ALWAYS preserved (never dropped).
+ *  - A server row is matched to an existing optimistic user row by
+ *    `clientKey`; when matched, the row is promoted to `origin:"server"`
+ *    (its content reconciled from the server copy) rather than
+ *    duplicated.
+ *  - Server rows with no live counterpart seed/refresh the historical
+ *    prefix (matched by ordinal), so a cold load or a same-session
+ *    refresh still hydrates prior turns.
+ *
+ * The function is order-preserving and idempotent: reconciling the same
+ * server history twice equals reconciling it once.
+ */
+export function reconcileServerHistory(
+  state: TranscriptState,
+  serverMessages: ChatMessage[],
+): TranscriptState {
+  // Adopt the server snapshot as the authoritative prefix (the source of
+  // truth for completed turns — this is what makes cold hydration,
+  // cross-tab sync, and edit-prior/regenerate truncation correct).
+  const serverRows = serverMessages.map((m) => ({ ...m, origin: "server" as const }));
+
+  // Then re-append any reducer rows positioned BEYOND the server snapshot
+  // that are still local-only. Chat history is append-only (and only
+  // ever end-truncated by edit-prior/regenerate), so a positional slice
+  // is well-defined: rows past `serverMessages.length` are the newest
+  // turn(s) the server may not have caught up to yet. We keep them when
+  // they are:
+  //   - an in-flight turn (`streaming`), OR
+  //   - a just-sent / just-completed turn the server has not PERSISTED
+  //     yet (`origin === "optimistic"`) — the draining window, OR
+  //   - a terminal error banner the user must still see.
+  // This is the whole follow-up-send fix: a background refetch (turn
+  // completion, +1200ms title re-poll, window focus) that resolves
+  // before the newest turn is persisted can NEVER delete it.
+  //
+  // Edit-prior / regenerate truncation still works: the truncated tail is
+  // made of `origin === "server"` rows (already confirmed), which are NOT
+  // local-only and so are correctly dropped when the server shrinks. Once
+  // the server catches up, those positions are covered by `serverRows`
+  // and the optimistic tail naturally empties (no duplication).
+  const tail = state.messages
+    .slice(serverMessages.length)
+    .filter((m) => m.origin === "optimistic" || m.streaming === true || m.role === "error");
+
+  return { ...state, messages: [...serverRows, ...tail] };
+}
+
+/**
+ * Drop the message with ``messageId`` and every row after it. Used by
+ * edit-prior / regenerate: the backend truncates SessionMemory at the
+ * same index, and this keeps the local single-source-of-truth reducer
+ * in step WITHOUT relying on a destructive history-refetch-replace
+ * (which is what made follow-up sends vanish). The caller then re-sends
+ * the edited message, which appends the fresh turn.
+ */
+export function truncateFrom(state: TranscriptState, messageId: string): TranscriptState {
+  const idx = state.messages.findIndex((m) => m.id === messageId);
+  if (idx < 0) return state;
+  return { ...state, messages: state.messages.slice(0, idx) };
 }
 
 /** Wall-clock latency since the in-flight assistant message started. */

@@ -20,6 +20,8 @@ export {
   initialState,
   markAborted,
   pushUserAndAssistantPlaceholder,
+  reconcileServerHistory,
+  truncateFrom,
 } from "./event-handler.js";
 export type {
   BudgetExceededEvent,

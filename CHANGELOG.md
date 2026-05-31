@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — follow-up messages no longer "flash and disappear" (chat turn-lifecycle redesign)
+
+Root-caused and fixed a ~50% failure where a follow-up message (2nd+ turn
+in a session), typed + Enter, would flash and vanish — sometimes with a
+brief "SSE error", mostly silently. Two interacting causes, both
+structural (see `docs/design/chat-turn-lifecycle-redesign.md`):
+
+1. **Backend held the session lock too long.** The per-session stream
+   lock was released only inside the post-stream persist `BackgroundTask`
+   (`chat.py` `_do_persist`), so the session stayed "running" for the
+   duration of the canonical-turn write + title heuristic AFTER the
+   client already saw the stream end. A fast follow-up POST in that
+   window got a **409 Conflict**. Fix: release the stream lock the
+   instant the SSE body finishes (in the generator's `finally`, a
+   synchronous release that survives client disconnect), and run persist
+   under a SEPARATE per-session persist lock so turns still persist in
+   order. `mark_done` is now run-scoped so a draining turn can't clobber
+   the next turn's `runs/active.json` pointer.
+2. **A racing history refetch wiped the optimistic message.** The route
+   invalidated the message-history query on turn completion (and again at
+   +1200ms); the hook's reset effect then replaced the transcript with a
+   server snapshot that didn't yet include the new turn. Fix: the
+   `useSendMessage` reducer is now the single source of truth — it is
+   never reset on a same-session refetch; history is reconciled
+   non-destructively (`reconcileServerHistory`) so a refetch can only
+   fill in server-confirmed rows and can NEVER delete an in-flight,
+   just-sent, or terminal-error row. Turn completion no longer refetches
+   message history (the reducer already holds the streamed turn); only
+   session meta/title is refreshed. Edit-prior / regenerate now truncate
+   the transcript locally (`truncate`) instead of relying on the removed
+   destructive refetch.
+
+`@273v/kaos-ui-react` → **0.1.0-alpha.11** (soft public API): the
+`useSendMessage` result gains `truncate(messageId)`, and the package
+now exports `reconcileServerHistory` / `truncateFrom`; `ChatMessage`
+gains optional `clientKey` / `origin` fields. Sends now carry a
+client-minted `X-Idempotency-Key`, and a queue replaces the old
+resume-preemption dance so a follow-up during the brief stream-teardown
+window is queued and flushed rather than dropped.
+
+Regression nets: `tests/event-handler.reconcile.test.ts` (8 reducer
+cases — in-flight, draining-window, terminal-error, truncation,
+idempotency), backend `test_locks.py` (session-free-while-persist-held)
+and `test_run_log.py` (run-scoped `mark_done`). Verified live via Chrome
+DevTools MCP: 5 rapid consecutive follow-ups, zero 409s, zero
+disappearances under an aggressive focus-refetch storm.
+
 ### Changed — web:spa template + kaos-ui-react upgraded to latest frontend deps
 
 Bumped the `web:spa` template (and the `single-user-chat` example +

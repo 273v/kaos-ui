@@ -226,15 +226,31 @@ function ChatDetail() {
   const wasPendingRef = useRef(false);
   useEffect(() => {
     if (wasPendingRef.current && !stream.state.pending) {
-      const invalidate = () => {
+      // Turn-lifecycle redesign (2026-05-31): refresh only the session
+      // META (title / message_count) and the sidebar LIST here. We no
+      // longer invalidate the message-HISTORY query on turn completion.
+      //
+      // The `useSendMessage` reducer is the single source of truth for
+      // the transcript and ALREADY contains this turn (the optimistic
+      // user row + the streamed assistant row). Refetching history on
+      // completion was both unnecessary AND harmful: the immediate
+      // invalidate fires at stream-end while the canonical-turn persist
+      // is still draining, so the refetch could resolve with a server
+      // snapshot MISSING the just-finished turn — which the old
+      // reset-replace then wiped from the transcript (the "flash and
+      // disappear" follow-up bug). History now refetches only on cold
+      // load / session switch / window-focus, and is reconciled
+      // non-destructively (see `reconcileServerHistory`).
+      const invalidateMeta = () => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
-        void queryClient.invalidateQueries({
-          queryKey: [...queryKeys.session(id), "history"],
-        });
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       };
-      invalidate();
-      const t = setTimeout(invalidate, 1200);
+      invalidateMeta();
+      // The first-turn title is written by the backend's post-stream
+      // persist task, which can land AFTER this edge — re-invalidate the
+      // META once more so the header/sidebar pick it up. (This no longer
+      // touches the transcript, so it cannot wipe anything.)
+      const t = setTimeout(invalidateMeta, 1200);
       wasPendingRef.current = stream.state.pending;
       return () => clearTimeout(t);
     }
@@ -341,8 +357,13 @@ function ChatDetail() {
       body: JSON.stringify({ content: newText }),
     })
       .then(() => {
-        // After truncating, send the edited message to trigger a fresh run.
-        // Use the existing send flow so SSE wiring + cost tracking apply.
+        // Truncate the LOCAL transcript at the edited message — the
+        // backend PATCH already rewound SessionMemory at the same index.
+        // We do this locally instead of relying on a destructive
+        // history-refetch-replace (which we removed because it wiped
+        // optimistic follow-ups). Then re-send so the reducer appends
+        // the fresh turn. The reducer is the single source of truth.
+        stream.truncate(messageId);
         setInput(newText);
         setTimeout(() => {
           const form = document.getElementById("composer-form") as HTMLFormElement | null;
@@ -371,13 +392,31 @@ function ChatDetail() {
       console.warn("regenerate: message id not found in transcript", { messageId });
       return;
     }
+    // Drop the stale assistant turn (and anything after) from the local
+    // transcript immediately — the backend rewinds SessionMemory at the
+    // same index. The fresh run is surfaced by the resume path
+    // (`useActiveRun` → `_resumeRun`) once the backend starts it.
+    stream.truncate(messageId);
     apiFetch(`/v1/chat/sessions/${id}/messages/${idx}/regenerate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
-    }).catch((err) => {
-      console.warn("regenerate POST failed", { messageId, idx, err });
-    });
+    })
+      .then(() => {
+        // Belt-and-suspenders: reflect the server-side rewind+rerun.
+        // Turn completion no longer auto-refetches history, so refetch
+        // explicitly here (an explicit user action); `reconcileServerHistory`
+        // applies it non-destructively (live/streaming rows are kept).
+        const refetchHistory = () =>
+          void queryClient.invalidateQueries({
+            queryKey: [...queryKeys.session(id), "history"],
+          });
+        refetchHistory();
+        setTimeout(refetchHistory, 1500);
+      })
+      .catch((err) => {
+        console.warn("regenerate POST failed", { messageId, idx, err });
+      });
   };
 
   // Pin auto-elevated groups into the session's persistent ceiling.
