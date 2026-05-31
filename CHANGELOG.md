@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a turn now survives navigating away mid-stream (detached runs)
+
+Follow-on to the turn-lifecycle redesign. Previously, sending a message
+then navigating to another session (or closing the tab) while it was
+still "thinking" **cancelled the in-flight request, and the backend run
+was cancelled with it** — so a long turn never finished or persisted and
+was lost. Now the agentic turn runs in a **detached task** that the
+client connection cannot cancel (`chat.py`): it drives `event_generator`,
+writes the run log, and persists, while the SSE response is just a live
+viewer draining a queue the task feeds. A client disconnect cancels the
+viewer, not the run. The turn finishes + persists, and a returning client
+picks it up via the active-run poll + history refetch (now safe because
+`reconcileServerHistory` is non-destructive). The stream lock is still
+released at the true run-end (preserving the 409-follow-up fix) and
+persist runs under the persist lock. The post-stream persist is therefore
+**eventual** (it lands shortly after the SSE sentinel, not synchronously),
+which the SPA handles via the active-run poll.
+
+Also surfaced turns that complete while off-screen: `useActiveRun` now
+polls while a run is "running" and the route refetches history on the
+running→terminal transition. Regression: `test_chat_agentic_loop.py`
+(stream-through-detached-run) + the lock/run-log suites; verified live via
+Chrome DevTools MCP (navigate away from a long turn → return → it
+persisted, no reload).
+
 ### Fixed — follow-up messages no longer "flash and disappear" (chat turn-lifecycle redesign)
 
 Root-caused and fixed a ~50% failure where a follow-up message (2nd+ turn

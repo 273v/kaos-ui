@@ -12,6 +12,7 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -49,6 +50,15 @@ from app.settings import AppSettings
 
 router = APIRouter(tags=["chat"])
 logger = app_logger("chat_router")
+
+# Detached turn tasks. A chat turn runs in a task spawned here rather than
+# being driven directly by the SSE response, so that a client disconnect
+# (the user navigating to another session mid-turn, or closing the tab)
+# does NOT cancel the run — it keeps going, writes to the run log, and
+# persists. The SSE response is just a live viewer consuming a queue the
+# task feeds. We hold strong references so the event loop doesn't GC an
+# in-flight task whose response has already disconnected.
+_DETACHED_RUN_TASKS: set[asyncio.Task[None]] = set()
 
 
 SettingsDep = Annotated[AppSettings, Depends(get_settings)]
@@ -506,8 +516,6 @@ async def send_message(
     import secrets
     from typing import Any
     from urllib.parse import quote
-
-    from starlette.background import BackgroundTask
 
     from app.services.persist_turn import persist_turn_completion
     from app.services.run_log import RunEventLog
@@ -1091,20 +1099,69 @@ async def send_message(
             # if already released.
             _release_session_lock()
 
+    # Detached run (2026-05-31): drive the turn in a task the client
+    # connection CANNOT cancel, so navigating away mid-turn (or closing
+    # the tab) no longer kills it — it runs to completion, writes the run
+    # log, and persists. The SSE response is just a live viewer draining a
+    # queue the task feeds. A returning client picks the turn back up via
+    # the active-run poll + history refetch (and, for a still-running
+    # turn, the resume endpoint).
+    #
+    # `event_generator` is unchanged: it still appends every event to the
+    # run log, feeds the recorders, captures the persist snapshot, and (in
+    # its `finally`) releases the STREAM lock at the TRUE run-end — which
+    # is now decoupled from the client connection, exactly as the
+    # 409-follow-up fix requires. `_do_persist` runs after the run fully
+    # completes, under the persist lock.
+    _frame_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def _drive_run() -> None:
+        try:
+            async for frame in event_generator():
+                await _frame_queue.put(frame)
+        except Exception:
+            logger.exception("detached run failed session=%s run=%s", session_id, run_id)
+        finally:
+            # Signal the live viewer that the STREAM is done the instant
+            # the event stream ends — `event_generator`'s finally has
+            # already released the stream lock here — so the composer
+            # re-enables promptly (the snappy follow-up timing). Persist
+            # then runs detached under the persist lock; a follow-up that
+            # lands during persist finds the stream lock free (no 409) and
+            # its own persist serializes behind this one. This is the
+            # load-bearing property: the SSE response may be long gone
+            # (client navigated away), but THIS task and its persist still
+            # run to completion.
+            await _frame_queue.put(None)  # sentinel — stream complete
+            try:
+                await _do_persist()
+            except Exception:
+                logger.exception("detached persist failed session=%s run=%s", session_id, run_id)
+            # Idempotent safety net: ensure the stream lock is freed even
+            # if `event_generator` raised before reaching its own finally.
+            _release_session_lock()
+
+    _run_task: asyncio.Task[None] = asyncio.create_task(_drive_run())
+    _DETACHED_RUN_TASKS.add(_run_task)
+    _run_task.add_done_callback(_DETACHED_RUN_TASKS.discard)
+
+    async def _consume():
+        # If the client disconnects, sse-starlette cancels THIS generator
+        # — but `_drive_run` keeps going (detached), so the turn still
+        # completes + persists.
+        while True:
+            frame = await _frame_queue.get()
+            if frame is None:
+                break
+            yield frame
+
     return EventSourceResponse(
-        event_generator(),
+        _consume(),
         ping=15,
         # ``X-Kaos-Run-Id`` lets the SPA stash the run id synchronously
         # off the response headers without waiting for the leading
         # ``run_started`` envelope — see design §3.1.
         headers={"X-Accel-Buffering": "no", "X-Kaos-Run-Id": run_id},
-        # Starlette runs ``_do_persist`` AFTER the response body is
-        # fully sent. The framework owns the lifetime, so a client
-        # disconnect during streaming doesn't cancel these writes —
-        # which closes the bug surfaced by the 2026-05-18 persona
-        # matrix where 8/10 sessions stuck at ``Untitled`` /
-        # ``message_count=0``.
-        background=BackgroundTask(_do_persist),
     )
 
 
