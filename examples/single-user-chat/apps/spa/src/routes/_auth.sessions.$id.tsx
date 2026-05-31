@@ -226,6 +226,19 @@ function ChatDetail() {
   const wasPendingRef = useRef(false);
   useEffect(() => {
     if (wasPendingRef.current && !stream.state.pending) {
+      // On the pending true→false edge (a turn we watched stream),
+      // refresh session META (title / message_count), the sidebar LIST,
+      // AND the message HISTORY.
+      //
+      // Re-adding the history refetch here is SAFE now: the
+      // `useSendMessage` reducer is the single source of truth and
+      // `reconcileServerHistory` merges a refetch NON-destructively (it
+      // fills in server-confirmed rows but never deletes an
+      // optimistic / streaming / terminal-error row — and protects rows
+      // positioned beyond the server snapshot, i.e. a turn whose persist
+      // is still draining). So the refetch that used to "flash and
+      // disappear" the follow-up can no longer wipe it; it only makes
+      // the transcript eventually-consistent with the server.
       const invalidate = () => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
         void queryClient.invalidateQueries({
@@ -234,12 +247,36 @@ function ChatDetail() {
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       };
       invalidate();
+      // The first-turn title + the canonical-turn persist land AFTER this
+      // edge (post-stream BackgroundTask), so re-invalidate ~1.2s later
+      // to pick them up. Non-destructive thanks to reconcile.
       const t = setTimeout(invalidate, 1200);
       wasPendingRef.current = stream.state.pending;
       return () => clearTimeout(t);
     }
     wasPendingRef.current = stream.state.pending;
   }, [stream.state.pending, id, queryClient]);
+
+  // A run can also reach a terminal state while the user is NOT watching
+  // its live stream — they sent a query then navigated to another session
+  // while it was still "thinking", or it finished detached. `useActiveRun`
+  // polls while a run is running; when its status transitions
+  // running→terminal we refetch the message history so the
+  // off-screen-completed turn appears (reconcile applies it
+  // non-destructively). This is the fix for "sent a query, navigated away
+  // mid-thinking, came back and the turn was gone": the turn DID persist
+  // server-side — we just weren't pulling it back into the transcript.
+  const prevRunStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const status = activeRun.data?.status ?? null;
+    if (prevRunStatusRef.current === "running" && status !== null && status !== "running") {
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.session(id), "history"],
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+    }
+    prevRunStatusRef.current = status;
+  }, [activeRun.data?.status, id, queryClient]);
 
   const onSubmit = () => {
     const text = input.trim();
@@ -341,8 +378,13 @@ function ChatDetail() {
       body: JSON.stringify({ content: newText }),
     })
       .then(() => {
-        // After truncating, send the edited message to trigger a fresh run.
-        // Use the existing send flow so SSE wiring + cost tracking apply.
+        // Truncate the LOCAL transcript at the edited message — the
+        // backend PATCH already rewound SessionMemory at the same index.
+        // We do this locally instead of relying on a destructive
+        // history-refetch-replace (which we removed because it wiped
+        // optimistic follow-ups). Then re-send so the reducer appends
+        // the fresh turn. The reducer is the single source of truth.
+        stream.truncate(messageId);
         setInput(newText);
         setTimeout(() => {
           const form = document.getElementById("composer-form") as HTMLFormElement | null;
@@ -371,13 +413,31 @@ function ChatDetail() {
       console.warn("regenerate: message id not found in transcript", { messageId });
       return;
     }
+    // Drop the stale assistant turn (and anything after) from the local
+    // transcript immediately — the backend rewinds SessionMemory at the
+    // same index. The fresh run is surfaced by the resume path
+    // (`useActiveRun` → `_resumeRun`) once the backend starts it.
+    stream.truncate(messageId);
     apiFetch(`/v1/chat/sessions/${id}/messages/${idx}/regenerate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
-    }).catch((err) => {
-      console.warn("regenerate POST failed", { messageId, idx, err });
-    });
+    })
+      .then(() => {
+        // Belt-and-suspenders: reflect the server-side rewind+rerun.
+        // Turn completion no longer auto-refetches history, so refetch
+        // explicitly here (an explicit user action); `reconcileServerHistory`
+        // applies it non-destructively (live/streaming rows are kept).
+        const refetchHistory = () =>
+          void queryClient.invalidateQueries({
+            queryKey: [...queryKeys.session(id), "history"],
+          });
+        refetchHistory();
+        setTimeout(refetchHistory, 1500);
+      })
+      .catch((err) => {
+        console.warn("regenerate POST failed", { messageId, idx, err });
+      });
   };
 
   // Pin auto-elevated groups into the session's persistent ceiling.

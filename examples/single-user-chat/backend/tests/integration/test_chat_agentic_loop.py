@@ -250,27 +250,39 @@ def test_router_threads_planner_and_goal_check_models_from_settings(
     assert captured["goal_check_model"] is not None
 
 
-def test_message_count_increments_on_successful_turn(
+def test_turn_streams_to_completion_via_detached_run(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Turn-lifecycle redesign (2026-05-31): the turn now runs in a
+    DETACHED task (so it survives a client disconnect — the user
+    navigating away mid-turn), and the SSE response is a live viewer
+    draining a queue the task feeds. This guards against the detach
+    breaking live streaming: a POST must still stream the WHOLE turn
+    end-to-end through the queue/consumer — leading ``run_started``
+    envelope, the worker text deltas, and the terminal loop events.
+
+    NOTE: the post-stream persist (message_count bump / canonical turn)
+    now runs in the detached task AFTER the SSE sentinel, so it is
+    eventual — and NOT synchronously observable under TestClient's portal
+    loop (the detached task's in-process ASGI persist call can't be pumped
+    there). That property is verified end-to-end live via Chrome DevTools
+    MCP (navigate away from a long turn → return → it persisted), and the
+    persist serialization is covered by ``test_locks`` /
+    ``test_run_log``.
+    """
     _patch_agentic_turn(monkeypatch)
     sid = _create_session(client)
 
-    before = client.get(f"/v1/chat/sessions/{sid}/meta").json()
-    assert before["message_count"] == 0
-
-    # The message-count touch + heuristic-title patch run in a
-    # Starlette :class:`BackgroundTask` attached to the SSE response,
-    # so the body has to be fully consumed before the framework
-    # invokes the task. ``client.post`` returns after consuming the
-    # stream, so the task IS guaranteed to run before the call
-    # returns — see persist_turn-followups.md §7 / UX-D1.
     r = client.post(f"/v1/chat/sessions/{sid}/messages", json={"message": "hi"})
     assert r.status_code == 200
 
-    after = client.get(f"/v1/chat/sessions/{sid}/meta").json()
-    # Bumped by exactly 2 (user message + assistant reply == 1 turn).
-    assert after["message_count"] == 2
+    events = _parse_sse(r.text)
+    types = [e.get("event") for e in events]
+    # Leading resume envelope + the worker's streamed text both made it
+    # through the detached task → queue → consumer → client.
+    assert "run_started" in types, f"missing run_started; got {types}"
+    assert "text_delta" in types, f"missing text_delta; got {types}"
+    assert "Hello " in r.text and "world." in r.text, "streamed text was lost through the queue"
 
 
 def test_blocked_session_still_routes_through_agentic_loop(

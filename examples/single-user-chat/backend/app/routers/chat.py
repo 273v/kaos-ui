@@ -12,6 +12,7 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -49,6 +50,15 @@ from app.settings import AppSettings
 
 router = APIRouter(tags=["chat"])
 logger = app_logger("chat_router")
+
+# Detached turn tasks. A chat turn runs in a task spawned here rather than
+# being driven directly by the SSE response, so that a client disconnect
+# (the user navigating to another session mid-turn, or closing the tab)
+# does NOT cancel the run — it keeps going, writes to the run log, and
+# persists. The SSE response is just a live viewer consuming a queue the
+# task feeds. We hold strong references so the event loop doesn't GC an
+# in-flight task whose response has already disconnected.
+_DETACHED_RUN_TASKS: set[asyncio.Task[None]] = set()
 
 
 SettingsDep = Annotated[AppSettings, Depends(get_settings)]
@@ -507,10 +517,8 @@ async def send_message(
     from typing import Any
     from urllib.parse import quote
 
-    from starlette.background import BackgroundTask
-
     from app.services.persist_turn import persist_turn_completion
-    from app.services.run_log import RunEventLog, read_active_pointer
+    from app.services.run_log import RunEventLog
     from app.services.tool_call_recorder import TurnToolCallRecorder, TurnUsageRecorder
 
     recorder = TurnToolCallRecorder()
@@ -532,7 +540,11 @@ async def send_message(
     # 409 path before any side effects. Released in ``_do_persist``
     # AFTER the SSE response body is fully sent (the lock lifetime
     # must span the streaming response, not just the handler).
-    from app.services.locks import get_session_lock, is_session_running
+    from app.services.locks import (
+        get_session_lock,
+        get_session_persist_lock,
+        is_session_running,
+    )
 
     if is_session_running(session_id):
         raise HTTPException(
@@ -561,37 +573,29 @@ async def send_message(
             _session_lock.release()
             _lock_released = True
 
-    # SSE resume Stage 1: refuse a second concurrent POST. If
-    # ``runs/active.json`` still says ``running`` for this session, the
-    # SPA should be calling ``GET /runs/{run_id}/events`` instead. The
-    # 409 body carries enough information for the SPA to open the
-    # resume stream without re-querying ``runs/active``.
-    if runtime is not None:
-        try:
-            active = await read_active_pointer(vfs=runtime.vfs, session_id=session_id)
-        except Exception:
-            active = None
-        if active is not None and active.get("status") == "running":
-            # B1.2: release the lock we acquired above before raising the
-            # soft-409 — otherwise the next POST would deadlock on a
-            # never-released asyncio.Lock.
-            _release_session_lock()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "run_in_progress",
-                    "what": "Another turn is still streaming for this session.",
-                    "how_to_fix": (
-                        "Wait for the existing run to finish or open "
-                        "GET /v1/chat/sessions/{id}/runs/{run_id}/events to resume it."
-                    ),
-                    "run_id": active.get("run_id"),
-                    "started_at": active.get("started_at"),
-                    "alternative_tool": (
-                        f"GET /v1/chat/sessions/{session_id}/runs/{active.get('run_id', '')}/events"
-                    ),
-                },
-            )
+    # Turn-lifecycle redesign (2026-05-31): the per-session stream lock
+    # acquired above is now the AUTHORITATIVE concurrent-stream guard,
+    # and it is released at stream-end (the generator's ``finally``),
+    # NOT after persist. So once we hold the lock, no stream is in
+    # flight for this session in this process. A ``runs/active.json``
+    # pointer that still reads ``running`` here is therefore either
+    #   (a) a turn that is *draining* — its stream ended, the lock is
+    #       free, only its persist BackgroundTask is still running, OR
+    #   (b) a stale pointer left by a crashed/restarted process.
+    # In BOTH cases it is correct to start the next turn: the new run's
+    # ``run_log.open`` below overwrites the pointer, and ``mark_done``
+    # is run-scoped so the draining turn cannot clobber it.
+    #
+    # The prior *soft-409 on the pointer* lived here and was the
+    # band-aid that made fast follow-ups fail (the pointer flips to
+    # terminal only inside the post-stream persist task, so a follow-up
+    # in the draining window 409'd ~50% of the time). It is intentionally
+    # removed. Genuine in-process concurrency is still rejected by the
+    # hard lock check above; multi-process deployments need a shared
+    # lock (see ``app/services/locks.py`` — out of scope for the
+    # single-process reference SPA). The ``GET /runs/active`` +
+    # ``GET /runs/{run_id}/events`` resume path is unchanged for the
+    # genuine reload-mid-stream case.
 
     # Run id: deterministic ``turn-{idx:04d}`` prefix + 6 hex chars of
     # randomness. The prefix keeps log files sortable per session; the
@@ -668,6 +672,14 @@ async def send_message(
         property the 2026-05-18 persona matrix found missing in the
         prior finally-block implementation.
         """
+        # Serialize persists across turns. The STREAM lock was already
+        # released by the generator's ``finally`` at stream-end, so the
+        # next turn may already be streaming while this runs — the next
+        # turn's stream does NOT wait on this lock, only its own persist
+        # does, which preserves turn-order appends without re-coupling
+        # "session free for the next turn" to "prior turn persisted".
+        _persist_lock = get_session_persist_lock(session_id)
+        await _persist_lock.acquire()
         try:
             if not persist_snapshot["captured"]:
                 # Defensive: the generator should always populate the
@@ -735,13 +747,12 @@ async def send_message(
                         session_id,
                         run_id,
                     )
-            # B1.2: release the per-session asyncio.Lock acquired at the
-            # top of the handler. Must run AFTER the SSE body is fully
-            # sent (Starlette's BackgroundTask contract) — releasing
-            # earlier would let a concurrent POST race the persist work.
-            # Idempotent: if the early-409 path already released, this
-            # is a no-op.
-            _release_session_lock()
+            # Release the PERSIST lock. The STREAM lock is no longer
+            # released here — the generator's ``finally`` releases it at
+            # stream-end (the decoupling that fixes the 409 follow-up
+            # race). Persist-lock release is unconditional: we acquired
+            # it at the top of this task.
+            _persist_lock.release()
 
     # Per-run sequence fallback used when an event payload doesn't
     # carry ``payload["sequence"]`` (defensive — every kaos-agents
@@ -1075,20 +1086,82 @@ async def send_message(
             # turn's tenant. Reset is safe even after an exception.
             current_tenant_id.reset(_tenant_ctx_token)
 
+            # CORE FIX (turn-lifecycle redesign): release the STREAM lock
+            # the instant the SSE body finishes streaming — NOT after
+            # persist. This is what makes a follow-up message succeed
+            # instead of 409'ing: the session is "free for the next turn"
+            # as soon as the stream ends, and the prior turn's persist
+            # runs lock-free in the BackgroundTask (serialized by the
+            # separate persist lock). ``_release_session_lock`` is
+            # SYNCHRONOUS (a plain ``Lock.release()``, no ``await``), so
+            # unlike the persist work it CANNOT be cancelled by a client
+            # disconnect — it always runs in this ``finally``. Idempotent
+            # if already released.
+            _release_session_lock()
+
+    # Detached run (2026-05-31): drive the turn in a task the client
+    # connection CANNOT cancel, so navigating away mid-turn (or closing
+    # the tab) no longer kills it — it runs to completion, writes the run
+    # log, and persists. The SSE response is just a live viewer draining a
+    # queue the task feeds. A returning client picks the turn back up via
+    # the active-run poll + history refetch (and, for a still-running
+    # turn, the resume endpoint).
+    #
+    # `event_generator` is unchanged: it still appends every event to the
+    # run log, feeds the recorders, captures the persist snapshot, and (in
+    # its `finally`) releases the STREAM lock at the TRUE run-end — which
+    # is now decoupled from the client connection, exactly as the
+    # 409-follow-up fix requires. `_do_persist` runs after the run fully
+    # completes, under the persist lock.
+    _frame_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def _drive_run() -> None:
+        try:
+            async for frame in event_generator():
+                await _frame_queue.put(frame)
+        except Exception:
+            logger.exception("detached run failed session=%s run=%s", session_id, run_id)
+        finally:
+            # Signal the live viewer that the STREAM is done the instant
+            # the event stream ends — `event_generator`'s finally has
+            # already released the stream lock here — so the composer
+            # re-enables promptly (the snappy follow-up timing). Persist
+            # then runs detached under the persist lock; a follow-up that
+            # lands during persist finds the stream lock free (no 409) and
+            # its own persist serializes behind this one. This is the
+            # load-bearing property: the SSE response may be long gone
+            # (client navigated away), but THIS task and its persist still
+            # run to completion.
+            await _frame_queue.put(None)  # sentinel — stream complete
+            try:
+                await _do_persist()
+            except Exception:
+                logger.exception("detached persist failed session=%s run=%s", session_id, run_id)
+            # Idempotent safety net: ensure the stream lock is freed even
+            # if `event_generator` raised before reaching its own finally.
+            _release_session_lock()
+
+    _run_task: asyncio.Task[None] = asyncio.create_task(_drive_run())
+    _DETACHED_RUN_TASKS.add(_run_task)
+    _run_task.add_done_callback(_DETACHED_RUN_TASKS.discard)
+
+    async def _consume():
+        # If the client disconnects, sse-starlette cancels THIS generator
+        # — but `_drive_run` keeps going (detached), so the turn still
+        # completes + persists.
+        while True:
+            frame = await _frame_queue.get()
+            if frame is None:
+                break
+            yield frame
+
     return EventSourceResponse(
-        event_generator(),
+        _consume(),
         ping=15,
         # ``X-Kaos-Run-Id`` lets the SPA stash the run id synchronously
         # off the response headers without waiting for the leading
         # ``run_started`` envelope — see design §3.1.
         headers={"X-Accel-Buffering": "no", "X-Kaos-Run-Id": run_id},
-        # Starlette runs ``_do_persist`` AFTER the response body is
-        # fully sent. The framework owns the lifetime, so a client
-        # disconnect during streaming doesn't cancel these writes —
-        # which closes the bug surfaced by the 2026-05-18 persona
-        # matrix where 8/10 sessions stuck at ``Untitled`` /
-        # ``message_count=0``.
-        background=BackgroundTask(_do_persist),
     )
 
 
