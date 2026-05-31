@@ -14,7 +14,7 @@
     "codegen": "openapi-ts"
   },
   "dependencies": {
-    "@273v/kaos-ui-react": "^0.1.0-alpha.0",
+    "@273v/kaos-ui-react": "^0.1.0-alpha.11",
     "@{{KAOS_NPM_SLUG}}/ui": "workspace:*",
     "@tanstack/react-query": "^5.100.14",
     "@tanstack/react-router": "^1.170.8",
