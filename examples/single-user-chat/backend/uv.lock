@@ -315,7 +315,7 @@ wheels = [
 
 [[package]]
 name = "kaos-agents"
-version = "0.1.25"
+version = "0.1.27"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-content", extra = ["html", "markdown"] },
@@ -325,9 +325,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/23/f9/3f5741f762cf88452424b83967abfb4b5f4ae1f985cb8661e8448df2eea3/kaos_agents-0.1.25.tar.gz", hash = "sha256:9c3cbd6f093defe02347ae464a9faebfeb93e4ad8cb10596556652fa832c7122", size = 3633313, upload-time = "2026-05-28T22:12:51.787Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/93/c9fb29d241bba9117c86179a1d17d823f5373b442ed95f47ea08a3d6a77a/kaos_agents-0.1.27.tar.gz", hash = "sha256:18111fc207876e0e45575c0202684aa282d0611169c51f67455430884e90b2b2", size = 3645120, upload-time = "2026-05-30T14:52:30.069Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/06/d53e57e716b27d2d3a3e0c7251af98fd307701f8ff9d39ec44aa3609a55d/kaos_agents-0.1.25-py3-none-any.whl", hash = "sha256:899b1c83a82a729ce3203caa09649596bd3787bf9b8a7136584a11ab4e1e6416", size = 1061682, upload-time = "2026-05-28T22:12:49.601Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/7a/56e52710188bb82e321c1684133ddf10b340b3364dc649bb36881e1be5a7/kaos_agents-0.1.27-py3-none-any.whl", hash = "sha256:f5f9ac390c5203565175b247e3c77699075ad3ce1f6a0c90703edc727ceb13c9", size = 1063806, upload-time = "2026-05-30T14:52:28.359Z" },
 ]
 
 [[package]]
@@ -524,7 +524,7 @@ dev = [
 
 [[package]]
 name = "kaos-web"
-version = "0.1.10"
+version = "0.1.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
@@ -532,9 +532,9 @@ dependencies = [
     { name = "kaos-core" },
     { name = "lxml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/8d/23ac3b0ddb8d45ca57e142e27dc24a2855fa2426f4aab84081af4ffc601a/kaos_web-0.1.10.tar.gz", hash = "sha256:533e235d54403973522178ea83a7ee2d11fbe4b6c077f8bf5972cc5b2ab66a67", size = 367467, upload-time = "2026-05-25T18:55:06.294Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/d6/5233dbe96d94308c02f6c2f80eb461b4b242d30ed90e637a05fd64cbf351/kaos_web-0.1.11.tar.gz", hash = "sha256:9a8924f30d9d9bc28cd26d6290dd008eba3c171eacd5af15da4010006677bf55", size = 369849, upload-time = "2026-05-31T22:28:00.691Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/cb/e50b04975c3056483e34e6262f0ac441a8f8b3a7719bc5c89005cd8e7d30/kaos_web-0.1.10-py3-none-any.whl", hash = "sha256:33d7d1ea385c4088f42a4f5101bffd0402cbdf1d84aceb9beff430ab04332d9b", size = 192200, upload-time = "2026-05-25T18:55:04.354Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/14/30d0b83070b753ac307a1ccf8a66c0e39338d7098be3a717da6cd86afd96/kaos_web-0.1.11-py3-none-any.whl", hash = "sha256:fca8a5f3857bd6f5809bdc948462c2dd274ef3458532a182f7df03bc6c01eb87", size = 193325, upload-time = "2026-05-31T22:27:59.215Z" },
 ]
 
 [package.optional-dependencies]
@@ -1111,7 +1111,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "kaos-agents", specifier = ">=0.1.25,<0.2" },
+    { name = "kaos-agents", specifier = ">=0.1.27,<0.2" },
     { name = "kaos-citations", specifier = ">=0.1.0,<0.2" },
     { name = "kaos-content", extras = ["markdown"], specifier = ">=0.1.0,<0.2" },
     { name = "kaos-core", specifier = ">=0.1.1,<0.2" },
@@ -1122,7 +1122,7 @@ requires-dist = [
     { name = "kaos-pdf", extras = ["ocr"], specifier = ">=0.1.4,<0.2" },
     { name = "kaos-source", specifier = ">=0.1.2,<0.2" },
     { name = "kaos-ui", editable = "../../../" },
-    { name = "kaos-web", extras = ["browser"], specifier = ">=0.1.9,<0.2" },
+    { name = "kaos-web", extras = ["browser"], specifier = ">=0.1.11,<0.2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pydantic-settings", specifier = ">=2.8,<3" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
