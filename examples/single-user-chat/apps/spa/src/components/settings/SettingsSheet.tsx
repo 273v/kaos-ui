@@ -492,8 +492,10 @@ export function SettingsSheet({ open, onClose, meta }: Props) {
                   </div>
                 </div>
                 <p className="mt-2 text-[11px] text-muted-foreground leading-snug">
-                  Three independent hard caps. The loop terminates when ANY cap fires — usually the
-                  cost cap. Defense-in-depth against runaway iterations.
+                  Three caps; the loop terminates when ANY fires. Note: the cost cap is
+                  cumulative and checked between iterations — a single iteration's tool calls
+                  can run past it before the next check, so actual spend may exceed the cap.
+                  Defense-in-depth against runaway loops, not a hard per-iteration ceiling.
                 </p>
               </fieldset>
 
