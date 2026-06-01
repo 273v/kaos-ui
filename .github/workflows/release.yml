@@ -228,8 +228,16 @@ jobs:
             exit 1
           fi
 
-      - name: Publish to npm (Trusted Publishing OIDC + provenance)
+      - name: Publish to npm (token auth or Trusted Publishing OIDC, + provenance)
         working-directory: packages/kaos-ui-react
+        # NODE_AUTH_TOKEN is consumed by the .npmrc that setup-node wrote.
+        # When the NPM_TOKEN secret is set, npm authenticates with it; when
+        # it is absent, publish relies on npm Trusted Publishing OIDC, which
+        # MUST be configured on npmjs.org for this package + repo + workflow.
+        # Either way provenance is attached (id-token: write is granted).
+        # See docs/RELEASING.md for the one-time setup of EITHER path.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           PKG_VER=$(node -p "require('./package.json').version")
@@ -240,5 +248,31 @@ jobs:
             *rc*)    DIST_TAG=rc    ;;
             *)       DIST_TAG=latest ;;
           esac
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "Auth: NPM_TOKEN (automation token)"
+          else
+            echo "Auth: npm Trusted Publishing OIDC (no NPM_TOKEN secret present)"
+            echo "::warning::No NPM_TOKEN secret — relying on OIDC Trusted Publishing, which must be configured on npmjs.org. If publish 404s, see docs/RELEASING.md."
+          fi
           echo "Publishing $PKG_VER on dist-tag $DIST_TAG"
           npm publish --provenance --access public --tag "$DIST_TAG"
+
+      - name: Verify the version is actually live on npm
+        # npm can report a "successful" publish step while the registry PUT
+        # silently 404s (this is exactly how 0.1.0-alpha.10 and alpha.11 were
+        # lost — the job looked done but nothing landed). This step makes that
+        # failure mode LOUD: a real, blocking red X with a pointer to the fix.
+        working-directory: packages/kaos-ui-react
+        run: |
+          set -euo pipefail
+          PKG_VER=$(node -p "require('./package.json').version")
+          for attempt in 1 2 3 4 5; do
+            if npm view "@273v/kaos-ui-react@${PKG_VER}" version >/dev/null 2>&1; then
+              echo "✓ @273v/kaos-ui-react@${PKG_VER} is live on npm"
+              exit 0
+            fi
+            echo "Not visible on npm yet (attempt ${attempt}/5)…"
+            sleep 10
+          done
+          echo "::error::Publish reported success but @273v/kaos-ui-react@${PKG_VER} is NOT on npm. Almost always this means neither auth path worked (no NPM_TOKEN secret AND Trusted Publishing not configured on npmjs.org). Fix per docs/RELEASING.md, then re-run this workflow or publish manually."
+          exit 1
