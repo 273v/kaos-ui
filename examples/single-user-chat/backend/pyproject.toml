@@ -123,7 +123,12 @@ dependencies = [
     # kaos-agent-interpret-extraction tools + bridge wiring in
     # BaseAgent/ResearchAgent for corpus + RESEARCH prompts). Tool
     # count 14 → 16. Pulls kaos-llm-core>=0.1.7 transitively.
-    "kaos-agents>=0.1.27,<0.2",
+    # 2026-06-03: bumped floor to 0.1.28 — live event streaming through
+    # the agentic loop (streaming worker contract + per-tool Span
+    # streaming), agentic intent routing (removed corpus_attached_promotion),
+    # and the M5 conversation-history grounding critic. The backend wires
+    # recent_turns + m5_history_model and consumes the streaming worker.
+    "kaos-agents>=0.1.28,<0.2",
     # 2026-05-18: bumped kaos-core floor to 0.1.0a10 — adds
     # KaosContext.default_vfs_namespace, which the SPA monkey-patch in
     # app/main.py:64-96 requires to route bare-name tool inputs to the
@@ -145,7 +150,10 @@ dependencies = [
     # the `'SignatureOutput' has no attribute 'strip'` titler crash
     # at /home/mjbommar/projects/273v/kaos-modules/docs/plans/
     # persona-matrix-followups.md § 5 Stage 2).
-    "kaos-llm-core>=0.1.7,<0.2",
+    # 2026-06-03: bumped floor to 0.1.12 — per-tool ProgramHooks
+    # (on_tool_start/on_tool_end) that ChatAgent's live tool-span
+    # streaming consumes.
+    "kaos-llm-core>=0.1.12,<0.2",
     # 2026-05-21: bumped floor to 0.1.1 — reliability roadmap R0.3
     # (Gemini tool-dispatch fix: JSON-schema transformer applied to
     # tool parameter blocks, not just structured-output responseSchema).

@@ -22,12 +22,19 @@ threaded into the system instructions on iteration 2+, NOT injected
 as a synthetic user turn. This avoids the kaos-agents memory storing
 fake "user said X" entries and keeps the message ledger truthful.
 
-**Event collection.** Every SSE record that :func:`stream_chat`
-yields is captured into :attr:`WorkerResult.events` verbatim
-(``{event, data}`` shape, where ``data`` is a JSON string). The
-orchestrator forwards these through to the chat router's SSE stream
-via the standard ``async for ev in worker_result.events: yield ev``
-pattern (see :func:`kaos_agents.patterns.agentic_loop.run_agentic_turn`).
+**Event streaming.** The worker is a *streaming* worker (an async
+generator): every SSE record :func:`stream_chat` yields is forwarded
+LIVE — ``yield record`` the instant it arrives (``{event, data}``
+shape, ``data`` a JSON string) — so the orchestrator and the SPA see
+the worker's text deltas and tool-call spans *while the iteration is
+still running*, not in a burst after it completes. After the upstream
+stream ends, the worker yields exactly one terminal
+:class:`WorkerResult` (with ``events=[]``, since they were already
+streamed) carrying the aggregate text / tool_calls / cost the
+orchestrator needs for its goal-check / critic / budget logic.
+:func:`kaos_agents.patterns.agentic_loop.run_agentic_turn` detects the
+async-generator shape, forwards each event as it is produced, and
+captures the terminal ``WorkerResult``.
 
 **Cost + tool-call accounting.** Sourced from the upstream wire:
 
@@ -45,7 +52,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import httpx
@@ -86,10 +93,11 @@ def make_worker(
             the system prompt by ``_instructions_with_corpus``.
 
     Returns:
-        A callable matching the
+        A callable matching the streaming
         :class:`~kaos_agents.patterns.agentic_loop.WorkerCallable`
-        signature: ``(user_message, allowed_groups, thinking_note,
-        iteration) -> WorkerResult``.
+        shape: ``(user_message, allowed_groups, thinking_note,
+        iteration)`` → an async generator that yields the upstream SSE
+        records live and then yields a terminal ``WorkerResult``.
     """
 
     async def _worker(
@@ -99,7 +107,7 @@ def make_worker(
         thinking_note: str,
         iteration: int,
         **_unused: Any,  # forward-compat with future loop kwargs
-    ) -> WorkerResult:
+    ) -> AsyncIterator[Any]:
         # ── 1. Per-iteration tool_set override ───────────────────────
         # The loop hands us the planner-narrowed set for this iteration.
         # Wrap it as a SessionToolSetWire so stream_chat's existing
@@ -155,7 +163,6 @@ def make_worker(
         # usage_observed for hard-early-termination paths.
         turn_summary_cost_usd: float | None = None
         usage_sum_cost_usd: float = 0.0
-        captured_events: list[dict[str, str]] = []
 
         async for record in stream_chat(
             client=client,
@@ -168,7 +175,13 @@ def make_worker(
             tool_set_override=per_iter_tool_set,
             is_internal_iteration=is_internal,
         ):
-            captured_events.append(record)
+            # Forward every upstream SSE record the instant it arrives so
+            # the orchestrator (and the SPA) sees the worker's text deltas
+            # and tool-call spans LIVE, mid-turn — not in a burst after the
+            # whole iteration completes. ``run_agentic_turn`` consumes this
+            # generator with ``async for`` and forwards each item straight
+            # to the SSE stream (see the streaming-worker branch there).
+            yield record
             payload = _parse_payload(record)
             if payload is None:
                 continue
@@ -274,19 +287,22 @@ def make_worker(
                             }
                         ),
                     }
-                    captured_events.append(forecast_event)
+                    yield forecast_event
 
         latency_ms = (time.monotonic() - t_start) * 1000.0
         cost_usd = (
             turn_summary_cost_usd if turn_summary_cost_usd is not None else usage_sum_cost_usd
         )
 
-        return WorkerResult(
+        # Terminal item: the aggregate the orchestrator needs for goal-check
+        # / critic / budget logic. ``events=[]`` — every event was already
+        # streamed live above, so the orchestrator must NOT replay them.
+        yield WorkerResult(
             text="".join(text_parts),
             tool_calls_made=tool_calls,
             cost_usd=cost_usd,
             latency_ms=latency_ms,
-            events=list(captured_events),
+            events=[],
         )
 
     return _worker
