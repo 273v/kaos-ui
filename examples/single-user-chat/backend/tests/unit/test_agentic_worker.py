@@ -29,9 +29,27 @@ from typing import Any
 
 import httpx
 import pytest
+from kaos_agents.patterns.agentic_loop import WorkerResult
 
 from app.models import SessionMeta, SessionPolicyWire
 from app.services import agentic_worker, stream_proxy
+
+
+async def _run_worker(worker: Any, **kwargs: Any) -> tuple[list[Any], WorkerResult]:
+    """Drive a streaming worker (async generator) to completion.
+
+    The worker yields its pass-through SSE records live, then a terminal
+    :class:`WorkerResult`. Returns ``(streamed_events, final_result)``.
+    """
+    events: list[Any] = []
+    result: WorkerResult | None = None
+    async for item in worker(**kwargs):
+        if isinstance(item, WorkerResult):
+            result = item
+        else:
+            events.append(item)
+    assert result is not None, "streaming worker did not yield a terminal WorkerResult"
+    return events, result
 
 
 class _StreamChatStub:
@@ -126,7 +144,8 @@ async def test_iter1_uses_meta_system_prompt_unchanged(monkeypatch: pytest.Monke
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents", "vfs"],
         thinking_note="",
@@ -151,7 +170,8 @@ async def test_iter2_appends_thinking_note_to_system_prompt(
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents"],
         thinking_note="Try searching the corpus first.",
@@ -179,7 +199,8 @@ async def test_iter2_with_empty_thinking_note_does_not_augment(
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
@@ -204,7 +225,8 @@ async def test_tool_set_override_carries_per_iter_groups(
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents", "citations"],
         thinking_note="",
@@ -229,7 +251,8 @@ async def test_tool_set_override_pins_denied_tools_floor(
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents"],
         thinking_note="",
@@ -260,7 +283,8 @@ async def test_tool_set_override_disables_auto_narrow(
         meta=meta,
         max_cost_usd=0.10,
     )
-    await worker(
+    await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents"],
         thinking_note="",
@@ -291,7 +315,8 @@ async def test_text_concatenation_from_text_deltas(
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
@@ -342,7 +367,8 @@ async def test_tool_calls_collected_from_span_complete_events(
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents"],
         thinking_note="",
@@ -398,7 +424,8 @@ async def test_tool_call_summary_excerpt_normalized_for_goal_checker(
         meta=_meta(),
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["web"],
         thinking_note="",
@@ -450,7 +477,8 @@ async def test_tool_call_error_status_normalized_for_goal_checker(
         meta=_meta(),
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["web"],
         thinking_note="",
@@ -494,7 +522,8 @@ async def test_span_start_phase_is_ignored_only_complete_counts(
         meta=_meta(),
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=["documents"],
         thinking_note="",
@@ -522,7 +551,8 @@ async def test_cost_prefers_turn_summary(monkeypatch: pytest.MonkeyPatch) -> Non
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
@@ -553,7 +583,8 @@ async def test_cost_falls_back_to_usage_sum_when_no_turn_summary(
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
@@ -579,16 +610,19 @@ async def test_events_list_preserves_wire_shape(monkeypatch: pytest.MonkeyPatch)
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
         iteration=1,
     )
 
-    # Verbatim — same dicts, same order. The orchestrator forwards
-    # these straight into the SSE stream so the wire shape is sacred.
-    assert result.events == records
+    # Verbatim — same dicts, same order. A streaming worker forwards
+    # these LIVE (not via WorkerResult.events, which stays empty so the
+    # orchestrator doesn't replay them); the wire shape is sacred.
+    assert _events == records
+    assert result.events == []
 
 
 async def test_malformed_payloads_do_not_crash_worker(
@@ -611,19 +645,20 @@ async def test_malformed_payloads_do_not_crash_worker(
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
         iteration=1,
     )
 
-    # Malformed events still ride through in `events` so the SSE
+    # Malformed events still ride through the live stream so the SSE
     # consumer sees the full upstream trace; text + cost accounting
     # just skips them.
     assert result.text == "ok"
     assert result.cost_usd == pytest.approx(0.001)
-    assert len(result.events) == 4
+    assert len(_events) == 4
 
 
 async def test_worker_tolerates_extra_kwargs_from_future_loop_versions(
@@ -643,7 +678,8 @@ async def test_worker_tolerates_extra_kwargs_from_future_loop_versions(
         meta=meta,
         max_cost_usd=0.10,
     )
-    result = await worker(
+    _events, result = await _run_worker(
+        worker,
         user_message="hi",
         allowed_groups=[],
         thinking_note="",
@@ -652,3 +688,53 @@ async def test_worker_tolerates_extra_kwargs_from_future_loop_versions(
     )
 
     assert result.text == ""
+
+
+async def test_streams_records_live_then_terminal_worker_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worker is a streaming async generator: it yields each upstream
+    SSE record verbatim (live, in order) plus a synthetic cost_forecast,
+    and yields the aggregate WorkerResult as its FINAL item."""
+    records = [
+        _sse("text_delta", content="hi"),
+        _sse("usage_observed", cost_usd=0.002),
+        _sse("turn_summary", cost_usd=0.01),
+    ]
+    fake = _stream_chat_stub(records)
+    monkeypatch.setattr(stream_proxy, "stream_chat", fake)
+    monkeypatch.setattr(agentic_worker, "stream_chat", fake)
+
+    worker = agentic_worker.make_worker(
+        client=_client(),
+        bearer_token="t",
+        meta=_meta(),
+        max_cost_usd=0.10,
+    )
+    items = [
+        item
+        async for item in worker(
+            user_message="hi",
+            allowed_groups=[],
+            thinking_note="",
+            iteration=1,
+        )
+    ]
+
+    # Terminal item is the aggregate; everything before it is a live dict.
+    assert isinstance(items[-1], WorkerResult)
+    assert all(isinstance(it, dict) for it in items[:-1])
+    # The upstream records were forwarded verbatim, in order (the synthetic
+    # cost_forecast is interleaved live, so filter it out for this check).
+    forwarded = [it for it in items[:-1] if it.get("event") != "cost_forecast"]
+    assert forwarded == records
+    # A synthetic cost_forecast was injected live, right after the
+    # usage_observed it forecasts from.
+    forecasts = [it for it in items[:-1] if it.get("event") == "cost_forecast"]
+    assert len(forecasts) == 1
+    assert items.index(forecasts[0]) == items.index(records[1]) + 1
+    # The terminal WorkerResult carries the aggregate; events stay empty
+    # (already streamed) so the orchestrator does not replay them.
+    assert items[-1].text == "hi"
+    assert items[-1].cost_usd == pytest.approx(0.01)
+    assert items[-1].events == []

@@ -908,6 +908,31 @@ async def send_message(
                 )
                 or None
             )
+            # M5 conversation-history grounding critic. Catches confident
+            # confabulations about the prior conversation ("my last reply
+            # introduced X" when no such thing was said) — the gap no other
+            # critic can see, because they judge the current turn / tool
+            # results, never the transcript. Needs ``recent_turns``
+            # populated (below). Default haiku; unset env var to disable.
+            m5_history_model = (
+                os.environ.get(
+                    "KAOS_AGENT_M5_HISTORY_MODEL",
+                    "anthropic:claude-haiku-4-5",
+                )
+                or None
+            )
+            # recent_turns: the prior conversation transcript (the turns
+            # BEFORE this one — the current user message isn't persisted
+            # until the post-loop write). Feeds the planner's context and
+            # the M5 history-grounding critic so claims about earlier turns
+            # are checked against what was actually said.
+            try:
+                _prior = await _fetch_history(session_id)
+            except Exception:  # history is best-effort context; never block the turn
+                _prior = []
+            recent_turns_text = (
+                "\n".join(f"{m.role}: {m.content}" for m in _prior[-8:]) if _prior else ""
+            )
             async for ev in run_agentic_turn(
                 user_message=body.message,
                 policy=session_policy,
@@ -921,9 +946,10 @@ async def send_message(
                 corpus_kinds=[],
                 session_intent=meta.policy.persona,
                 corpus_headlines=corpus_headlines,
-                # recent_turns: deferred to TR-13 (deeper context). The
-                # planner tolerates an empty string.
-                recent_turns="",
+                # recent_turns: prior conversation transcript (see fetch
+                # above). Feeds planner context + the M5 history-grounding
+                # critic.
+                recent_turns=recent_turns_text,
                 # The per-iteration planner + GoalChecker models. These
                 # were defined in AppSettings (`agentic_planner_model` /
                 # `agentic_goal_check_model`, Sonnet-tier defaults) but
@@ -944,6 +970,7 @@ async def send_message(
                 goal_check_model=settings.agentic_goal_check_model,
                 m2_consistency_model=m2_consistency_model,
                 m3_grounding_model=m3_grounding_model,
+                m5_history_model=m5_history_model,
             ):
                 sse_event = _to_sse_event(ev)
                 if sse_event is None:
