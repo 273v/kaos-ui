@@ -193,7 +193,7 @@ def _parse_sync(temp_path: Path, ext: str) -> Any:
     if detected_group in _BYTES_GROUP_TO_EXT:
         expected_ext = _BYTES_GROUP_TO_EXT[detected_group]
         if ext != expected_ext:
-            logger.info(
+            logger.debug(
                 "upload ext/bytes mismatch resolved by bytes: declared_ext=%r "
                 "expected_ext=%r detected_group=%r mime=%r",
                 ext,
@@ -307,7 +307,7 @@ async def _enrich_parsed_doc(
 
             body = text if len(text) <= summary_input_cap_chars else text[:summary_input_cap_chars]
             if len(text) > summary_input_cap_chars:
-                logger.info(
+                logger.debug(
                     "summary input truncated session=%s file=%s len=%d cap=%d",
                     session_id,
                     filename,
@@ -423,7 +423,7 @@ async def store_and_parse(
     )
     await vfs.write(f"{vfs_path}.meta.json", meta.model_dump_json().encode("utf-8"))
     if parse_status.status == "ready":
-        logger.info(
+        logger.debug(
             "upload+parse ok session=%s file=%s size=%d",
             session_id,
             filename,
@@ -505,7 +505,7 @@ async def delete_session_file(*, runtime: KaosRuntime, session_id: str, filename
         if await runtime.vfs.exists(path):
             await runtime.vfs.delete(path)
     await runtime.vfs.delete(meta_path)
-    logger.info(
+    logger.debug(
         "deleted upload session=%s file=%s",
         session_id,
         safe,
@@ -587,7 +587,7 @@ async def render_session_corpus_markdown(
         truncated = len(body) > per_file_budget_chars
         if truncated:
             body = body[:per_file_budget_chars] + "\n\n...[head excerpt — more available via tools]"
-            logger.info(
+            logger.debug(
                 "corpus inline truncated session=%s file=%s len=%d budget=%d",
                 session_id,
                 meta.filename,

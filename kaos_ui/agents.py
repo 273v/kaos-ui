@@ -149,7 +149,7 @@ def build_chat_runtime(
 
             total += register_agent_tools(runtime)
 
-    logger.info("registered %d tools on runtime", total)
+    logger.debug("registered %d tools on runtime", total)
     tool_names = tuple(sorted(runtime.tools.list_tools()))
     return runtime, tool_names
 
@@ -418,7 +418,7 @@ def register_kaos_tool_groups(runtime: KaosRuntime) -> dict[str, int]:
             force=True,
         )
         counts[group_name] = len(group_tools)
-    logger.info(
+    logger.debug(
         "registered %d kaos tool groups: %s",
         len(counts),
         ", ".join(f"{g}={n}" for g, n in counts.items()),
