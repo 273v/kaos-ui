@@ -269,7 +269,7 @@ def scaffold(
             check=False,
         )
 
-    logger.info(
+    logger.debug(
         "scaffolded template",
         extra={
             "template_kind": canonical,
