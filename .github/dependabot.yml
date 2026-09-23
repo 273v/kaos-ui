@@ -17,6 +17,23 @@ updates:
       deps-minor:
         update-types: ["minor", "patch"]
 
+  # JS deps via the root pnpm workspace (pnpm-lock.yaml covers
+  # packages/kaos-ui-react and examples/single-user-chat/*). The template
+  # SPAs under kaos_ui/templates/ ship no lockfile, so they are not tracked.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Etc/UTC"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor:
+        update-types: ["minor", "patch"]
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
