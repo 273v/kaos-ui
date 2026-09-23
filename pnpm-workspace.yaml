@@ -19,3 +19,10 @@ savePrefix: ""
 allowBuilds:
   '@biomejs/biome': true
   esbuild: true
+
+# @hey-api/json-schema-ref-parser (dev-only OpenAPI codegen in the
+# single-user-chat example) pins js-yaml exactly, including in its latest
+# release; 4.3.2 is the semver-compatible patched line
+# (GHSA advisories on js-yaml merge-key / !!omap quadratic CPU).
+overrides:
+  "@hey-api/json-schema-ref-parser>js-yaml": "4.3.2"
