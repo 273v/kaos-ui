@@ -59,9 +59,11 @@ from app.settings import AppSettings
 
 router = APIRouter(tags=["reports"])
 
+
 class Report(BaseModel):
     name: str
     rows: int
+
 
 @router.get("", response_model=list[Report])
 def list_reports(
@@ -73,6 +75,7 @@ def list_reports(
 ```python
 # backend/app/main.py — register:
 from app.routers import auth, documents, health, reports, search, sessions, uploads
+
 app.include_router(reports.router, prefix="/v1/reports")
 ```
 
