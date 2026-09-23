@@ -85,6 +85,7 @@ an event handler — that blocks the event loop:
 ```python
 from textual import work
 
+
 class ChatScreen(Screen):
     @work(exclusive=True, group="chat")
     async def submit(self, message: str) -> None:
