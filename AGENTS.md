@@ -62,6 +62,18 @@ uv build
 uvx --from twine twine check --strict dist/*
 ```
 
+When touching `packages/kaos-ui-react`, the single-user-chat example,
+or `kaos_ui/templates/web/spa/packages/ui`, run the pnpm workspace gate
+(the `frontend` CI workflow). `packages/ui` in the example is generated
+and gitignored, so stamp it first; if a template dependency changed,
+drop `--frozen-lockfile` once and commit the updated `pnpm-lock.yaml`:
+
+```bash
+./examples/single-user-chat/scripts/sync-ui.sh
+pnpm install --frozen-lockfile
+pnpm build && pnpm typecheck && pnpm lint && pnpm test
+```
+
 When touching a template under `kaos_ui/templates/`, run the
 per-template integration test:
 
